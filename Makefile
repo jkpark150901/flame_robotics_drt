@@ -1,5 +1,5 @@
 VENV_DIR := $(CURDIR)/venv
-PYTHON := $(VENV_DIR)/bin/python3
+PYTHON := /home/dev/miniconda3/envs/drt/bin/python
 
 # 3D Viewer with Vedo 3D Library
 viewervedo:
