@@ -747,7 +747,7 @@
             </item>
             <item>
              <widget class="QTableWidget" name="table_verify">
-              <property name="columnCount"><number>5</number></property>
+              <property name="columnCount"><number>6</number></property>
               <property name="rowCount"><number>0</number></property>
               <property name="selectionBehavior"><enum>QAbstractItemView::SelectRows</enum></property>
               <property name="editTriggers"><set>QAbstractItemView::NoEditTriggers</set></property>
@@ -755,10 +755,11 @@
               <property name="sortingEnabled"><bool>false</bool></property>
               <attribute name="horizontalHeaderStretchLastSection"><bool>true</bool></attribute>
               <column><property name="text"><string>#</string></property></column>
-              <column><property name="text"><string>Pose Label</string></property></column>
-              <column><property name="text"><string>Error (mm)</string></property></column>
-              <column><property name="text"><string>TCP pos (m)</string></property></column>
-              <column><property name="text"><string>RB aligned (m)</string></property></column>
+              <column><property name="text"><string>Pose</string></property></column>
+              <column><property name="text"><string>Pos err (mm)</string></property></column>
+              <column><property name="text"><string>Rot err (°)</string></property></column>
+              <column><property name="text"><string>TCP pos</string></property></column>
+              <column><property name="text"><string>Pred pos</string></property></column>
              </widget>
             </item>
            </layout>

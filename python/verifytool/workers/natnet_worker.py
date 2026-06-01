@@ -44,19 +44,24 @@ class NatNetWorker(QThread):
     fps_updated  = pyqtSignal(float)
 
     def __init__(self, server_ip: str, client_ip: str = 'auto',
-                 rigid_body_id: int = 1, force_version: tuple | None = None,
+                 rigid_body_id: int | list[int] = 1,
+                 force_version: tuple | None = None,
                  parent=None):
         super().__init__(parent)
         self._server_ip = server_ip
         self._client_ip = client_ip
-        self._rb_id = rigid_body_id
-        self._force_version = force_version  # (major, minor) or None
+        # 단일 int도 list로 통일
+        self._rb_ids: set[int] = (
+            {rigid_body_id} if isinstance(rigid_body_id, int)
+            else set(rigid_body_id)
+        )
+        self._force_version = force_version
         self._stop_event = threading.Event()
 
-        self._frame_times: list[float] = []
-        self._fps = 0.0
-        self._last_emit_time: float = 0.0
-        self._EMIT_INTERVAL = 1.0 / 30.0   # UI 시그널 최대 30 Hz
+        self._frame_times: dict[int, list[float]] = {}   # rb_id → 수신 시각 목록
+        self._last_emit:   dict[int, float]       = {}   # rb_id → 마지막 emit 시각
+        self._fps: dict[int, float]               = {}
+        self._EMIT_INTERVAL = 1.0 / 30.0
 
     # ──────────────────────────────────────────────
     # Public API
@@ -111,29 +116,27 @@ class NatNetWorker(QThread):
         log.info("NatNet: connected.")
         self.connected.emit()
 
-        # FPS 계산 타이머
         fps_last = time.time()
-        fps_count = 0
 
         try:
             while not self._stop_event.is_set():
                 time.sleep(0.1)
-                # FPS 보고 (1 초 주기)
                 now = time.time()
                 if now - fps_last >= 1.0:
-                    with threading.Lock():
-                        t = self._frame_times
-                        recent = [ft for ft in t if now - ft <= 1.0]
-                        self._frame_times = recent
-                        fps = len(recent)
-                    self._fps = float(fps)
-                    self.fps_updated.emit(self._fps)
+                    total = 0
+                    for rb_id in list(self._frame_times):
+                        recent = [t for t in self._frame_times[rb_id] if now - t <= 1.0]
+                        self._frame_times[rb_id] = recent
+                        self._fps[rb_id] = float(len(recent))
+                        total += len(recent)
+                    self.fps_updated.emit(float(total) / max(len(self._rb_ids), 1))
                     fps_last = now
         finally:
-            try:
-                client.shutdown()
-            except Exception:
-                pass
+            # client.shutdown()은 내부 스레드 join으로 블로킹될 수 있으므로
+            # daemon 스레드에서 실행해 QThread가 즉시 종료되도록 함
+            t = threading.Thread(target=_safe_shutdown, args=(client,), daemon=True)
+            t.start()
+            t.join(timeout=1.5)   # 최대 1.5초만 대기
             log.info("NatNet: disconnected.")
             self.disconnected.emit()
 
@@ -142,19 +145,22 @@ class NatNetWorker(QThread):
     # ──────────────────────────────────────────────
 
     def _on_rigid_body(self, rb_id, position, rotation):
-        if int(rb_id) != self._rb_id:
+        if self._stop_event.is_set():   # 종료 중이면 즉시 무시
+            return
+        rid = int(rb_id)
+        if rid not in self._rb_ids:
             return
         now = time.time()
-        self._frame_times.append(now)   # FPS 집계는 모든 프레임 카운트
+        self._frame_times.setdefault(rid, []).append(now)
 
-        # UI 시그널은 30Hz로 제한 — 메인 스레드 이벤트 큐 포화 방지
-        if now - self._last_emit_time < self._EMIT_INTERVAL:
+        # UI 시그널은 30 Hz 제한
+        if now - self._last_emit.get(rid, 0.0) < self._EMIT_INTERVAL:
             return
-        self._last_emit_time = now
+        self._last_emit[rid] = now
 
-        pos  = [float(v) for v in position]   # [x, y, z] m
-        quat = [float(v) for v in rotation]   # [qx, qy, qz, qw]
-        self.rb_updated.emit(int(rb_id), pos, quat)
+        pos  = [float(v) for v in position]
+        quat = [float(v) for v in rotation]
+        self.rb_updated.emit(rid, pos, quat)
 
     # ──────────────────────────────────────────────
     # IP helpers (copied from check_mocap_unicast)
@@ -184,3 +190,10 @@ class NatNetWorker(QThread):
                 f"server={server_ip}, client={client_ip} 조합이 맞지 않습니다. "
                 "원격 Motive 서버를 쓸 때 client는 이 PC의 같은 네트워크 대역 IP여야 합니다."
             )
+
+
+def _safe_shutdown(client):
+    try:
+        client.shutdown()
+    except Exception:
+        pass

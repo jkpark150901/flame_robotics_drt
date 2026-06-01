@@ -6,3 +6,8 @@ colorlog
 open3d
 vedo
 pyyaml
+opencv-python
+trimesh
+networkx
+lxml
+pycollada

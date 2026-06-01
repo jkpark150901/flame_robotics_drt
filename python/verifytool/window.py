@@ -702,8 +702,10 @@ class AppWindow(QMainWindow):
             'tcp_orientation_type': self._config.get('tcp_orientation_type', 'zyx_euler_deg'),
         }
 
-        if self._verify_plot:
-            self._verify_plot.clear()
+        if self._verify_plot_pos:
+            self._verify_plot_pos.clear()
+        if self._verify_plot_rot:
+            self._verify_plot_rot.clear()
 
         self._verify_result = None
         self.progress_verify.setValue(0)
@@ -734,20 +736,13 @@ class AppWindow(QMainWindow):
     def _on_verify_pose_started(self, idx: int, total: int, label: str):
         self.progress_verify.setMaximum(total)
 
-    def _on_verify_pose_done(self, idx: int, total: int, error_mm: float):
-        if error_mm >= 0:
-            self._log(f"  └ [{idx:02d}/{total:02d}] {error_mm:.3f} mm")
+    def _on_verify_pose_done(self, idx: int, total: int, pos_err_mm: float, rot_err_deg: float):
+        if pos_err_mm >= 0:
+            self._log(f"  └ [{idx:02d}/{total:02d}] pos {pos_err_mm:.3f} mm  rot {rot_err_deg:.3f} °")
 
-    def _on_verify_point(self, tcp_pos_m: list, pred_pos_m: list, error_mm: float):
-        if self._verify_plot is None:
-            return
-        try:
-            import pyqtgraph as pg
-            import numpy as np
-            result = self._verify_result  # 아직 None이면 incremental 표시
-            # 누적 bar 업데이트는 all_done에서 처리
-        except Exception:
-            pass
+    def _on_verify_point(self, tcp_pos_m: list, pred_pos_m: list,
+                         pos_err_mm: float, rot_err_deg: float):
+        pass  # 누적 bar 업데이트는 all_done에서 처리
 
     def _on_verify_all_done(self, result: dict):
         self._verify_result = result
@@ -755,10 +750,15 @@ class AppWindow(QMainWindow):
         self.btn_stop_verify.setEnabled(False)
         self.btn_save_verify_csv.setEnabled(True)
 
-        errors = result['errors_mm']
-        self.lbl_verify_rmse.setText(f"RMSE: {result['rmse_mm']:.3f} mm")
-        self.lbl_verify_max.setText(f"Max: {result['max_mm']:.3f} mm")
-        self.lbl_verify_mean.setText(f"Mean: {result['mean_mm']:.3f} mm")
+        self.lbl_verify_rmse.setText(
+            f"Pos RMSE: {result['rmse_mm']:.3f} mm  |  Rot RMSE: {result['rmse_rot_deg']:.3f} °"
+        )
+        self.lbl_verify_max.setText(
+            f"Pos Max: {result['max_mm']:.3f} mm  |  Rot Max: {result['max_rot_deg']:.3f} °"
+        )
+        self.lbl_verify_mean.setText(
+            f"Pos Mean: {result['mean_mm']:.3f} mm  |  Rot Mean: {result['mean_rot_deg']:.3f} °"
+        )
 
         self._update_verify_plot(result)
         self._update_verify_table(result)
@@ -774,63 +774,75 @@ class AppWindow(QMainWindow):
         QMessageBox.critical(self, "검증 오류", msg)
 
     def _update_verify_plot(self, result: dict):
-        if self._verify_plot is None:
+        if self._verify_plot_pos is None:
             return
         try:
             import pyqtgraph as pg
             import numpy as np
-            errors = np.array(result['errors_mm'])
-            x      = np.arange(len(errors))
-            self._verify_plot.clear()
 
-            # 색상: RMSE 이하=파랑, 초과=주황
-            rmse = result['rmse_mm']
-            colors = ['#3399ff' if e <= rmse else '#ff7733' for e in errors]
+            def _draw_bars(plot_widget, values, rmse, unit_label):
+                plot_widget.clear()
+                colors = ['#3399ff' if v <= rmse else '#ff7733' for v in values]
+                for i, (v, col) in enumerate(zip(values, colors)):
+                    bar = pg.BarGraphItem(x=[i], height=[v], width=0.7,
+                                         brush=col, pen=pg.mkPen(None))
+                    plot_widget.addItem(bar)
+                rmse_line = pg.InfiniteLine(
+                    pos=rmse, angle=0,
+                    pen=pg.mkPen('#00ff88', width=1,
+                                 style=pg.QtCore.Qt.PenStyle.DashLine),
+                    label=f'RMSE {rmse:.2f}{unit_label}',
+                    labelOpts={'color': '#00ff88', 'position': 0.95},
+                )
+                plot_widget.addItem(rmse_line)
+                ax = plot_widget.getAxis('bottom')
+                ax.setTicks([[(i, str(i+1)) for i in range(len(values))]])
 
-            for i, (err, col) in enumerate(zip(errors, colors)):
-                bar = pg.BarGraphItem(x=[i], height=[err], width=0.7,
-                                      brush=col, pen=pg.mkPen(None))
-                self._verify_plot.addItem(bar)
-
-            # RMSE 수평선
-            rmse_line = pg.InfiniteLine(
-                pos=rmse, angle=0,
-                pen=pg.mkPen('#00ff88', width=1, style=pg.QtCore.Qt.PenStyle.DashLine),
-                label=f'RMSE {rmse:.2f}mm',
-                labelOpts={'color': '#00ff88', 'position': 0.95},
-            )
-            self._verify_plot.addItem(rmse_line)
-
-            # x축 레이블 (pose 번호)
-            ax = self._verify_plot.getAxis('bottom')
-            ax.setTicks([[(i, str(i+1)) for i in range(len(errors))]])
+            _draw_bars(self._verify_plot_pos,
+                       result['errors_mm'], result['rmse_mm'], 'mm')
+            _draw_bars(self._verify_plot_rot,
+                       result['rot_errors_deg'], result['rmse_rot_deg'], '°')
         except Exception as e:
             log.warning("verify plot update failed: %s", e)
 
     def _update_verify_table(self, result: dict):
         try:
-            from PyQt6.QtWidgets import QTableWidgetItem
+            from PyQt6.QtWidgets import QTableWidgetItem, QHeaderView
             from PyQt6.QtGui import QColor
             import numpy as np
-            table  = self.table_verify
-            errors = result['errors_mm']
-            labels = result['labels']
-            tcp    = result['tcp_positions']
-            pred   = result['rb_predictions']
-            rmse   = result['rmse_mm']
+            table    = self.table_verify
+            errors   = result['errors_mm']
+            rot_errs = result.get('rot_errors_deg', [0.0] * len(errors))
+            labels   = result['labels']
+            tcp      = result['tcp_positions']
+            pred     = result['rb_predictions']
+            rmse_pos = result['rmse_mm']
+            rmse_rot = result.get('rmse_rot_deg', 0.0)
 
+            table.setColumnCount(6)
+            table.setHorizontalHeaderLabels(
+                ['#', 'Pose', 'Pos err (mm)', 'Rot err (°)',
+                 'TCP pos', 'Pred pos'])
             table.setRowCount(len(errors))
-            for row, (label, err, t, p) in enumerate(zip(labels, errors, tcp, pred)):
+
+            for row, (label, err, rot, t, p) in enumerate(
+                    zip(labels, errors, rot_errs, tcp, pred)):
                 table.setItem(row, 0, QTableWidgetItem(str(row + 1)))
                 table.setItem(row, 1, QTableWidgetItem(label))
-                item_err = QTableWidgetItem(f"{err:.3f}")
-                item_err.setForeground(
-                    QColor('#ff7733') if err > rmse else QColor('#3399ff')
-                )
-                table.setItem(row, 2, item_err)
-                table.setItem(row, 3, QTableWidgetItem(
-                    f"[{t[0]*1000:.1f}, {t[1]*1000:.1f}, {t[2]*1000:.1f}] mm"))
+
+                item_pos = QTableWidgetItem(f"{err:.3f}")
+                item_pos.setForeground(
+                    QColor('#ff7733') if err > rmse_pos else QColor('#3399ff'))
+                table.setItem(row, 2, item_pos)
+
+                item_rot = QTableWidgetItem(f"{rot:.3f}")
+                item_rot.setForeground(
+                    QColor('#ff7733') if rot > rmse_rot else QColor('#3399ff'))
+                table.setItem(row, 3, item_rot)
+
                 table.setItem(row, 4, QTableWidgetItem(
+                    f"[{t[0]*1000:.1f}, {t[1]*1000:.1f}, {t[2]*1000:.1f}] mm"))
+                table.setItem(row, 5, QTableWidgetItem(
                     f"[{p[0]*1000:.1f}, {p[1]*1000:.1f}, {p[2]*1000:.1f}] mm"))
             table.resizeColumnsToContents()
         except Exception as e:

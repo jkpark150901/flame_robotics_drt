@@ -1,6 +1,6 @@
 '''
-Calibration & Verification Tool
-Entry point — mirrors simtool.py pattern.
+Verify Cobot — Calibration & Verification Tool
+Entry point.
 '''
 
 try:
@@ -34,10 +34,10 @@ log = logging.getLogger(__name__)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Calibration & Verification Tool")
-    _default_cfg = _PYTHON_PATH / 'verifytool.cfg'
+    parser = argparse.ArgumentParser(description="Verify Cobot")
+    _default_cfg = _PYTHON_PATH / 'verifycobot.cfg'
     parser.add_argument('--config', default=str(_default_cfg),
-                        help='JSON config file (default: python/verifytool.cfg)')
+                        help='JSON config file (default: python/verifycobot.cfg)')
     args = parser.parse_args()
 
     try:
@@ -51,7 +51,7 @@ def main():
         sys.exit(1)
 
     config['root_path'] = ROOT_PATH
-    config['app_path'] = _PYTHON_PATH / APP_NAME
+    config['app_path'] = _PYTHON_PATH / 'verifytool'
 
     app = QApplication(sys.argv)
 

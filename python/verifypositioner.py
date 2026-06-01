@@ -1,7 +1,13 @@
-'''
-Calibration & Verification Tool
-Entry point — mirrors simtool.py pattern.
-'''
+"""
+verifypositioner.py
+===================
+Positioner(모션 캡쳐 기반) 궤적 검증 툴 진입점.
+로봇 SDK 없이 NatNet + 계획 CSV만으로 동작.
+
+실행:
+  python python/verifypositioner.py
+  python python/verifypositioner.py --config python/verifypositioner.cfg
+"""
 
 try:
     from PyQt6.QtWidgets import QApplication
@@ -15,15 +21,11 @@ import json
 import argparse
 import logging
 
-# python/ 디렉토리 (이 파일의 위치)
 _PYTHON_PATH = pathlib.Path(__file__).parent
-# 저장소 루트 (python/ 의 부모)
-ROOT_PATH = _PYTHON_PATH.parent
-APP_NAME = pathlib.Path(__file__).stem
+ROOT_PATH    = _PYTHON_PATH.parent
 
-# python/ 와 루트를 경로에 추가 (simtool.py 동일 패턴)
-sys.path.append(ROOT_PATH.as_posix())
-sys.path.append(_PYTHON_PATH.as_posix())
+sys.path.append(str(ROOT_PATH))
+sys.path.append(str(_PYTHON_PATH))
 
 logging.basicConfig(
     format='%(asctime)s.%(msecs)03d %(levelname)s %(name)s  %(message)s',
@@ -34,24 +36,22 @@ log = logging.getLogger(__name__)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Calibration & Verification Tool")
-    _default_cfg = _PYTHON_PATH / 'verifytool.cfg'
-    parser.add_argument('--config', default=str(_default_cfg),
-                        help='JSON config file (default: python/verifytool.cfg)')
+    parser = argparse.ArgumentParser(description="Verify Positioner")
+    parser.add_argument('--config', default=str(_PYTHON_PATH / 'verifypositioner.cfg'),
+                        help='JSON config file (default: python/verifypositioner.cfg)')
     args = parser.parse_args()
 
     try:
-        with open(args.config, 'r') as f:
+        with open(args.config) as f:
             config = json.load(f)
     except FileNotFoundError:
-        log.critical("Config file not found: %s", args.config)
-        sys.exit(1)
+        log.warning("Config not found: %s — using empty config.", args.config)
+        config = {}
     except json.JSONDecodeError as e:
         log.critical("Config parse error: %s", e)
         sys.exit(1)
 
     config['root_path'] = ROOT_PATH
-    config['app_path'] = _PYTHON_PATH / APP_NAME
 
     app = QApplication(sys.argv)
 
@@ -61,11 +61,9 @@ def main():
         families = QFontDatabase.applicationFontFamilies(fid)
         if families:
             app.setFont(QFont(families[0], 11))
-    else:
-        log.warning("Font not found: %s", font_path)
 
-    from verifytool.window import AppWindow
-    window = AppWindow(config=config)
+    from verifytool.verifypositioner import CsvMocapVerifyWindow
+    window = CsvMocapVerifyWindow(config=config)
     window.show()
 
     sys.exit(app.exec())

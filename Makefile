@@ -1,5 +1,5 @@
 VENV_DIR := $(CURDIR)/venv
-PYTHON := /home/dev/miniconda3/envs/drt/bin/python
+PYTHON := $(VENV_DIR)/bin/python
 
 # 3D Viewer with Vedo 3D Library
 viewervedo:
@@ -16,6 +16,14 @@ zproxy:
 # Simulation/Real Control Box
 simtool:
 	$(PYTHON) ./python/simtool.py --config $(CURDIR)/python/simtool.cfg
+
+# Cobot Calibration & Verification Tool (robot SDK + NatNet)
+verifycobot:
+	$(PYTHON) ./python/verifycobot.py --config $(CURDIR)/python/verifycobot.cfg
+
+# Positioner Trajectory Verify (NatNet만 필요, 로봇 SDK 불필요)
+verifypositioner:
+	$(PYTHON) ./python/verifypositioner.py --config $(CURDIR)/python/verifypositioner.cfg
 
 # Run in parallel
 run:
