@@ -1,0 +1,79 @@
+<mujoco model="positioner">
+  <asset>
+    <mesh name="positioner_base_link_visual_0" file="assets/generated/positioner_base_link_visual_0.obj" />
+    <mesh name="positioner_base_link_collision_0" file="assets/generated/positioner_base_link_collision_0.obj" scale="0.001 0.001 0.001" />
+    <mesh name="positioner_f_column_z_visual_0" file="assets/generated/positioner_f_column_z_visual_0.obj" />
+    <mesh name="positioner_f_column_z_collision_0" file="assets/generated/positioner_f_column_z_collision_0.obj" scale="0.001 0.001 0.001" />
+    <mesh name="positioner_f_column_r_visual_0" file="assets/generated/positioner_f_column_r_visual_0.obj" />
+    <mesh name="positioner_f_column_r_collision_0" file="assets/generated/positioner_f_column_r_collision_0.obj" scale="0.001 0.001 0.001" />
+    <mesh name="positioner_f_column_passive_clamp_visual_0" file="assets/generated/positioner_f_column_passive_clamp_visual_0.obj" />
+    <mesh name="positioner_f_column_passive_clamp_collision_0" file="assets/generated/positioner_f_column_passive_clamp_collision_0.obj" scale="0.001 0.001 0.001" />
+    <mesh name="positioner_m_column_visual_0" file="assets/generated/positioner_m_column_visual_0.obj" />
+    <mesh name="positioner_m_column_collision_0" file="assets/generated/positioner_m_column_collision_0.obj" scale="0.001 0.001 0.001" />
+    <mesh name="positioner_m_column_z_visual_0" file="assets/generated/positioner_m_column_z_visual_0.obj" />
+    <mesh name="positioner_m_column_z_collision_0" file="assets/generated/positioner_m_column_z_collision_0.obj" scale="0.001 0.001 0.001" />
+    <mesh name="positioner_m_column_passive_r_visual_0" file="assets/generated/positioner_m_column_passive_r_visual_0.obj" />
+    <mesh name="positioner_m_column_passive_r_collision_0" file="assets/generated/positioner_m_column_passive_r_collision_0.obj" scale="0.001 0.001 0.001" />
+  </asset>
+  <worldbody>
+    <body name="positioner_base" pos="0 0.5 0" euler="0 0 0">
+      <body name="base_link">
+        <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01" />
+        <geom name="positioner_base_link_visual_0" pos="0 0 0" euler="0 0 0" rgba="0.25 0.45 0.6 0.9" contype="0" conaffinity="0" group="1" type="mesh" mesh="positioner_base_link_visual_0" />
+        <geom name="positioner_base_link_collision_0" pos="0 0 0" euler="0 0 0" rgba="1 0 0 0.18" contype="1" conaffinity="1" group="3" condim="3" friction="1 0.005 0.0001" solref="0.01 1" solimp="0.9 0.95 0.001" type="mesh" mesh="positioner_base_link_collision_0" />
+
+        <body name="f_column_z" pos="0.26 1.375 1.5" euler="0 0 0">
+          <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01" />
+          <joint name="base_to_f_column_z" type="slide" axis="0 0 1" range="0.0 0.85" actuatorfrcrange="-1000.0 1000.0" damping="80" armature="0.1" />
+          <!-- <geom name="positioner_f_column_z_visual_0" pos="0 0 0" euler="0 0 0" rgba="1.0 0.0 0.0 1.0" contype="0" conaffinity="0" group="1" type="mesh" mesh="positioner_f_column_z_collision_0" /> -->
+          <geom name="positioner_f_column_z_collision_0" type="mesh" group="3" mesh="positioner_f_column_z_collision_0" />
+          <!-- <geom name="positioner_f_column_z_collision_0" pos="0 0 0 " euler="0 0 0" rgba="1 0 0 0.18" contype="1" conaffinity="1" group="3" condim="3" friction="1 0.005 0.0001" solref="0.01 1" solimp="0.9 0.95 0.001" type="mesh" mesh="positioner_f_column_z_collision_0" /> -->
+          
+          
+          <!-- <body name="f_column_r" pos="0.22 -0.005 0" euler="0 0 0">
+            <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01" />
+            <joint name="f_column_z_to_f_column_r" type="hinge" axis="1 0 0" range="-3.14159 3.14159" actuatorfrcrange="-1000.0 1000.0" damping="8" armature="0.05" />
+            <geom name="positioner_f_column_r_visual_0" pos="0 0 0" euler="0 0 0" rgba="0.5 0.0 0.5 1.0" contype="0" conaffinity="0" group="1" type="mesh" mesh="positioner_f_column_r_visual_0" />
+            <geom name="positioner_f_column_r_collision_0" pos="0 0 0" euler="0 0 0" rgba="1 0 0 0.18" contype="1" conaffinity="1" group="3" condim="3" friction="1 0.005 0.0001" solref="0.01 1" solimp="0.9 0.95 0.001" type="mesh" mesh="positioner_f_column_r_collision_0" />
+            <body name="f_column_passive_clamp" pos="0.427 0.9 0" euler="0 0 0">
+              <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01" />
+              <joint name="f_column_r_to_f_column_passive_clamp" type="slide" axis="0 1 0" range="-0.9 0.0" actuatorfrcrange="-1000.0 1000.0" damping="80" armature="0.1" />
+              <geom name="positioner_f_column_passive_clamp_visual_0" pos="0 0 0" euler="0 0 0" rgba="0.25 0.45 0.6 0.9" contype="0" conaffinity="0" group="1" type="mesh" mesh="positioner_f_column_passive_clamp_visual_0" />
+              <geom name="positioner_f_column_passive_clamp_collision_0" pos="0 0 0" euler="0 0 0" rgba="1 0 0 0.18" contype="1" conaffinity="1" group="3" condim="3" friction="1 0.005 0.0001" solref="0.01 1" solimp="0.9 0.95 0.001" type="mesh" mesh="positioner_f_column_passive_clamp_collision_0" />
+            </body>
+          </body> -->
+        </body>
+        
+        <!-- <body name="m_column" pos="8 1.377 0.328" euler="0 0 0">
+          <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01" />
+          <joint name="base_to_m_column" type="slide" axis="1 0 0" range="-4.7 0.0" actuatorfrcrange="-1000.0 1000.0" damping="80" armature="0.1" />
+          <geom name="positioner_m_column_visual_0" pos="0 0 0" euler="0 0 0" rgba="0.0 1.0 0.0 1.0" contype="0" conaffinity="0" group="1" type="mesh" mesh="positioner_m_column_visual_0" />
+          <geom name="positioner_m_column_collision_0" pos="0 0 0" euler="0 0 0" rgba="1 0 0 0.18" contype="1" conaffinity="1" group="3" condim="3" friction="1 0.005 0.0001" solref="0.01 1" solimp="0.9 0.95 0.001" type="mesh" mesh="positioner_m_column_collision_0" />
+          <body name="m_column_z" pos="0 0 0.885" euler="0 0 0">
+            <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01" />
+            <joint name="m_column_to_m_column_z" type="slide" axis="0 0 1" range="0.0 0.85" actuatorfrcrange="-1000.0 1000.0" damping="80" armature="0.1" />
+            <geom name="positioner_m_column_z_visual_0" pos="0 0 0" euler="0 0 0" rgba="1.0 0.0 0.0 1.0" contype="0" conaffinity="0" group="1" type="mesh" mesh="positioner_m_column_z_visual_0" />
+            <geom name="positioner_m_column_z_collision_0" pos="0 0 -0.885" euler="0 0 0" rgba="1 0 0 0.18" contype="1" conaffinity="1" group="3" condim="3" friction="1 0.005 0.0001" solref="0.01 1" solimp="0.9 0.95 0.001" type="mesh" mesh="positioner_m_column_z_collision_0" />
+            <body name="m_column_passive_r" pos="-0.247 0 0" euler="0 0 0">
+              <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01" />
+              <joint name="m_column_z_to_m_column_passive_r" type="hinge" axis="1 0 0" range="-3.14159 3.14159" actuatorfrcrange="-1000.0 1000.0" damping="8" armature="0.05" />
+              <geom name="positioner_m_column_passive_r_visual_0" pos="0 0 0" euler="0 0 0" rgba="0.25 0.45 0.6 0.9" contype="0" conaffinity="0" group="1" type="mesh" mesh="positioner_m_column_passive_r_visual_0" />
+              <geom name="positioner_m_column_passive_r_collision_0" pos="0.247 0 -0.885" euler="0 0 0" rgba="1 0 0 0.18" contype="1" conaffinity="1" group="3" condim="3" friction="1 0.005 0.0001" solref="0.01 1" solimp="0.9 0.95 0.001" type="mesh" mesh="positioner_m_column_passive_r_collision_0" />
+            </body>
+          </body>
+        </body> -->
+      </body>
+    </body>
+  </worldbody>
+  <actuator>
+    <!-- <position name="base_to_f_column_z_pos" joint="base_to_f_column_z" kp="300" kv="80" ctrlrange="0.0 0.85" forcerange="-1000.0 1000.0" /> -->
+    <!-- <position name="f_column_z_to_f_column_r_pos" joint="f_column_z_to_f_column_r" kp="40" kv="12" ctrlrange="-3.14159 3.14159" forcerange="-1000.0 1000.0" />
+    <position name="f_column_r_to_f_column_passive_clamp_pos" joint="f_column_r_to_f_column_passive_clamp" kp="300" kv="80" ctrlrange="-0.9 0.0" forcerange="-1000.0 1000.0" />
+    <position name="base_to_m_column_pos" joint="base_to_m_column" kp="300" kv="80" ctrlrange="-4.7 0.0" forcerange="-1000.0 1000.0" />
+    <position name="m_column_to_m_column_z_pos" joint="m_column_to_m_column_z" kp="300" kv="80" ctrlrange="0.0 0.85" forcerange="-1000.0 1000.0" />
+    <position name="m_column_z_to_m_column_passive_r_pos" joint="m_column_z_to_m_column_passive_r" kp="40" kv="12" ctrlrange="-3.14159 3.14159" forcerange="-1000.0 1000.0" /> -->
+  </actuator>
+  <!-- <contact>
+    <exclude body1="base_link" body2="f_column_z"/>
+  </contact> -->
+</mujoco>

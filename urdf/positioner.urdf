@@ -47,7 +47,7 @@
        ============================================================ -->
   <link name="f_column_z">
     <visual>
-      <origin rpy="0 0 0" xyz="0.26 1.375 1.3" />
+      <origin rpy="0 0 0" xyz="0.26 1.375 0.629" />
       <geometry>
         <mesh filename="meshes/positioner/visual/f_column_z.dae"/>
       </geometry>
@@ -189,7 +189,7 @@
   <joint name="f_column_z_to_f_column_r" type="revolute">
     <parent link="f_column_z" />
     <child link="f_column_r" />
-    <origin rpy="0 0 0" xyz="0.48 1.37 1.3" />
+    <origin rpy="0 0 0" xyz="0.48 1.37 0.629" />
     <axis xyz="1 0 0" />
     <limit effort="1000.0" lower="-3.14159" upper="3.14159" velocity="1.0" />
   </joint>

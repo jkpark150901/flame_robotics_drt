@@ -236,7 +236,14 @@ class Visualizer:
                             if mesh:
                                 if hasattr(self, '_loaded_spool_mesh') and self._loaded_spool_mesh:
                                     self.plotter.remove(self._loaded_spool_mesh)
-                                
+
+                                # PLY/PCD 단위: mm → 씬 단위: m  (÷ 1000)
+                                mesh.scale(1.0 / 1000.0)
+                                self.__console.info(
+                                    f"Spool bounds after scaling (m): "
+                                    f"{[round(v, 4) for v in mesh.bounds()]}"
+                                )
+
                                 self.plotter.add(mesh)
                                 self._loaded_spool_mesh = mesh # Track the currently loaded spool
                                 self.plotter.render()

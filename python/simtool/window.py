@@ -34,6 +34,7 @@ class AppWindow(QMainWindow):
         self.__config = config
         self.zpipe = zpipe
         self.zapi = None
+        self.mujoco_zapi = None
 
         try:            
             if "gui" in config:
@@ -66,6 +67,51 @@ class AppWindow(QMainWindow):
                 self.zapi.signal_message_received.connect(self._handle_message)
                 self.zapi.run()
                 self.__console.info("Now ZAPI is running for SimTool")
+
+                mujoco_config = self.__config.get("mujoco", {})
+                if mujoco_config.get("enable", False):
+                    mujoco_transport = mujoco_config.get("transport", "ipc")
+                    mujoco_channel = mujoco_config.get("channel", "/tmp/viewermujoco")
+                    self.mujoco_zapi = ZAPI(
+                        zpipe=self.zpipe,
+                        transport=mujoco_transport,
+                        channel=mujoco_channel,
+                        socket_id="ZAPI_SIMTOOL_MUJOCO"
+                    )
+                    self.mujoco_zapi.signal_message_received.connect(self._handle_mujoco_message)
+                    self.mujoco_zapi.run()
+                    self.__console.info("Now ZAPI is running for MuJoCo")
+
+                    urdf_entries = mujoco_config.get("urdf", [])
+                    if urdf_entries:
+                        root_path = pathlib.Path(self.__config.get("root_path", ""))
+                        resolved_entries = []
+                        for urdf_entry in urdf_entries:
+                            if isinstance(urdf_entry, str):
+                                resolved_entries.append(str(root_path / urdf_entry))
+                            else:
+                                resolved_entry = urdf_entry.copy()
+                                resolved_entry["path"] = str(root_path / resolved_entry.get("path", ""))
+                                resolved_entries.append(resolved_entry)
+                        self.mujoco_zapi._ZAPI_request_mujoco_load_urdf_workspace(resolved_entries)
+                    else:
+                        model_paths = mujoco_config.get("models", [])
+                        if model_paths:
+                            root_path = pathlib.Path(self.__config.get("root_path", ""))
+                            resolved_models = []
+                            for model_entry in model_paths:
+                                if isinstance(model_entry, str):
+                                    resolved_models.append(str(root_path / model_entry))
+                                else:
+                                    resolved_entry = model_entry.copy()
+                                    resolved_entry["path"] = str(root_path / resolved_entry.get("path", ""))
+                                    resolved_models.append(resolved_entry)
+                            self.mujoco_zapi._ZAPI_request_mujoco_load_models(resolved_models)
+                        else:
+                            model_path = mujoco_config.get("model", "")
+                            if model_path:
+                                model_path = pathlib.Path(self.__config.get("root_path", "")) / model_path
+                                self.mujoco_zapi._ZAPI_request_mujoco_load_model(str(model_path))
             else:
                  self.__console.error("ZPipe instance missing, ZAPI not started")
                 
@@ -177,6 +223,12 @@ class AppWindow(QMainWindow):
             elif hasattr(self, 'radio_mode_real') and self.radio_mode_real.isChecked():
                 self.zapi._ZAPI_request_set_mode("real")
 
+        if getattr(self, 'mujoco_zapi', None):
+            if hasattr(self, 'radio_mode_simulation') and self.radio_mode_simulation.isChecked():
+                self.mujoco_zapi._ZAPI_request_set_mode("simulation")
+            elif hasattr(self, 'radio_mode_real') and self.radio_mode_real.isChecked():
+                self.mujoco_zapi._ZAPI_request_set_mode("real")
+
     def on_btn_test_async_zapi_request_clicked(self):
         """Handle async ZAPI test request button click"""
         pass
@@ -275,6 +327,28 @@ class AppWindow(QMainWindow):
                     pass
         except Exception as e:
             self.__console.error(f"Error handling message: {e}")
+
+    def _handle_mujoco_message(self, topic, msg):
+        """Handle incoming ZMQ messages from the MuJoCo backend."""
+        try:
+            if isinstance(topic, bytes):
+                topic = topic.decode('utf-8')
+            if isinstance(msg, bytes):
+                msg = msg.decode('utf-8')
+
+            if topic == "update_state_info":
+                self.__console.info("Received state info from MuJoCo. Sending current execution mode.")
+                if hasattr(self, 'radio_mode_simulation') and self.radio_mode_simulation.isChecked():
+                    self.mujoco_zapi._ZAPI_request_set_mode("simulation")
+                elif hasattr(self, 'radio_mode_real') and self.radio_mode_real.isChecked():
+                    self.mujoco_zapi._ZAPI_request_set_mode("real")
+                else:
+                    self.mujoco_zapi._ZAPI_request_set_mode("simulation")
+            else:
+                self.__console.debug(f"Unhandled MuJoCo message: {topic} {msg}")
+
+        except Exception as e:
+            self.__console.error(f"Error handling MuJoCo message: {e}")
     
     def closeEvent(self, event:QCloseEvent) -> None:
         """ Handle close event """
@@ -283,6 +357,9 @@ class AppWindow(QMainWindow):
             if hasattr(self, 'zapi') and self.zapi:
                 self.zapi.stop()
                 self.__console.info("ZAPI stopped")
+            if hasattr(self, 'mujoco_zapi') and self.mujoco_zapi:
+                self.mujoco_zapi.stop()
+                self.__console.info("MuJoCo ZAPI stopped")
 
         except Exception as e:
             self.__console.error(f"Error during window close: {e}")

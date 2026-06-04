@@ -5,6 +5,12 @@ PYTHON := $(VENV_DIR)/bin/python3
 viewervedo:
 	$(PYTHON) ./python/viewervedo.py --config $(CURDIR)/python/viewervedo.cfg
 
+viewermujoco:
+	$(PYTHON) ./python/viewermujoco.py --config $(CURDIR)/python/viewermujoco.cfg
+
+mujoco-scene:
+	$(PYTHON) ./tools/generate_mujoco_scene.py --config $(CURDIR)/python/viewermujoco.cfg --output $(CURDIR)/mjcf/scene.xml
+
 # !! Deprecated
 controller:
 	$(PYTHON) ./python/controller.py --config $(CURDIR)/python/controller.cfg

@@ -18,7 +18,13 @@ class ZAPI(QObject, ZAPIBase):
     # Signal for message reception: function_name, json_kwargs
     signal_message_received = pyqtSignal(str, str)
 
-    def __init__(self, zpipe: ZPipe = None, transport: str = "ipc", channel: str = "/tmp/viewervedo"):
+    def __init__(
+        self,
+        zpipe: ZPipe = None,
+        transport: str = "ipc",
+        channel: str = "/tmp/viewervedo",
+        socket_id: str = "ZAPI_SIMTOOL"
+    ):
         QObject.__init__(self)
         ZAPIBase.__init__(self)
         
@@ -27,11 +33,12 @@ class ZAPI(QObject, ZAPIBase):
         self._running = False
         self._transport = transport
         self._channel = channel
+        self._socket_id = socket_id
         
         # Dealer Socket
-        self.__dealer_socket = AsyncZSocket("ZAPI_SIMTOOL", "dealer")
+        self.__dealer_socket = AsyncZSocket(socket_id, "dealer")
         if not self.__dealer_socket.create(pipeline=zpipe):
-            self.__console.error("Failed to create Simtool Socket(Dealer)")
+            self.__console.error(f"Failed to create Simtool Socket(Dealer): {socket_id}")
 
     def run(self):
         """Start the ZAPI communication."""
@@ -39,14 +46,14 @@ class ZAPI(QObject, ZAPIBase):
             self.__console.warning("[ZAPI_SIMTOOL] Already running")
             return
         self._running = True
-        self.__console.debug("Starting Simtool ZAPI...")
+        self.__console.debug(f"Starting Simtool ZAPI: {self._socket_id}")
         
         # Connect immediately (ZeroMQ handles reconnection)
         self.__dealer_socket.set_message_callback(self._on_message_received)
         if self.__dealer_socket.join(self._transport, self._channel):
-            self.__console.info(f"[ZAPI SIMTOOL] Connected to {self._transport}://{self._channel}")
+            self.__console.info(f"[{self._socket_id}] Connected to {self._transport}://{self._channel}")
         else:
-            self.__console.error(f"[ZAPI SIMTOOL] Failed to connect to {self._transport}://{self._channel}")
+            self.__console.error(f"[{self._socket_id}] Failed to connect to {self._transport}://{self._channel}")
 
     def stop(self):
         """Stop and cleanup."""
@@ -115,3 +122,51 @@ class ZAPI(QObject, ZAPIBase):
             self.__console.info(f"[ZAPI] Sent set_mode request: {mode}")
         else:
             self.__console.warning("[ZAPI] Cannot send set_mode: Socket not connected")
+
+    def _ZAPI_request_mujoco_load_model(self, model_path: str):
+        """Sends command to load an MJCF model in the MuJoCo viewer."""
+        if self.__dealer_socket and self.__dealer_socket.is_joined:
+            self.call(self.__dealer_socket, "zapi_load_model", {"path": model_path})
+            self.__console.info(f"[ZAPI] Sent mujoco load_model request: {model_path}")
+        else:
+            self.__console.warning("[ZAPI] Cannot send load_model: Socket not connected")
+
+    def _ZAPI_request_mujoco_load_models(self, model_paths: list):
+        """Sends command to load multiple MJCF models as one MuJoCo workspace."""
+        if self.__dealer_socket and self.__dealer_socket.is_joined:
+            self.call(self.__dealer_socket, "zapi_load_models", {"paths": model_paths})
+            self.__console.info(f"[ZAPI] Sent mujoco load_models request: {model_paths}")
+        else:
+            self.__console.warning("[ZAPI] Cannot send load_models: Socket not connected")
+
+    def _ZAPI_request_mujoco_load_urdf_workspace(self, urdf_entries: list):
+        """Sends command to load URDF visual models as one MuJoCo workspace."""
+        if self.__dealer_socket and self.__dealer_socket.is_joined:
+            self.call(self.__dealer_socket, "zapi_load_urdf_workspace", {"urdf": urdf_entries})
+            self.__console.info(f"[ZAPI] Sent mujoco load_urdf_workspace request: {urdf_entries}")
+        else:
+            self.__console.warning("[ZAPI] Cannot send load_urdf_workspace: Socket not connected")
+
+    def _ZAPI_request_mujoco_reset(self):
+        """Sends command to reset the MuJoCo simulation."""
+        if self.__dealer_socket and self.__dealer_socket.is_joined:
+            self.call(self.__dealer_socket, "zapi_reset", {})
+            self.__console.info("[ZAPI] Sent mujoco reset request")
+        else:
+            self.__console.warning("[ZAPI] Cannot send reset: Socket not connected")
+
+    def _ZAPI_request_mujoco_set_joint_positions(self, positions: dict):
+        """Sends direct joint-position values to the MuJoCo simulation."""
+        if self.__dealer_socket and self.__dealer_socket.is_joined:
+            self.call(self.__dealer_socket, "zapi_set_joint_positions", {"positions": positions})
+            self.__console.info(f"[ZAPI] Sent mujoco joint positions: {positions}")
+        else:
+            self.__console.warning("[ZAPI] Cannot send joint positions: Socket not connected")
+
+    def _ZAPI_request_mujoco_set_joint_targets(self, targets: dict):
+        """Sends actuator targets to the MuJoCo simulation when actuators exist."""
+        if self.__dealer_socket and self.__dealer_socket.is_joined:
+            self.call(self.__dealer_socket, "zapi_set_joint_targets", {"targets": targets})
+            self.__console.info(f"[ZAPI] Sent mujoco joint targets: {targets}")
+        else:
+            self.__console.warning("[ZAPI] Cannot send joint targets: Socket not connected")

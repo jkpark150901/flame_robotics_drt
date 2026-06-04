@@ -1,0 +1,47 @@
+<mujoco model="rb10_1300e">
+  <compiler angle="radian"/>
+
+  <asset>
+    <mesh name="link0" content_type="model/stl" file="meshes/rb10_1300e/collision/link0.stl"/>
+    <mesh name="link1" content_type="model/stl" file="meshes/rb10_1300e/collision/link1.stl"/>
+    <mesh name="link2" content_type="model/stl" file="meshes/rb10_1300e/collision/link2.stl"/>
+    <mesh name="link3" content_type="model/stl" file="meshes/rb10_1300e/collision/link3.stl"/>
+    <mesh name="link4" content_type="model/stl" file="meshes/rb10_1300e/collision/link4.stl"/>
+    <mesh name="link5" content_type="model/stl" file="meshes/rb10_1300e/collision/link5.stl"/>
+    <mesh name="link6" content_type="model/stl" file="meshes/rb10_1300e/collision/link6.stl"/>
+  </asset>
+
+  <worldbody>
+    <geom type="mesh" mesh="link0"/>
+    <body name="link1">
+      <inertial pos="2.1e-05 -0.007855 -0.042537" quat="0.668143 0.227084 -0.227174 0.671126" mass="8.366" diaginertia="0.0300937 0.0274036 0.0238172"/>
+      <joint name="base" pos="0 0 0" axis="0 0 1" range="-3.14 3.14" actuatorfrcrange="-10 10"/>
+      <geom type="mesh" mesh="link1"/>
+      <body name="link2" pos="0 0 0.197">
+        <inertial pos="-1.3e-05 -0.155462 0.225241" quat="0.999935 0.0113011 4.5051e-05 -0.00127675" mass="15.61" diaginertia="1.14065 1.13495 0.050295"/>
+        <joint name="shoulder" pos="0 0 0" axis="0 1 0" range="-3.14 3.14" actuatorfrcrange="-10 10"/>
+        <geom type="mesh" mesh="link2"/>
+        <body name="link3" pos="0 -0.1875 0.6127">
+          <inertial pos="-4.8e-05 -0.013885 0.325013" quat="0.999934 0.00888495 -8.40357e-05 0.00730132" mass="5.69" diaginertia="0.312033 0.311382 0.0113031"/>
+          <joint name="elbow" pos="0 0 0" axis="0 1 0" range="-3.14 3.14" actuatorfrcrange="-10 10"/>
+          <geom type="mesh" mesh="link3"/>
+          <body name="link4" pos="0 0.1484 0.57015">
+            <inertial pos="9.3e-05 -0.113949 0.026461" quat="0.656395 0.0704845 -0.0965087 0.744891" mass="2.062" diaginertia="0.00275113 0.00271071 0.0021217"/>
+            <joint name="wrist1" pos="0 0 0" axis="0 1 0" range="-3.14 3.14" actuatorfrcrange="-10 10"/>
+            <geom type="mesh" mesh="link4"/>
+            <body name="link5" pos="0 -0.11715 0">
+              <inertial pos="-9.3e-05 -0.026434 -0.003233" quat="0.513081 0.415282 -0.459688 0.594117" mass="2.061" diaginertia="0.00274675 0.00270604 0.00211951"/>
+              <joint name="wrist2" pos="0 0 0" axis="0 0 1" range="-3.14 3.14" actuatorfrcrange="-10 10"/>
+              <geom type="mesh" mesh="link5"/>
+              <body name="link6" pos="0 0 0.11715">
+                <inertial pos="-0.00021 -0.09254 -0.000292" quat="0.706853 -0.043425 -0.0431026 0.704709" mass="0.406" diaginertia="0.000532875 0.000345394 0.00033994"/>
+                <joint name="wrist3" pos="0 0 0" axis="0 1 0" range="-3.14 3.14" actuatorfrcrange="-10 10"/>
+                <geom type="mesh" mesh="link6"/>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+</mujoco>

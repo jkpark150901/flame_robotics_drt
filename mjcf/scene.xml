@@ -1,0 +1,23 @@
+<mujoco model="drt_scene">
+  <compiler angle="radian" />
+  <include file="robots/positioner.xml" />
+  <include file="robots/dda_rb10_1300e.xml" />
+  <include file="robots/rb20_1900es.xml" />
+  <option timestep="0.001" integrator="implicitfast" iterations="80" ls_iterations="20" gravity="0.0 0.0 -9.81" />
+  <statistic center="4 2 1" extent="6" meansize="0.2" />
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0" />
+    <global azimuth="135" elevation="-25" />
+    <quality shadowsize="4096" />
+  </visual>
+  <asset>
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.22 0.24 0.26" rgb2="0.14 0.16 0.18" markrgb="0.8 0.8 0.8" width="300" height="300" />
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="10 10" reflectance="0.15" />
+  </asset>
+  <worldbody>
+    <light name="key_light" pos="4 -5 7" dir="-0.5 0.6 -1" />
+    <light name="fill_light" pos="-4 4 5" dir="0.5 -0.4 -1" />
+    <camera name="overview" pos="6 -9 5" xyaxes="1 0 0 0 0.5 1" />
+    <geom name="ground" type="plane" size="10 10 0.01" material="groundplane" condim="3" friction="1 0.005 0.0001" />
+  </worldbody>
+</mujoco>

@@ -1,0 +1,95 @@
+<mujoco model="dda_rb10_1300e">
+  <asset>
+    <mesh name="dda_rb10_1300e_dda_link0_visual_0" file="assets/generated/dda_rb10_1300e_dda_link0_visual_0.obj" />
+    <mesh name="dda_rb10_1300e_dda_link0_collision_0" file="assets/generated/dda_rb10_1300e_dda_link0_collision_0.obj" />
+    <mesh name="dda_rb10_1300e_dda_link1_visual_0" file="assets/generated/dda_rb10_1300e_dda_link1_visual_0.obj" />
+    <mesh name="dda_rb10_1300e_dda_link1_collision_0" file="assets/generated/dda_rb10_1300e_dda_link1_collision_0.obj" />
+    <mesh name="dda_rb10_1300e_dda_link2_visual_0" file="assets/generated/dda_rb10_1300e_dda_link2_visual_0.obj" />
+    <mesh name="dda_rb10_1300e_dda_link2_collision_0" file="assets/generated/dda_rb10_1300e_dda_link2_collision_0.obj" />
+    <mesh name="dda_rb10_1300e_dda_link3_visual_0" file="assets/generated/dda_rb10_1300e_dda_link3_visual_0.obj" />
+    <mesh name="dda_rb10_1300e_dda_link3_collision_0" file="assets/generated/dda_rb10_1300e_dda_link3_collision_0.obj" />
+    <mesh name="dda_rb10_1300e_dda_link4_visual_0" file="assets/generated/dda_rb10_1300e_dda_link4_visual_0.obj" />
+    <mesh name="dda_rb10_1300e_dda_link4_collision_0" file="assets/generated/dda_rb10_1300e_dda_link4_collision_0.obj" />
+    <mesh name="dda_rb10_1300e_dda_link5_visual_0" file="assets/generated/dda_rb10_1300e_dda_link5_visual_0.obj" />
+    <mesh name="dda_rb10_1300e_dda_link5_collision_0" file="assets/generated/dda_rb10_1300e_dda_link5_collision_0.obj" />
+    <mesh name="dda_rb10_1300e_dda_link6_visual_0" file="assets/generated/dda_rb10_1300e_dda_link6_visual_0.obj" />
+    <mesh name="dda_rb10_1300e_dda_link6_collision_0" file="assets/generated/dda_rb10_1300e_dda_link6_collision_0.obj" />
+    <mesh name="dda_rb10_1300e_dda_link_end_visual_0" file="assets/generated/dda_rb10_1300e_dda_link_end_visual_0.obj" scale="0.001 0.001 0.001" />
+    <mesh name="dda_rb10_1300e_dda_link_end_collision_0" file="assets/generated/dda_rb10_1300e_dda_link_end_collision_0.obj" scale="0.001 0.001 0.001" />
+  </asset>
+  <worldbody>
+    <body name="dda_rb10_1300e_base" pos="0 3.75 0" euler="0 0 0">
+      <body name="dda_link_linear_track">
+        <inertial pos="4.15 0 0.1" mass="100.0" diaginertia="1.0 1.0 1.0" />
+        <geom name="dda_rb10_1300e_dda_link_linear_track_visual_0" pos="4.15 0 0.1" euler="0 0 0" rgba="0.1 0.1 0.1 1" contype="0" conaffinity="0" group="1" type="box" size="4.15 0.2 0.1" />
+        <geom name="dda_rb10_1300e_dda_link_linear_track_collision_0" pos="4.15 0 0.1" euler="0 0 0" rgba="1 0 0 0.18" contype="1" conaffinity="1" group="3" condim="3" friction="1 0.005 0.0001" solref="0.01 1" solimp="0.9 0.95 0.001" type="box" size="4.15 0.2 0.1" />
+        <body name="dda_link_carriage" pos="0 0 0.2" euler="0 0 0">
+          <inertial pos="0 0.25 0.05" mass="50.0" diaginertia="1.0 1.0 1.0" />
+          <joint name="dda_joint_linear_track" type="slide" axis="1 0 0" range="0.0 7.9" actuatorfrcrange="-1000.0 1000.0" damping="80" armature="0.1" />
+          <geom name="dda_rb10_1300e_dda_link_carriage_visual_0" pos="0.2 0 0.1" euler="0 0 0" rgba="0.1 0.1 0.1 1" contype="0" conaffinity="0" group="1" type="box" size="0.2 0.35 0.1" />
+          <geom name="dda_rb10_1300e_dda_link_carriage_collision_0" pos="0 0.25 0.05" euler="0 0 0" rgba="1 0 0 0.18" contype="1" conaffinity="1" group="3" condim="3" friction="1 0.005 0.0001" solref="0.01 1" solimp="0.9 0.95 0.001" type="box" size="0.2 0.25 0.05" />
+          <body name="dda_link0" pos="0.2 0 0.2" euler="0 0 0">
+            <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01" />
+            <joint name="dda_joint_carriage" type="slide" axis="0 1 0" range="0.0 0.5" actuatorfrcrange="-1000.0 1000.0" damping="80" armature="0.1" />
+            <geom name="dda_rb10_1300e_dda_link0_visual_0" pos="0 0 0" euler="0 0 1.570796327" rgba="0.25 0.45 0.6 0.9" contype="0" conaffinity="0" group="1" type="mesh" mesh="dda_rb10_1300e_dda_link0_visual_0" />
+            <geom name="dda_rb10_1300e_dda_link0_collision_0" pos="0 0 0" euler="0 0 1.570796327" rgba="1 0 0 0.18" contype="1" conaffinity="1" group="3" condim="3" friction="1 0.005 0.0001" solref="0.01 1" solimp="0.9 0.95 0.001" type="mesh" mesh="dda_rb10_1300e_dda_link0_collision_0" />
+            <body name="dda_link1" pos="0 0 0" euler="0 0 1.570796327">
+              <inertial pos="2.1e-05 -0.007855 -0.042537" mass="8.366" diaginertia="0.027403652 0.027770573 0.026140211" />
+              <joint name="dda_joint_base" type="hinge" axis="0 0 1" range="-3.14 3.14" actuatorfrcrange="-10 10" damping="8" armature="0.05" />
+              <geom name="dda_rb10_1300e_dda_link1_visual_0" pos="0 0 0" euler="0 0 0" rgba="0.25 0.45 0.6 0.9" contype="0" conaffinity="0" group="1" type="mesh" mesh="dda_rb10_1300e_dda_link1_visual_0" />
+              <geom name="dda_rb10_1300e_dda_link1_collision_0" pos="0 0 0" euler="0 0 0" rgba="1 0 0 0.18" contype="1" conaffinity="1" group="3" condim="3" friction="1 0.005 0.0001" solref="0.01 1" solimp="0.9 0.95 0.001" type="mesh" mesh="dda_rb10_1300e_dda_link1_collision_0" />
+              <body name="dda_link2" pos="0 0 0.197" euler="0 0 0">
+                <inertial pos="-1.3e-05 -0.155462 0.225241" mass="15.61" diaginertia="1.140650644 1.134398623 0.050849068" />
+                <joint name="dda_joint_shoulder" type="hinge" axis="0 1 0" range="-3.14 3.14" actuatorfrcrange="-10 10" damping="3" armature="0.08" />
+                <geom name="dda_rb10_1300e_dda_link2_visual_0" pos="0 0 0" euler="0 0 0" rgba="0.25 0.45 0.6 0.9" contype="0" conaffinity="0" group="1" type="mesh" mesh="dda_rb10_1300e_dda_link2_visual_0" />
+                <geom name="dda_rb10_1300e_dda_link2_collision_0" pos="0 0 0" euler="0 0 0" rgba="1 0 0 0.18" contype="1" conaffinity="1" group="3" condim="3" friction="1 0.005 0.0001" solref="0.01 1" solimp="0.9 0.95 0.001" type="mesh" mesh="dda_rb10_1300e_dda_link2_collision_0" />
+                <body name="dda_link3" pos="0 -0.1875 0.6127" euler="0 0 0">
+                  <inertial pos="-4.8e-05 -0.013885 0.325013" mass="5.69" diaginertia="0.312033029 0.311287646 0.011397824" />
+                  <joint name="dda_joint_elbow" type="hinge" axis="0 1 0" range="-3.14 3.14" actuatorfrcrange="-10 10" damping="3" armature="0.08" />
+                  <geom name="dda_rb10_1300e_dda_link3_visual_0" pos="0 0 0" euler="0 0 0" rgba="0.25 0.45 0.6 0.9" contype="0" conaffinity="0" group="1" type="mesh" mesh="dda_rb10_1300e_dda_link3_visual_0" />
+                  <geom name="dda_rb10_1300e_dda_link3_collision_0" pos="0 0 0" euler="0 0 0" rgba="1 0 0 0.18" contype="1" conaffinity="1" group="3" condim="3" friction="1 0.005 0.0001" solref="0.01 1" solimp="0.9 0.95 0.001" type="mesh" mesh="dda_rb10_1300e_dda_link3_collision_0" />
+                  <body name="dda_link4" pos="0 0.1484 0.57015" euler="0 0 0">
+                    <inertial pos="9.3e-05 -0.113949 0.026461" mass="2.062" diaginertia="0.0027111 0.002715407 0.002157043" />
+                    <joint name="dda_joint_wrist1" type="hinge" axis="0 1 0" range="-3.14 3.14" actuatorfrcrange="-10 10" damping="8" armature="0.05" />
+                    <geom name="dda_rb10_1300e_dda_link4_visual_0" pos="0 0 0" euler="0 0 0" rgba="0.25 0.45 0.6 0.9" contype="0" conaffinity="0" group="1" type="mesh" mesh="dda_rb10_1300e_dda_link4_visual_0" />
+                    <geom name="dda_rb10_1300e_dda_link4_collision_0" pos="0 0 0" euler="0 0 0" rgba="1 0 0 0.18" contype="1" conaffinity="1" group="3" condim="3" friction="1 0.005 0.0001" solref="0.01 1" solimp="0.9 0.95 0.001" type="mesh" mesh="dda_rb10_1300e_dda_link4_collision_0" />
+                    <body name="dda_link5" pos="0 -0.11715 0" euler="0 0 0">
+                      <inertial pos="-9.3e-05 -0.026434 -0.003233" mass="2.061" diaginertia="0.002706437 0.002153592 0.002712272" />
+                      <joint name="dda_joint_wrist2" type="hinge" axis="0 0 1" range="-3.14 3.14" actuatorfrcrange="-10 10" damping="8" armature="0.05" />
+                      <geom name="dda_rb10_1300e_dda_link5_visual_0" pos="0 0 0" euler="0 0 0" rgba="0.25 0.45 0.6 0.9" contype="0" conaffinity="0" group="1" type="mesh" mesh="dda_rb10_1300e_dda_link5_visual_0" />
+                      <geom name="dda_rb10_1300e_dda_link5_collision_0" pos="0 0 0" euler="0 0 0" rgba="1 0 0 0.18" contype="1" conaffinity="1" group="3" condim="3" friction="1 0.005 0.0001" solref="0.01 1" solimp="0.9 0.95 0.001" type="mesh" mesh="dda_rb10_1300e_dda_link5_collision_0" />
+                      <body name="dda_link6" pos="0 0 0.11715" euler="0 0 0">
+                        <inertial pos="-0.00021 -0.09254 -0.000292" mass="0.406" diaginertia="0.000345314 0.000532873 0.000340021" />
+                        <joint name="dda_joint_wrist3" type="hinge" axis="0 1 0" range="-3.14 3.14" actuatorfrcrange="-10 10" damping="8" armature="0.05" />
+                        <geom name="dda_rb10_1300e_dda_link6_visual_0" pos="0 0 0" euler="0 0 0" rgba="0.25 0.45 0.6 0.9" contype="0" conaffinity="0" group="1" type="mesh" mesh="dda_rb10_1300e_dda_link6_visual_0" />
+                        <geom name="dda_rb10_1300e_dda_link6_collision_0" pos="0 0 0" euler="0 0 0" rgba="1 0 0 0.18" contype="1" conaffinity="1" group="3" condim="3" friction="1 0.005 0.0001" solref="0.01 1" solimp="0.9 0.95 0.001" type="mesh" mesh="dda_rb10_1300e_dda_link6_collision_0" />
+                        <body name="dda_link_end" pos="0 -0.1163 0" euler="0 0 0">
+                          <inertial pos="2.946288202e-07 -0.01499979919 6.035655293e-17" mass="10.402034999999998" diaginertia="0.015852 0.112139 0.097847" />
+                          <geom name="dda_rb10_1300e_dda_link_end_visual_0" pos="0 0.1163 0" euler="0 0 0" rgba="0 0 0 1" contype="0" conaffinity="0" group="1" type="mesh" mesh="dda_rb10_1300e_dda_link_end_visual_0" />
+                          <geom name="dda_rb10_1300e_dda_link_end_collision_0" pos="-0 0.1163 -0" euler="0 0 0" rgba="1 0 0 0.18" contype="1" conaffinity="1" group="3" condim="3" friction="1 0.005 0.0001" solref="0.01 1" solimp="0.9 0.95 0.001" type="mesh" mesh="dda_rb10_1300e_dda_link_end_collision_0" />
+                          <body name="dda_link_tcp" pos="0 -0.03 0" euler="0 0 -1.57">
+                            <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01" />
+                          </body>
+                        </body>
+                      </body>
+                    </body>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+  <actuator>
+    <position name="dda_joint_linear_track_pos" joint="dda_joint_linear_track" kp="300" kv="80" ctrlrange="0.0 7.9" forcerange="-1000.0 1000.0" />
+    <position name="dda_joint_carriage_pos" joint="dda_joint_carriage" kp="300" kv="80" ctrlrange="0.0 0.5" forcerange="-1000.0 1000.0" />
+    <position name="dda_joint_base_pos" joint="dda_joint_base" kp="40" kv="12" ctrlrange="-3.14 3.14" forcerange="-10 10" />
+    <position name="dda_joint_shoulder_pos" joint="dda_joint_shoulder" kp="80" kv="24" ctrlrange="-3.14 3.14" forcerange="-10 10" />
+    <position name="dda_joint_elbow_pos" joint="dda_joint_elbow" kp="80" kv="24" ctrlrange="-3.14 3.14" forcerange="-10 10" />
+    <position name="dda_joint_wrist1_pos" joint="dda_joint_wrist1" kp="40" kv="12" ctrlrange="-3.14 3.14" forcerange="-10 10" />
+    <position name="dda_joint_wrist2_pos" joint="dda_joint_wrist2" kp="40" kv="12" ctrlrange="-3.14 3.14" forcerange="-10 10" />
+    <position name="dda_joint_wrist3_pos" joint="dda_joint_wrist3" kp="40" kv="12" ctrlrange="-3.14 3.14" forcerange="-10 10" />
+  </actuator>
+</mujoco>
