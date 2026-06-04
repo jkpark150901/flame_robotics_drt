@@ -432,3 +432,7 @@ class NatNetStateProxy:
             if self._pos is None or self._time is None or self._time < min_time:
                 return None
             return self._pos.copy(), self._rot.copy()
+
+    def get_time(self) -> float | None:
+        with self._lock:
+            return self._time

@@ -17,15 +17,18 @@ import pathlib
 import json
 import logging
 
+import matplotlib.pyplot as plt
+
 from verifytool.workers.robot_worker import RobotWorker
 from verifytool.workers.natnet_worker import NatNetWorker
 from verifytool.calib_runner import CalibRunner, NatNetStateProxy
 from verifytool.verify_runner import VerifyRunner
+from verifytool.sync_runner import SyncRunner
 
 log = logging.getLogger(__name__)
 
 
-class AppWindow(QMainWindow):
+class VerifyCobotWindow(QMainWindow):
     def __init__(self, config: dict):
         super().__init__()
         self._config = config
@@ -38,6 +41,11 @@ class AppWindow(QMainWindow):
         self._calib_runner: CalibRunner | None = None
         self._verify_runner: VerifyRunner | None = None
         self._verify_result: dict | None = None
+        self._sync_runner:  SyncRunner  | None = None
+        self._sync_records: list = []
+        # sync 실시간 플롯용 누적 버퍼
+        self._sync_elapsed: list = []
+        self._sync_errors:  list = []
 
         ui_path = pathlib.Path(config['app_path']) / config['gui']
         if not ui_path.is_file():
@@ -50,7 +58,7 @@ class AppWindow(QMainWindow):
         self._connect_signals()
         self._start_monitor_timer()
 
-        log.info("AppWindow initialized.")
+        log.info("VerifyCobotWindow initialized.")
 
     # ──────────────────────────────────────────────
     # Initialisation helpers
@@ -89,70 +97,45 @@ class AppWindow(QMainWindow):
                 self.cbx_handeye_method.setCurrentIndex(idx)
 
     def _inject_plot_widgets(self):
-        """Replace QWidget placeholders with real pyqtgraph widgets."""
-        self._calib_plot    = None
-        self._verify_plot_pos = None
-        self._verify_plot_rot = None
-        self._scatter_rb  = None
-        self._scatter_tcp = None
-        self._line_rb     = None
-        self._line_tcp    = None
+        """Calibration 3D → matplotlib,  Verification/Sync → pyqtgraph 2D."""
+        import numpy as np
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+        from matplotlib.figure import Figure
+        from PyQt6.QtWidgets import QSplitter
+        from PyQt6.QtCore import Qt
+
         self._pts_rb:  list = []
         self._pts_tcp: list = []
 
+        # ── Calibration: matplotlib 3D (GLX 불필요) ────────────────
+        self._calib_fig = Figure(tight_layout=True)
+        self._calib_fig.patch.set_facecolor('#1a1a2e')
+        self._calib_canvas = FigureCanvasQTAgg(self._calib_fig)
+        self.widget_calib_plot.layout().addWidget(self._calib_canvas)
+        self._redraw_calib_plot()
+
+        # ── Verification / Sync: pyqtgraph 2D ─────────────────────
         try:
             import pyqtgraph as pg
-            import pyqtgraph.opengl as gl
-            import numpy as np
-            from PyQt6.QtWidgets import QSplitter
-            from PyQt6.QtCore import Qt
 
-            # ── Calibration tab: 3-D trajectory plot ──────────────
-            self._calib_plot = gl.GLViewWidget()
-            self._calib_plot.setBackgroundColor('#1a1a2e')
-            self._calib_plot.setCameraPosition(distance=7000)
+            self._verify_plot_pos = None
+            self._verify_plot_rot = None
 
-            grid = gl.GLGridItem()
-            grid.setSize(6000, 6000)
-            grid.setSpacing(1000, 1000)
-            self._calib_plot.addItem(grid)
+            # Verification: matplotlib 3D 궤적만 표시
+            from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+            from matplotlib.figure import Figure
+            self._verify_pose_fig = Figure(tight_layout=True)
+            self._verify_pose_fig.patch.set_facecolor('#1a1a2e')
+            self._verify_pose_canvas = FigureCanvasQTAgg(self._verify_pose_fig)
+            self.widget_verify_plot.layout().addWidget(self._verify_pose_canvas)
+            self._redraw_verify_poses()
 
-            axis = gl.GLAxisItem()
-            axis.setSize(500, 500, 500)
-            self._calib_plot.addItem(axis)
-
-            # 궤적 선 (라인) + 포인트
-            self._line_rb  = gl.GLLinePlotItem(antialias=True, mode='line_strip', width=2)
-            self._line_tcp = gl.GLLinePlotItem(antialias=True, mode='line_strip', width=2)
-            self._scatter_rb  = gl.GLScatterPlotItem(size=8, pxMode=True)
-            self._scatter_tcp = gl.GLScatterPlotItem(size=8, pxMode=True)
-            for item in (self._line_rb, self._line_tcp,
-                         self._scatter_rb, self._scatter_tcp):
-                self._calib_plot.addItem(item)
-
-            self.widget_calib_plot.layout().addWidget(self._calib_plot)
-
-            # ── Verification tab: pos error + rot error ────────────
-            verify_splitter = QSplitter(Qt.Orientation.Vertical)
-
-            self._verify_plot_pos = pg.PlotWidget(background='#1a1a2e')
-            self._verify_plot_pos.setLabel('left', 'Pos error (mm)')
-            self._verify_plot_pos.setLabel('bottom', 'Pose #')
-            self._verify_plot_pos.showGrid(x=True, y=True, alpha=0.3)
-
-            self._verify_plot_rot = pg.PlotWidget(background='#1a1a2e')
-            self._verify_plot_rot.setLabel('left', 'Rot error (°)')
-            self._verify_plot_rot.setLabel('bottom', 'Pose #')
-            self._verify_plot_rot.showGrid(x=True, y=True, alpha=0.3)
-
-            verify_splitter.addWidget(self._verify_plot_pos)
-            verify_splitter.addWidget(self._verify_plot_rot)
-            verify_splitter.setSizes([1, 1])
-            self.widget_verify_plot.layout().addWidget(verify_splitter)
-
-            log.info("pyqtgraph plot widgets injected.")
-        except ImportError:
-            log.warning("pyqtgraph not available — plot areas left as placeholders.")
+            self._inject_sync_tab(pg)
+            log.info("Plot widgets injected (matplotlib 3D + pyqtgraph 2D).")
+        except Exception as e:
+            log.warning("pyqtgraph unavailable — verification/sync plots skipped: %s", e)
+            self._verify_plot_pos = None
+            self._verify_plot_rot = None
 
     def _connect_signals(self):
         # Tab 1 – Connection
@@ -437,22 +420,11 @@ class AppWindow(QMainWindow):
         self._log("캘리브레이션 중단 요청.")
 
     def _on_calib_point_collected(self, rb_pos: list, tcp_pos_m: list):
-        if self._scatter_rb is None:
-            return
-        import numpy as np
         self._pts_rb.append([v * 1000.0 for v in rb_pos])
         self._pts_tcp.append([v * 1000.0 for v in tcp_pos_m])
-        pts_rb  = np.array(self._pts_rb,  dtype=float)
-        pts_tcp = np.array(self._pts_tcp, dtype=float)
-        n = len(pts_rb)
-        t = np.linspace(0.0, 1.0, n)
-        colors_rb  = np.column_stack([0.2 + 0.3*t, 0.5 + 0.5*t, 1.0 - 0.3*t, np.ones(n)])
-        colors_tcp = np.column_stack([0.2*np.ones(n), 0.7 + 0.3*t, 0.3 + 0.2*t, np.ones(n)])
-        self._scatter_rb.setData(pos=pts_rb,   color=colors_rb)
-        self._scatter_tcp.setData(pos=pts_tcp, color=colors_tcp)
-        # 궤적 선 (단색, 마지막 색상)
-        self._line_rb.setData(pos=pts_rb,  color=(0.4, 0.7, 1.0, 0.6))
-        self._line_tcp.setData(pos=pts_tcp, color=(0.2, 1.0, 0.5, 0.6))
+        # 5포인트마다 갱신 (매번 재렌더링하면 느림)
+        if len(self._pts_rb) % 5 == 0:
+            self._redraw_calib_plot()
 
     def _on_calib_pose_started(self, idx: int, total: int, label: str):
         self.progress_calib.setMaximum(total)
@@ -500,8 +472,10 @@ class AppWindow(QMainWindow):
         except Exception as e:
             self._log(f"[경고] 자동 저장 실패: {e}")
 
-        # ── 검증 탭 자동 업데이트 ──────────────────
+        # ── 검증 탭 / Sync 탭 자동 업데이트 ────────
         self._apply_calib_to_verify_tab(result, str(cal_path))
+        if hasattr(self, 'btn_sync_start'):
+            self.btn_sync_start.setEnabled(True)
 
     def _on_calib_error(self, msg: str):
         self.btn_run_calib.setEnabled(True)
@@ -510,8 +484,7 @@ class AppWindow(QMainWindow):
         QMessageBox.critical(self, "캘리브레이션 오류", msg)
 
     def _update_calib_plot(self, result: dict):
-        if self._scatter_rb is None:
-            return
+        """캘리브레이션 완료 후 inlier/outlier 색상으로 최종 플롯 갱신."""
         try:
             import numpy as np
             records = result['raw_records']
@@ -520,16 +493,57 @@ class AppWindow(QMainWindow):
                                   for r in records]) * 1000.0
             pts_tcp = np.array([[r['tcp_x_mm'], r['tcp_y_mm'], r['tcp_z_mm']]
                                   for r in records])
-            colors_rb  = np.array([[0.2, 0.8, 1.0, 1.0] if ok else [1.0, 0.3, 0.2, 0.4]
-                                    for ok in inlier])
-            colors_tcp = np.array([[0.2, 1.0, 0.4, 1.0] if ok else [1.0, 0.3, 0.2, 0.4]
-                                    for ok in inlier])
-            self._scatter_rb.setData(pos=pts_rb,   color=colors_rb,  size=12)
-            self._scatter_tcp.setData(pos=pts_tcp, color=colors_tcp, size=12)
-            self._line_rb.setData(pos=pts_rb,  color=(0.4, 0.7, 1.0, 0.7))
-            self._line_tcp.setData(pos=pts_tcp, color=(0.2, 1.0, 0.5, 0.7))
+            self._pts_rb  = pts_rb.tolist()
+            self._pts_tcp = pts_tcp.tolist()
+            self._calib_inlier = list(inlier)
+            self._redraw_calib_plot()
         except Exception as e:
             log.warning("calib plot update failed: %s", e)
+
+    def _redraw_calib_plot(self):
+        """matplotlib 3D 캘리브레이션 플롯 전체 재렌더링."""
+        if not hasattr(self, '_calib_fig'):
+            return
+        import numpy as np
+        _DARK = '#1a1a2e'
+        self._calib_fig.clear()
+        ax = self._calib_fig.add_subplot(111, projection='3d')
+        ax.set_facecolor(_DARK)
+        ax.tick_params(colors='#aaa', labelsize=7)
+        for sp in [ax.xaxis, ax.yaxis, ax.zaxis]:
+            sp.pane.fill = False
+            sp.pane.set_edgecolor('#333')
+
+        inlier = getattr(self, '_calib_inlier', None)
+
+        if self._pts_rb:
+            pts_rb  = np.array(self._pts_rb)
+            pts_tcp = np.array(self._pts_tcp)
+
+            if inlier is not None:
+                c_rb  = ['#3399ff' if ok else '#ff4444' for ok in inlier]
+                c_tcp = ['#00cc66' if ok else '#ff4444' for ok in inlier]
+            else:
+                c_rb  = '#3399ff'
+                c_tcp = '#00cc66'
+
+            ax.scatter(pts_rb[:, 0], pts_rb[:, 1], pts_rb[:, 2],
+                       c=c_rb,  s=30, label='RB (NatNet)', depthshade=False)
+            ax.scatter(pts_tcp[:, 0], pts_tcp[:, 1], pts_tcp[:, 2],
+                       c=c_tcp, s=30, marker='^', label='TCP (robot)', depthshade=False)
+            ax.plot(pts_rb[:, 0],  pts_rb[:, 1],  pts_rb[:, 2],
+                    color='#3399ff', lw=0.8, alpha=0.4)
+            ax.plot(pts_tcp[:, 0], pts_tcp[:, 1], pts_tcp[:, 2],
+                    color='#00cc66', lw=0.8, alpha=0.4)
+            ax.legend(fontsize=8, labelcolor='white',
+                      facecolor='#2a2a4e', edgecolor='#444', loc='upper left')
+
+        ax.set_xlabel('X (mm)', color='#aaa', fontsize=8, labelpad=4)
+        ax.set_ylabel('Y (mm)', color='#aaa', fontsize=8, labelpad=4)
+        ax.set_zlabel('Z (mm)', color='#aaa', fontsize=8, labelpad=4)
+        ax.set_title('Calibration Poses  (blue=RB  green=TCP  red=outlier)',
+                     color='white', fontsize=9, pad=6)
+        self._calib_canvas.draw()
 
     def _on_save_calib(self):
         if self._calib_result is None:
@@ -548,6 +562,49 @@ class AppWindow(QMainWindow):
                 self._log(f"Calibration saved → {path}")
             except Exception as e:
                 self._log(f"[ERROR] 저장 실패: {e}")
+
+    def _redraw_verify_poses(self, result: dict | None = None):
+        """Robot TCP 궤적 vs Motive RB 궤적을 3D로 표시. 오차는 숫자 레이블로만."""
+        if not hasattr(self, '_verify_pose_fig'):
+            return
+        import numpy as np
+        _DARK = '#1a1a2e'
+        self._verify_pose_fig.clear()
+        ax = self._verify_pose_fig.add_subplot(111, projection='3d')
+        ax.set_facecolor(_DARK)
+        ax.tick_params(colors='#aaa', labelsize=7)
+        for sp in [ax.xaxis, ax.yaxis, ax.zaxis]:
+            sp.pane.fill = False
+            sp.pane.set_edgecolor('#333')
+
+        if result is not None:
+            tcp  = np.array(result['tcp_positions']) * 1000   # m → mm
+            pred = np.array(result['rb_predictions']) * 1000
+
+            # Robot 궤적 (파랑)
+            ax.plot(tcp[:, 0], tcp[:, 1], tcp[:, 2],
+                    'o-', color='steelblue', lw=1.5, ms=5,
+                    label='Robot TCP', alpha=0.9)
+            # Motive RB 궤적 (주황)
+            ax.plot(pred[:, 0], pred[:, 1], pred[:, 2],
+                    '^--', color='tomato', lw=1.5, ms=5,
+                    label='Motive RB (aligned)', alpha=0.9)
+
+            ax.legend(fontsize=8, labelcolor='white',
+                      facecolor='#2a2a4e', edgecolor='#444', loc='upper left')
+            n = len(result['errors_mm'])
+            ax.set_title(
+                f'Robot TCP  vs  Motive RB    N={n}  '
+                f'RMSE={result["rmse_mm"]:.3f} mm',
+                color='white', fontsize=9, pad=6)
+        else:
+            ax.set_title('Robot TCP  vs  Motive RB\n(run verification to display)',
+                         color='#555', fontsize=9, pad=6)
+
+        ax.set_xlabel('X (mm)', color='#aaa', fontsize=8, labelpad=4)
+        ax.set_ylabel('Y (mm)', color='#aaa', fontsize=8, labelpad=4)
+        ax.set_zlabel('Z (mm)', color='#aaa', fontsize=8, labelpad=4)
+        self._verify_pose_canvas.draw()
 
     def _on_load_calib(self):
         path, _ = QFileDialog.getOpenFileName(self, "Load Calibration JSON",
@@ -649,6 +706,8 @@ class AppWindow(QMainWindow):
         self._log(f"검증용 캘리브레이션 로드 ← {path}")
 
     def _apply_calib_to_verify_tab(self, data: dict, label: str):
+        if hasattr(self, 'btn_sync_start'):
+            self.btn_sync_start.setEnabled(True)
         import numpy as np
         T = np.array(data['T_base_motive'])
         t = T[:3, 3]
@@ -762,9 +821,10 @@ class AppWindow(QMainWindow):
 
         self._update_verify_plot(result)
         self._update_verify_table(result)
+        self._redraw_verify_poses(result)
         self._log(
             f"검증 완료 — RMSE {result['rmse_mm']:.3f} mm  "
-            f"Max {result['max_mm']:.3f} mm  ({len(errors)}포즈)"
+            f"Max {result['max_mm']:.3f} mm  ({len(result['errors_mm'])}포즈)"
         )
 
     def _on_verify_error(self, msg: str):
@@ -871,6 +931,254 @@ class AppWindow(QMainWindow):
             self._log(f"[ERROR] CSV 저장 실패: {e}")
 
     # ──────────────────────────────────────────────
+    # Tab 4 – Sync (NatNet ↔ Robot 연속 동기 기록)
+    # ──────────────────────────────────────────────
+
+    def _inject_sync_tab(self, pg):
+        """pyqtgraph 위젯으로 구성된 Sync 탭을 tab_widget에 추가."""
+        from PyQt6.QtWidgets import (
+            QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
+            QLabel, QPushButton, QDoubleSpinBox, QGroupBox,
+            QPlainTextEdit,
+        )
+        from PyQt6.QtCore import Qt
+
+        tab = QWidget()
+        main_vl = QVBoxLayout(tab)
+        main_vl.setContentsMargins(6, 6, 6, 6)
+        main_vl.setSpacing(6)
+
+        # ── 상단 컨트롤 바 ──────────────────────────────────────────
+        ctrl_hl = QHBoxLayout()
+
+        grp_settings = QGroupBox("Recording")
+        grp_settings.setMaximumWidth(300)
+        sl = QHBoxLayout(grp_settings)
+        sl.addWidget(QLabel("Interval (s):"))
+        self._sync_spin_interval = QDoubleSpinBox()
+        self._sync_spin_interval.setRange(0.01, 1.0)
+        self._sync_spin_interval.setDecimals(3)
+        self._sync_spin_interval.setSingleStep(0.01)
+        self._sync_spin_interval.setValue(0.02)
+        sl.addWidget(self._sync_spin_interval)
+        ctrl_hl.addWidget(grp_settings)
+
+        grp_ctrl = QGroupBox("Control")
+        cl = QHBoxLayout(grp_ctrl)
+        self.btn_sync_start = QPushButton("▶ Start Sync")
+        self.btn_sync_start.setStyleSheet(
+            "background:#1b5e20; color:white; font-weight:bold; padding:6px;")
+        self.btn_sync_start.setEnabled(False)
+        self.btn_sync_stop = QPushButton("■ Stop")
+        self.btn_sync_stop.setStyleSheet(
+            "background:#b71c1c; color:white; font-weight:bold; padding:6px;")
+        self.btn_sync_stop.setEnabled(False)
+        self.btn_sync_save = QPushButton("Save CSV")
+        self.btn_sync_save.setEnabled(False)
+        self.btn_sync_clear = QPushButton("Clear")
+        cl.addWidget(self.btn_sync_start)
+        cl.addWidget(self.btn_sync_stop)
+        cl.addWidget(self.btn_sync_save)
+        cl.addWidget(self.btn_sync_clear)
+        ctrl_hl.addWidget(grp_ctrl)
+
+        # 통계 레이블
+        grp_stat = QGroupBox("Statistics")
+        stat_l = QHBoxLayout(grp_stat)
+        self.lbl_sync_rmse  = QLabel("RMSE: —")
+        self.lbl_sync_mean  = QLabel("Mean: —")
+        self.lbl_sync_max   = QLabel("Max: —")
+        self.lbl_sync_pts   = QLabel("Points: 0")
+        self.lbl_sync_lag   = QLabel("Mocap lag: —")
+        for lbl in (self.lbl_sync_rmse, self.lbl_sync_mean,
+                    self.lbl_sync_max, self.lbl_sync_pts, self.lbl_sync_lag):
+            lbl.setStyleSheet("font-size:11px;")
+            stat_l.addWidget(lbl)
+        ctrl_hl.addWidget(grp_stat)
+        ctrl_hl.addStretch()
+
+        main_vl.addLayout(ctrl_hl)
+
+        # ── 플롯 영역 ──────────────────────────────────────────────
+        splitter = QSplitter(Qt.Orientation.Vertical)
+
+        # 오차 시계열
+        self._sync_plot_err = pg.PlotWidget(background='#1a1a2e')
+        self._sync_plot_err.setLabel('left', 'Error (mm)')
+        self._sync_plot_err.setLabel('bottom', 'Time (s)')
+        self._sync_plot_err.showGrid(x=True, y=True, alpha=0.3)
+        self._sync_curve_err  = self._sync_plot_err.plot(
+            pen=pg.mkPen('#3399ff', width=1.5))
+        self._sync_line_rmse  = pg.InfiniteLine(
+            angle=0, pen=pg.mkPen('#00ff88', width=1,
+                                  style=pg.QtCore.Qt.PenStyle.DashLine))
+        self._sync_plot_err.addItem(self._sync_line_rmse)
+
+        # mocap lag 시계열
+        self._sync_plot_lag = pg.PlotWidget(background='#1a1a2e')
+        self._sync_plot_lag.setLabel('left', 'Mocap lag (ms)')
+        self._sync_plot_lag.setLabel('bottom', 'Time (s)')
+        self._sync_plot_lag.showGrid(x=True, y=True, alpha=0.3)
+        self._sync_curve_lag = self._sync_plot_lag.plot(
+            pen=pg.mkPen('#fb8c00', width=1.5))
+
+        splitter.addWidget(self._sync_plot_err)
+        splitter.addWidget(self._sync_plot_lag)
+        splitter.setSizes([2, 1])
+        main_vl.addWidget(splitter, 1)
+
+        # 로그
+        self._sync_log = QPlainTextEdit()
+        self._sync_log.setReadOnly(True)
+        self._sync_log.setMaximumBlockCount(300)
+        self._sync_log.setFixedHeight(80)
+        self._sync_log.setStyleSheet(
+            "background:#16213e; color:#aaa; font-size:10px; border:none;")
+        main_vl.addWidget(self._sync_log)
+
+        self.tab_widget.addTab(tab, "Sync")
+
+        # 시그널 연결
+        self.btn_sync_start.clicked.connect(self._on_sync_start)
+        self.btn_sync_stop.clicked.connect(self._on_sync_stop)
+        self.btn_sync_save.clicked.connect(self._on_sync_save)
+        self.btn_sync_clear.clicked.connect(self._on_sync_clear)
+
+    def _on_sync_start(self):
+        if self._calib_result is None:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "캘리브레이션 없음",
+                                "먼저 캘리브레이션을 수행하거나 로드하세요.")
+            return
+        robot_ip = self.edit_robot_ip.text().strip()
+        if not robot_ip:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "IP 없음", "Robot IP를 입력하세요.")
+            return
+        if self._sync_runner and self._sync_runner.isRunning():
+            return
+
+        import numpy as np
+        calib = {
+            'T_base_motive': self._calib_result['T_base_motive'],
+            'T_rb_tcp':      self._calib_result.get('T_rb_tcp', np.eye(4).tolist()),
+        }
+        params = {
+            'robot_ip':             robot_ip,
+            'speed_bar':            float(self.spin_speed_bar.value()),
+            'interval_s':           float(self._sync_spin_interval.value()),
+            'tcp_orientation_type': self._config.get('tcp_orientation_type', 'zyx_euler_deg'),
+        }
+
+        self._sync_records = []
+        self._sync_elapsed = []
+        self._sync_errors  = []
+        self._sync_lags    = []
+
+        self._sync_runner = SyncRunner(params, calib, self._natnet_state, parent=self)
+        self._sync_runner.point_recorded.connect(self._on_sync_point)
+        self._sync_runner.all_done.connect(self._on_sync_done)
+        self._sync_runner.log_msg.connect(self._sync_log.appendPlainText)
+        self._sync_runner.error.connect(self._on_sync_error)
+
+        self.btn_sync_start.setEnabled(False)
+        self.btn_sync_stop.setEnabled(True)
+        self.btn_sync_save.setEnabled(False)
+        self._sync_log.clear()
+        self._sync_curve_err.setData([], [])
+        self._sync_curve_lag.setData([], [])
+        self._sync_runner.start()
+
+    def _on_sync_stop(self):
+        if self._sync_runner and self._sync_runner.isRunning():
+            self._sync_runner.stop()
+        self.btn_sync_stop.setEnabled(False)
+
+    def _on_sync_point(self, rec: dict):
+        self._sync_elapsed.append(rec['elapsed_s'])
+        self._sync_errors.append(rec['error_mm'])
+        self._sync_lags.append(rec['mocap_age_ms'])
+        self._sync_records.append(rec)
+
+        # 실시간 플롯 (50포인트마다 갱신)
+        n = len(self._sync_elapsed)
+        if n % 50 == 0 or n < 10:
+            self._sync_curve_err.setData(self._sync_elapsed, self._sync_errors)
+            self._sync_curve_lag.setData(self._sync_elapsed, self._sync_lags)
+
+        if n % 100 == 0:
+            import numpy as np
+            errs = np.array(self._sync_errors)
+            rmse = float(np.sqrt(np.mean(errs ** 2)))
+            self._sync_line_rmse.setValue(rmse)
+            self.lbl_sync_rmse.setText(f"RMSE: {rmse:.2f} mm")
+            self.lbl_sync_mean.setText(f"Mean: {errs.mean():.2f} mm")
+            self.lbl_sync_max.setText( f"Max: {errs.max():.2f} mm")
+            self.lbl_sync_pts.setText( f"Points: {n}")
+            lag = np.array(self._sync_lags)
+            self.lbl_sync_lag.setText(f"Mocap lag: {lag.mean():.1f} ms (max {lag.max():.1f})")
+
+    def _on_sync_done(self, records: list):
+        import numpy as np
+        self._sync_records = records
+        self.btn_sync_start.setEnabled(True)
+        self.btn_sync_stop.setEnabled(False)
+        self.btn_sync_save.setEnabled(True)
+
+        # 최종 플롯 갱신
+        self._sync_curve_err.setData(self._sync_elapsed, self._sync_errors)
+        self._sync_curve_lag.setData(self._sync_elapsed, self._sync_lags)
+
+        if self._sync_errors:
+            errs = np.array(self._sync_errors)
+            lags = np.array(self._sync_lags)
+            rmse = float(np.sqrt(np.mean(errs ** 2)))
+            self._sync_line_rmse.setValue(rmse)
+            self.lbl_sync_rmse.setText(f"RMSE: {rmse:.3f} mm")
+            self.lbl_sync_mean.setText(f"Mean: {errs.mean():.3f} mm")
+            self.lbl_sync_max.setText( f"Max:  {errs.max():.3f} mm")
+            self.lbl_sync_pts.setText( f"Points: {len(records)}")
+            self.lbl_sync_lag.setText(
+                f"Mocap lag: {lags.mean():.1f} ms  max {lags.max():.1f} ms")
+
+    def _on_sync_error(self, msg: str):
+        self.btn_sync_start.setEnabled(True)
+        self.btn_sync_stop.setEnabled(False)
+        self._sync_log.appendPlainText(f"[ERROR] {msg}")
+
+    def _on_sync_clear(self):
+        self._sync_records = []
+        self._sync_elapsed = []
+        self._sync_errors  = []
+        if hasattr(self, '_sync_lags'):
+            self._sync_lags = []
+        if hasattr(self, '_sync_curve_err'):
+            self._sync_curve_err.setData([], [])
+            self._sync_curve_lag.setData([], [])
+            self._sync_line_rmse.setValue(0)
+        for lbl in (self.lbl_sync_rmse, self.lbl_sync_mean,
+                    self.lbl_sync_max, self.lbl_sync_pts, self.lbl_sync_lag):
+            lbl.setText(lbl.text().split(':')[0] + ': —')
+
+    def _on_sync_save(self):
+        if not self._sync_records:
+            return
+        import datetime, csv as _csv
+        stamp   = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        default = str(self._config.get('root_path', '.')) + f'/sync_{stamp}.csv'
+        from PyQt6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Sync CSV", default, "CSV Files (*.csv)")
+        if not path:
+            return
+        with open(path, 'w', newline='', encoding='utf-8-sig') as f:
+            writer = _csv.DictWriter(
+                f, fieldnames=list(self._sync_records[0].keys()))
+            writer.writeheader()
+            writer.writerows(self._sync_records)
+        self._log(f"Sync CSV saved → {path}")
+
+    # ──────────────────────────────────────────────
     # Helpers
     # ──────────────────────────────────────────────
 
@@ -899,6 +1207,10 @@ class AppWindow(QMainWindow):
             self._verify_runner.stop()
             self._verify_runner.wait(5000)
 
+        if self._sync_runner and self._sync_runner.isRunning():
+            self._sync_runner.stop()
+            self._sync_runner.wait(3000)
+
         if self._robot_worker and self._robot_worker.isRunning():
             self._robot_worker.stop()
             self._robot_worker.wait(3000)
@@ -907,7 +1219,7 @@ class AppWindow(QMainWindow):
             self._natnet_worker.stop()
             self._natnet_worker.wait(3000)
 
-        log.info("AppWindow closed.")
+        log.info("VerifyCobotWindow closed.")
         super().closeEvent(event)
 
 

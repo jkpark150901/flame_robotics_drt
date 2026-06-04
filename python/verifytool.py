@@ -64,8 +64,8 @@ def main():
     else:
         log.warning("Font not found: %s", font_path)
 
-    from verifytool.window import AppWindow
-    window = AppWindow(config=config)
+    from verifytool.verifycobotwindow import VerifyCobotWindow
+    window = VerifyCobotWindow(config=config)
     window.show()
 
     sys.exit(app.exec())
