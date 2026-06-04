@@ -350,7 +350,7 @@ def main():
         default=None,
         help="NatNet rigid body ID (기본값: model_id 와 동일)",
     )
-    p.add_argument("--server", default="127.0.0.1", help="NatNet 서버 IP")
+    p.add_argument("--server", default="10", help="NatNet 서버 IP")
     p.add_argument(
         "--client",
         default="auto",

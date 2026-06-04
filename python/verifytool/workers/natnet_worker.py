@@ -62,6 +62,8 @@ class NatNetWorker(QThread):
         self._last_emit:   dict[int, float]       = {}   # rb_id → 마지막 emit 시각
         self._fps: dict[int, float]               = {}
         self._EMIT_INTERVAL = 1.0 / 30.0
+        # UI 쓰로틀 없이 모든 프레임을 받을 raw 콜백 (CalibRunner/VerifyRunner 용)
+        self.raw_rb_listener: callable | None = None
 
     # ──────────────────────────────────────────────
     # Public API
@@ -153,13 +155,20 @@ class NatNetWorker(QThread):
         now = time.time()
         self._frame_times.setdefault(rid, []).append(now)
 
+        pos  = [float(v) for v in position]
+        quat = [float(v) for v in rotation]
+
+        # CalibRunner/VerifyRunner: 쓰로틀 없이 모든 프레임 전달
+        if self.raw_rb_listener is not None:
+            try:
+                self.raw_rb_listener(rid, pos, quat)
+            except Exception:
+                pass
+
         # UI 시그널은 30 Hz 제한
         if now - self._last_emit.get(rid, 0.0) < self._EMIT_INTERVAL:
             return
         self._last_emit[rid] = now
-
-        pos  = [float(v) for v in position]
-        quat = [float(v) for v in rotation]
         self.rb_updated.emit(rid, pos, quat)
 
     # ──────────────────────────────────────────────

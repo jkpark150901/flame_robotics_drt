@@ -24,6 +24,7 @@ from verifytool.workers.natnet_worker import NatNetWorker
 from verifytool.calib_runner import CalibRunner, NatNetStateProxy
 from verifytool.verify_runner import VerifyRunner
 from verifytool.sync_runner import SyncRunner
+from verifytool.blend_test_runner import BlendTestRunner, DEFAULT_JB2_DELTAS, DEFAULT_PB_DELTAS
 
 log = logging.getLogger(__name__)
 
@@ -39,6 +40,10 @@ class VerifyCobotWindow(QMainWindow):
         self._last_rb_quat: list | None = None
         self._natnet_state = NatNetStateProxy()
         self._calib_runner: CalibRunner | None = None
+        self._scatter_rb = None
+        self._scatter_tcp = None
+        self._line_rb = None
+        self._line_tcp = None
         self._verify_runner: VerifyRunner | None = None
         self._verify_result: dict | None = None
         self._sync_runner:  SyncRunner  | None = None
@@ -46,6 +51,9 @@ class VerifyCobotWindow(QMainWindow):
         # sync 실시간 플롯용 누적 버퍼
         self._sync_elapsed: list = []
         self._sync_errors:  list = []
+        # blend test
+        self._blend_runner:  BlendTestRunner | None = None
+        self._blend_results: dict = {}   # {blending_value: records}
 
         ui_path = pathlib.Path(config['app_path']) / config['gui']
         if not ui_path.is_file():
@@ -136,6 +144,7 @@ class VerifyCobotWindow(QMainWindow):
             log.warning("pyqtgraph unavailable — verification/sync plots skipped: %s", e)
             self._verify_plot_pos = None
             self._verify_plot_rot = None
+        self._inject_blend_tab()
 
     def _connect_signals(self):
         # Tab 1 – Connection
@@ -258,7 +267,8 @@ class VerifyCobotWindow(QMainWindow):
         self._natnet_worker.disconnected.connect(self._on_natnet_disconnected)
         self._natnet_worker.error.connect(lambda msg: self._log(f"[NatNet ERROR] {msg}"))
         self._natnet_worker.rb_updated.connect(self._on_rb_updated)
-        self._natnet_worker.rb_updated.connect(
+        # raw_rb_listener: Qt 시그널 쓰로틀(30Hz) 없이 모든 프레임을 state proxy에 전달
+        self._natnet_worker.raw_rb_listener = (
             lambda rb_id, pos, quat: self._natnet_state.update(pos, quat)
         )
         self._natnet_worker.fps_updated.connect(self._on_natnet_fps)
@@ -931,7 +941,393 @@ class VerifyCobotWindow(QMainWindow):
             self._log(f"[ERROR] CSV 저장 실패: {e}")
 
     # ──────────────────────────────────────────────
-    # Tab 4 – Sync (NatNet ↔ Robot 연속 동기 기록)
+    # Tab 4 – Blend Test (blending 비교 궤적 실행)
+    # ──────────────────────────────────────────────
+
+    def _inject_blend_tab(self):
+        """Blend Test 탭: blending 값별 궤적 실행 + 비교 플롯."""
+        import numpy as np
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+        from matplotlib.figure import Figure
+        from PyQt6.QtWidgets import (
+            QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
+            QLabel, QPushButton, QComboBox, QDoubleSpinBox,
+            QPlainTextEdit, QProgressBar, QSplitter, QLineEdit,
+        )
+        from PyQt6.QtCore import Qt
+
+        tab = QWidget()
+        main_vl = QVBoxLayout(tab)
+        main_vl.setContentsMargins(6, 6, 6, 6)
+        main_vl.setSpacing(6)
+
+        # ── 수평 splitter: 좌(설정) / 우(플롯) ──────────────────────
+        hsplit = QSplitter(Qt.Orientation.Horizontal)
+
+        # ── 왼쪽 패널 ───────────────────────────────────────────────
+        left = QWidget()
+        left.setMaximumWidth(390)
+        left_vl = QVBoxLayout(left)
+        left_vl.setContentsMargins(0, 0, 4, 0)
+        left_vl.setSpacing(6)
+
+        # Settings
+        grp_set = QGroupBox("Settings")
+        from PyQt6.QtWidgets import QFormLayout
+        fl = QFormLayout(grp_set)
+        fl.setSpacing(4)
+
+        self._blend_cbx_mode = QComboBox()
+        self._blend_cbx_mode.addItems(['jb2', 'pb', 'lb'])
+        fl.addRow("Mode:", self._blend_cbx_mode)
+
+        self._blend_cbx_blend_opt = QComboBox()
+        self._blend_cbx_blend_opt.addItems(['ratio', 'distance'])
+        fl.addRow("Blend option (pb):", self._blend_cbx_blend_opt)
+
+        self._blend_spin_speed = QDoubleSpinBox()
+        self._blend_spin_speed.setRange(1, 500)
+        self._blend_spin_speed.setValue(60.0)
+        self._blend_spin_speed.setSuffix("  deg/s  mm/s")
+        fl.addRow("Speed:", self._blend_spin_speed)
+
+        self._blend_spin_accel = QDoubleSpinBox()
+        self._blend_spin_accel.setRange(1, 2000)
+        self._blend_spin_accel.setValue(100.0)
+        self._blend_spin_accel.setSuffix("  deg/s²  mm/s²")
+        fl.addRow("Accel:", self._blend_spin_accel)
+
+        self._blend_spin_hz = QDoubleSpinBox()
+        self._blend_spin_hz.setRange(5, 200)
+        self._blend_spin_hz.setValue(50.0)
+        self._blend_spin_hz.setSuffix(" Hz")
+        fl.addRow("Record Hz:", self._blend_spin_hz)
+
+        self._blend_edit_values = QLineEdit("0.0  0.3  0.7  1.0")
+        self._blend_edit_values.setPlaceholderText("공백 구분: 0.0 0.3 0.7 1.0")
+        fl.addRow("Blending values:", self._blend_edit_values)
+
+        left_vl.addWidget(grp_set)
+
+        # Waypoints
+        grp_wp = QGroupBox("Waypoints  (Δ from start, 한 줄에 j1,j2,j3,j4,j5,j6)")
+        wp_vl = QVBoxLayout(grp_wp)
+        wp_vl.setSpacing(4)
+
+        self._blend_edit_wp = QPlainTextEdit()
+        self._blend_edit_wp.setFixedHeight(130)
+        self._blend_edit_wp.setStyleSheet(
+            "font-family: Courier New; font-size: 10px;")
+        self._blend_edit_wp.setPlaceholderText(
+            "20,10,0,0,0,0\n-15,25,5,0,0,0\n...")
+        self._blend_edit_wp.setPlainText(
+            '\n'.join(','.join(f'{v:.0f}' for v in row) for row in DEFAULT_JB2_DELTAS))
+        wp_vl.addWidget(self._blend_edit_wp)
+
+        btn_reset_wp = QPushButton("Reset to Mode Defaults")
+        btn_reset_wp.setStyleSheet("font-size: 10px;")
+        wp_vl.addWidget(btn_reset_wp)
+        left_vl.addWidget(grp_wp)
+
+        # Control
+        grp_ctrl = QGroupBox("Control")
+        ctrl_vl = QVBoxLayout(grp_ctrl)
+        ctrl_vl.setSpacing(4)
+
+        ctrl_hl = QHBoxLayout()
+        self.btn_blend_run = QPushButton("▶ Run")
+        self.btn_blend_run.setStyleSheet(
+            "background:#1b5e20; color:white; font-weight:bold; padding:6px;")
+        self.btn_blend_stop = QPushButton("■ Stop")
+        self.btn_blend_stop.setStyleSheet(
+            "background:#b71c1c; color:white; font-weight:bold; padding:6px;")
+        self.btn_blend_stop.setEnabled(False)
+        self.btn_blend_save = QPushButton("Save JSON")
+        self.btn_blend_save.setEnabled(False)
+        self.btn_blend_clear = QPushButton("Clear")
+        ctrl_hl.addWidget(self.btn_blend_run)
+        ctrl_hl.addWidget(self.btn_blend_stop)
+        ctrl_hl.addWidget(self.btn_blend_save)
+        ctrl_hl.addWidget(self.btn_blend_clear)
+        ctrl_vl.addLayout(ctrl_hl)
+
+        self._blend_progress = QProgressBar()
+        self._blend_progress.setValue(0)
+        ctrl_vl.addWidget(self._blend_progress)
+
+        self._blend_lbl_status = QLabel("Ready.")
+        self._blend_lbl_status.setStyleSheet("font-size: 10px; color: #aaa;")
+        ctrl_vl.addWidget(self._blend_lbl_status)
+        left_vl.addWidget(grp_ctrl)
+
+        left_vl.addStretch()
+        hsplit.addWidget(left)
+
+        # ── 오른쪽: matplotlib 캔버스 ────────────────────────────────
+        self._blend_fig = Figure(tight_layout=True)
+        self._blend_fig.patch.set_facecolor('#1a1a2e')
+        self._blend_canvas = FigureCanvasQTAgg(self._blend_fig)
+        hsplit.addWidget(self._blend_canvas)
+        hsplit.setStretchFactor(0, 0)
+        hsplit.setStretchFactor(1, 1)
+
+        main_vl.addWidget(hsplit, 1)
+
+        # ── 로그 ────────────────────────────────────────────────────
+        self._blend_log = QPlainTextEdit()
+        self._blend_log.setReadOnly(True)
+        self._blend_log.setMaximumBlockCount(400)
+        self._blend_log.setFixedHeight(75)
+        self._blend_log.setStyleSheet(
+            "background:#16213e; color:#aaa; font-size:10px; border:none;")
+        main_vl.addWidget(self._blend_log)
+
+        self.tab_widget.addTab(tab, "Blend Test")
+
+        # ── 시그널 연결 ──────────────────────────────────────────────
+        self.btn_blend_run.clicked.connect(self._on_blend_run)
+        self.btn_blend_stop.clicked.connect(self._on_blend_stop)
+        self.btn_blend_save.clicked.connect(self._on_blend_save)
+        self.btn_blend_clear.clicked.connect(self._on_blend_clear)
+        btn_reset_wp.clicked.connect(self._on_blend_reset_wp)
+        self._blend_cbx_mode.currentTextChanged.connect(self._on_blend_reset_wp)
+
+        self._redraw_blend_plot()
+
+    def _on_blend_run(self):
+        import numpy as np
+        robot_ip = self.edit_robot_ip.text().strip()
+        if not robot_ip:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "IP 없음", "Robot IP를 입력하세요.")
+            return
+        if self._blend_runner and self._blend_runner.isRunning():
+            return
+
+        # blending values 파싱
+        try:
+            blending_values = [float(v) for v in
+                               self._blend_edit_values.text().split()]
+            if not blending_values:
+                raise ValueError("비어 있음")
+        except ValueError as e:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "입력 오류", f"Blending values 오류: {e}")
+            return
+
+        # waypoints 파싱
+        try:
+            deltas = []
+            for line in self._blend_edit_wp.toPlainText().splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                vals = [float(v) for v in line.split(',')]
+                if len(vals) != 6:
+                    raise ValueError(f"6개 값 필요, got {len(vals)}: {line}")
+                deltas.append(vals)
+            if not deltas:
+                raise ValueError("웨이포인트가 없습니다")
+        except ValueError as e:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "입력 오류", f"Waypoints 오류: {e}")
+            return
+
+        mode = self._blend_cbx_mode.currentText()
+        params = {
+            'robot_ip':         robot_ip,
+            'mode':             mode,
+            'blending_values':  blending_values,
+            'waypoint_deltas':  deltas,
+            'speed':            float(self._blend_spin_speed.value()),
+            'accel':            float(self._blend_spin_accel.value()),
+            'speed_bar':        float(self.spin_speed_bar.value()),
+            'record_hz':        float(self._blend_spin_hz.value()),
+            'blending_option':  self._blend_cbx_blend_opt.currentText(),
+        }
+
+        self._blend_results = {}
+        self._blend_progress.setMaximum(len(blending_values))
+        self._blend_progress.setValue(0)
+        self._blend_log.clear()
+        self._redraw_blend_plot()
+
+        self._blend_runner = BlendTestRunner(params, parent=self)
+        self._blend_runner.run_progress.connect(self._on_blend_run_progress)
+        self._blend_runner.run_done.connect(self._on_blend_run_done)
+        self._blend_runner.all_done.connect(self._on_blend_all_done)
+        self._blend_runner.log_msg.connect(self._blend_log.appendPlainText)
+        self._blend_runner.error.connect(self._on_blend_error)
+
+        self.btn_blend_run.setEnabled(False)
+        self.btn_blend_stop.setEnabled(True)
+        self.btn_blend_save.setEnabled(False)
+        self._blend_lbl_status.setText("Running …")
+        self._blend_runner.start()
+
+    def _on_blend_stop(self):
+        if self._blend_runner and self._blend_runner.isRunning():
+            self._blend_runner.stop()
+        self.btn_blend_stop.setEnabled(False)
+
+    def _on_blend_run_progress(self, run_idx: int, total: int, bv: float):
+        self._blend_lbl_status.setText(
+            f"Run {run_idx}/{total}  blending={bv:.3f} …")
+
+    def _on_blend_run_done(self, bv: float, records: list):
+        self._blend_results[bv] = records
+        self._blend_progress.setValue(len(self._blend_results))
+        self._redraw_blend_plot()
+
+    def _on_blend_all_done(self, all_results: dict):
+        self._blend_results = all_results
+        self.btn_blend_run.setEnabled(True)
+        self.btn_blend_stop.setEnabled(False)
+        self.btn_blend_save.setEnabled(True)
+        n = len(all_results)
+        self._blend_lbl_status.setText(
+            f"완료 — {n}개 blending 값, 결과 저장 가능.")
+        self._redraw_blend_plot()
+
+    def _on_blend_error(self, msg: str):
+        self.btn_blend_run.setEnabled(True)
+        self.btn_blend_stop.setEnabled(False)
+        self._blend_lbl_status.setText(f"Error: {msg}")
+        self._blend_log.appendPlainText(f"[ERROR] {msg}")
+
+    def _on_blend_clear(self):
+        self._blend_results = {}
+        self._blend_progress.setValue(0)
+        self._blend_lbl_status.setText("Ready.")
+        self._blend_log.clear()
+        self._redraw_blend_plot()
+
+    def _on_blend_reset_wp(self):
+        import numpy as np
+        mode = self._blend_cbx_mode.currentText()
+        deltas = DEFAULT_JB2_DELTAS if mode == 'jb2' else DEFAULT_PB_DELTAS
+        text = '\n'.join(','.join(f'{v:.0f}' for v in row) for row in deltas)
+        self._blend_edit_wp.setPlainText(text)
+
+    def _on_blend_save(self):
+        if not self._blend_results:
+            return
+        import datetime
+        from PyQt6.QtWidgets import QFileDialog
+        stamp   = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        default = str(self._config.get('root_path', '.')) + f'/blend_{stamp}.json'
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Blend Results", default, "JSON Files (*.json)")
+        if not path:
+            return
+        mode = self._blend_cbx_mode.currentText()
+        payload = {
+            'mode': mode,
+            'results': {str(bv): recs
+                        for bv, recs in self._blend_results.items()},
+        }
+        with open(path, 'w', encoding='utf-8') as f:
+            import json as _json
+            _json.dump(payload, f)
+        self._log(f"Blend results saved → {path}")
+
+    def _redraw_blend_plot(self):
+        import numpy as np
+        import matplotlib.cm as cm
+
+        if not hasattr(self, '_blend_fig'):
+            return
+
+        self._blend_fig.clear()
+
+        if not self._blend_results:
+            ax = self._blend_fig.add_subplot(111)
+            ax.set_facecolor('#1a1a2e')
+            ax.text(0.5, 0.5, 'Run을 시작하면 궤적이 표시됩니다',
+                    ha='center', va='center', color='#555', fontsize=11,
+                    transform=ax.transAxes)
+            ax.set_xticks([]); ax.set_yticks([])
+            self._blend_canvas.draw()
+            return
+
+        mode = self._blend_cbx_mode.currentText()
+        bv_list = sorted(self._blend_results.keys())
+        colors  = cm.plasma(np.linspace(0.1, 0.9, max(len(bv_list), 1)))
+
+        if mode == 'jb2':
+            # 상단: J1-J2 궤적 / 하단: J1, J2 vs time
+            ax_traj = self._blend_fig.add_subplot(3, 1, (1, 2))
+            ax_j1   = self._blend_fig.add_subplot(3, 1, 3)
+
+            ax_traj.set_facecolor('#0d1b2a')
+            ax_j1.set_facecolor('#0d1b2a')
+            ax_traj.set_title('J1 – J2 궤적  (blending 비교)',
+                              color='#ddd', fontsize=10)
+            ax_traj.set_xlabel('J1 (deg)', color='#aaa')
+            ax_traj.set_ylabel('J2 (deg)', color='#aaa')
+            ax_j1.set_xlabel('Time (s)', color='#aaa')
+            ax_j1.set_ylabel('J1 (deg)', color='#aaa')
+
+            for ax in (ax_traj, ax_j1):
+                ax.tick_params(colors='#888')
+                ax.grid(True, alpha=0.2, color='#444')
+                for spine in ax.spines.values():
+                    spine.set_edgecolor('#444')
+
+            for bv, color in zip(bv_list, colors):
+                recs = self._blend_results[bv]
+                j1 = [r['joints'][0] for r in recs]
+                j2 = [r['joints'][1] for r in recs]
+                t  = [r['t']          for r in recs]
+                lbl = f'blend={bv:.2f}'
+                ax_traj.plot(j1, j2, color=color, lw=1.6, label=lbl)
+                ax_j1.plot(t,  j1, color=color, lw=1.4, label=lbl)
+                if recs:
+                    ax_traj.scatter(j1[0], j2[0], color=color,
+                                    marker='o', s=40, zorder=5)
+
+            ax_traj.legend(fontsize=8, facecolor='#1a1a2e',
+                           labelcolor='#ccc', framealpha=0.7)
+        else:
+            # 상단: XY 궤적 / 하단: X vs time
+            ax_traj = self._blend_fig.add_subplot(3, 1, (1, 2))
+            ax_x    = self._blend_fig.add_subplot(3, 1, 3)
+
+            ax_traj.set_facecolor('#0d1b2a')
+            ax_x.set_facecolor('#0d1b2a')
+            ax_traj.set_title(f'TCP XY 궤적  (blending 비교 — {mode.upper()})',
+                              color='#ddd', fontsize=10)
+            ax_traj.set_xlabel('X (mm)', color='#aaa')
+            ax_traj.set_ylabel('Y (mm)', color='#aaa')
+            ax_x.set_xlabel('Time (s)', color='#aaa')
+            ax_x.set_ylabel('X (mm)', color='#aaa')
+
+            for ax in (ax_traj, ax_x):
+                ax.tick_params(colors='#888')
+                ax.grid(True, alpha=0.2, color='#444')
+                for spine in ax.spines.values():
+                    spine.set_edgecolor('#444')
+
+            for bv, color in zip(bv_list, colors):
+                recs = self._blend_results[bv]
+                x   = [r['tcp'][0] for r in recs]
+                y   = [r['tcp'][1] for r in recs]
+                t   = [r['t']       for r in recs]
+                lbl = f'blend={bv:.2f}'
+                ax_traj.plot(x, y, color=color, lw=1.6, label=lbl)
+                ax_x.plot(t, x,    color=color, lw=1.4, label=lbl)
+                if recs:
+                    ax_traj.scatter(x[0], y[0], color=color,
+                                    marker='o', s=40, zorder=5)
+
+            ax_traj.set_aspect('equal', adjustable='datalim')
+            ax_traj.legend(fontsize=8, facecolor='#1a1a2e',
+                           labelcolor='#ccc', framealpha=0.7)
+
+        self._blend_canvas.draw()
+
+    # ──────────────────────────────────────────────
+    # Tab 5 – Sync (NatNet ↔ Robot 연속 동기 기록)
     # ──────────────────────────────────────────────
 
     def _inject_sync_tab(self, pg):
