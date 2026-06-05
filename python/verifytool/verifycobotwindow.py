@@ -24,7 +24,10 @@ from verifytool.workers.natnet_worker import NatNetWorker
 from verifytool.calib_runner import CalibRunner, NatNetStateProxy
 from verifytool.verify_runner import VerifyRunner
 from verifytool.sync_runner import SyncRunner
-from verifytool.blend_test_runner import BlendTestRunner, DEFAULT_JB2_DELTAS, DEFAULT_PB_DELTAS
+from verifytool.blend_test_runner import (
+    BlendTestRunner, DEFAULT_JB2_DELTAS, DEFAULT_PB_DELTAS,
+    parse_trajectory_csv, compute_plan_deviation,
+)
 
 log = logging.getLogger(__name__)
 
@@ -52,8 +55,9 @@ class VerifyCobotWindow(QMainWindow):
         self._sync_elapsed: list = []
         self._sync_errors:  list = []
         # blend test
-        self._blend_runner:  BlendTestRunner | None = None
-        self._blend_results: dict = {}   # {blending_value: records}
+        self._blend_runner:    BlendTestRunner | None = None
+        self._blend_results:   dict = {}   # {blending_value: records}
+        self._blend_csv_data:  list | None = None  # [{'joints','speed','accel'}]
 
         ui_path = pathlib.Path(config['app_path']) / config['gui']
         if not ui_path.is_file():
@@ -945,12 +949,12 @@ class VerifyCobotWindow(QMainWindow):
     # ──────────────────────────────────────────────
 
     def _inject_blend_tab(self):
-        """Blend Test 탭: blending 값별 궤적 실행 + 비교 플롯."""
+        """Blend Test 탭: CSV 궤적 or 델타 waypoints + blending 비교 플롯."""
         import numpy as np
         from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
         from matplotlib.figure import Figure
         from PyQt6.QtWidgets import (
-            QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
+            QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QFormLayout,
             QLabel, QPushButton, QComboBox, QDoubleSpinBox,
             QPlainTextEdit, QProgressBar, QSplitter, QLineEdit,
         )
@@ -961,25 +965,57 @@ class VerifyCobotWindow(QMainWindow):
         main_vl.setContentsMargins(6, 6, 6, 6)
         main_vl.setSpacing(6)
 
-        # ── 수평 splitter: 좌(설정) / 우(플롯) ──────────────────────
         hsplit = QSplitter(Qt.Orientation.Horizontal)
 
         # ── 왼쪽 패널 ───────────────────────────────────────────────
         left = QWidget()
-        left.setMaximumWidth(390)
+        left.setMaximumWidth(400)
         left_vl = QVBoxLayout(left)
         left_vl.setContentsMargins(0, 0, 4, 0)
         left_vl.setSpacing(6)
 
-        # Settings
+        # ① Trajectory source
+        grp_traj = QGroupBox("Trajectory")
+        traj_vl = QVBoxLayout(grp_traj)
+        traj_vl.setSpacing(3)
+
+        src_hl = QHBoxLayout()
+        self._blend_lbl_csv = QLabel("No CSV — using delta mode")
+        self._blend_lbl_csv.setStyleSheet("color:#888; font-size:10px;")
+        self._blend_lbl_csv.setWordWrap(True)
+        btn_load_csv = QPushButton("Load CSV")
+        btn_load_csv.setFixedWidth(80)
+        btn_clear_csv = QPushButton("Clear")
+        btn_clear_csv.setFixedWidth(50)
+        src_hl.addWidget(self._blend_lbl_csv, 1)
+        src_hl.addWidget(btn_load_csv)
+        src_hl.addWidget(btn_clear_csv)
+        traj_vl.addLayout(src_hl)
+
+        # delta mode waypoints (hidden when CSV loaded)
+        self._blend_grp_delta = QGroupBox("Delta Waypoints  (j1,j2,j3,j4,j5,j6 per line)")
+        delta_vl = QVBoxLayout(self._blend_grp_delta)
+        delta_vl.setSpacing(3)
+        self._blend_edit_wp = QPlainTextEdit()
+        self._blend_edit_wp.setFixedHeight(110)
+        self._blend_edit_wp.setStyleSheet("font-family: Courier New; font-size:10px;")
+        self._blend_edit_wp.setPlainText(
+            '\n'.join(','.join(f'{v:.0f}' for v in row) for row in DEFAULT_JB2_DELTAS))
+        delta_vl.addWidget(self._blend_edit_wp)
+        btn_reset_wp = QPushButton("Reset to Mode Defaults")
+        btn_reset_wp.setStyleSheet("font-size:10px;")
+        delta_vl.addWidget(btn_reset_wp)
+        traj_vl.addWidget(self._blend_grp_delta)
+        left_vl.addWidget(grp_traj)
+
+        # ② Settings
         grp_set = QGroupBox("Settings")
-        from PyQt6.QtWidgets import QFormLayout
         fl = QFormLayout(grp_set)
         fl.setSpacing(4)
 
         self._blend_cbx_mode = QComboBox()
         self._blend_cbx_mode.addItems(['jb2', 'pb', 'lb'])
-        fl.addRow("Mode:", self._blend_cbx_mode)
+        fl.addRow("Mode (delta only):", self._blend_cbx_mode)
 
         self._blend_cbx_blend_opt = QComboBox()
         self._blend_cbx_blend_opt.addItems(['ratio', 'distance'])
@@ -987,15 +1023,15 @@ class VerifyCobotWindow(QMainWindow):
 
         self._blend_spin_speed = QDoubleSpinBox()
         self._blend_spin_speed.setRange(1, 500)
-        self._blend_spin_speed.setValue(60.0)
-        self._blend_spin_speed.setSuffix("  deg/s  mm/s")
-        fl.addRow("Speed:", self._blend_spin_speed)
+        self._blend_spin_speed.setValue(80.0)
+        self._blend_spin_speed.setSuffix("  deg/s")
+        fl.addRow("Speed (start/delta):", self._blend_spin_speed)
 
         self._blend_spin_accel = QDoubleSpinBox()
         self._blend_spin_accel.setRange(1, 2000)
         self._blend_spin_accel.setValue(100.0)
-        self._blend_spin_accel.setSuffix("  deg/s²  mm/s²")
-        fl.addRow("Accel:", self._blend_spin_accel)
+        self._blend_spin_accel.setSuffix("  deg/s²")
+        fl.addRow("Accel (start/delta):", self._blend_spin_accel)
 
         self._blend_spin_hz = QDoubleSpinBox()
         self._blend_spin_hz.setRange(5, 200)
@@ -1004,32 +1040,29 @@ class VerifyCobotWindow(QMainWindow):
         fl.addRow("Record Hz:", self._blend_spin_hz)
 
         self._blend_edit_values = QLineEdit("0.0  0.3  0.7  1.0")
-        self._blend_edit_values.setPlaceholderText("공백 구분: 0.0 0.3 0.7 1.0")
+        self._blend_edit_values.setPlaceholderText("0.0 0.3 0.7 1.0")
         fl.addRow("Blending values:", self._blend_edit_values)
 
         left_vl.addWidget(grp_set)
 
-        # Waypoints
-        grp_wp = QGroupBox("Waypoints  (Δ from start, 한 줄에 j1,j2,j3,j4,j5,j6)")
-        wp_vl = QVBoxLayout(grp_wp)
-        wp_vl.setSpacing(4)
+        # ③ Joint selection
+        _JC = ['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6','#1abc9c']
+        from PyQt6.QtWidgets import QCheckBox
+        grp_joints = QGroupBox("Joints")
+        joints_hl = QHBoxLayout(grp_joints)
+        joints_hl.setSpacing(4)
+        self._blend_joint_chk: list = []
+        for i in range(6):
+            chk = QCheckBox(f'J{i+1}')
+            chk.setChecked(True)
+            chk.setStyleSheet(
+                f"color: {_JC[i]}; font-weight: bold; font-size: 10px;")
+            chk.stateChanged.connect(self._redraw_blend_plot)
+            self._blend_joint_chk.append(chk)
+            joints_hl.addWidget(chk)
+        left_vl.addWidget(grp_joints)
 
-        self._blend_edit_wp = QPlainTextEdit()
-        self._blend_edit_wp.setFixedHeight(130)
-        self._blend_edit_wp.setStyleSheet(
-            "font-family: Courier New; font-size: 10px;")
-        self._blend_edit_wp.setPlaceholderText(
-            "20,10,0,0,0,0\n-15,25,5,0,0,0\n...")
-        self._blend_edit_wp.setPlainText(
-            '\n'.join(','.join(f'{v:.0f}' for v in row) for row in DEFAULT_JB2_DELTAS))
-        wp_vl.addWidget(self._blend_edit_wp)
-
-        btn_reset_wp = QPushButton("Reset to Mode Defaults")
-        btn_reset_wp.setStyleSheet("font-size: 10px;")
-        wp_vl.addWidget(btn_reset_wp)
-        left_vl.addWidget(grp_wp)
-
-        # Control
+        # ④ Control
         grp_ctrl = QGroupBox("Control")
         ctrl_vl = QVBoxLayout(grp_ctrl)
         ctrl_vl.setSpacing(4)
@@ -1056,21 +1089,19 @@ class VerifyCobotWindow(QMainWindow):
         ctrl_vl.addWidget(self._blend_progress)
 
         self._blend_lbl_status = QLabel("Ready.")
-        self._blend_lbl_status.setStyleSheet("font-size: 10px; color: #aaa;")
+        self._blend_lbl_status.setStyleSheet("font-size:10px; color:#aaa;")
         ctrl_vl.addWidget(self._blend_lbl_status)
         left_vl.addWidget(grp_ctrl)
-
         left_vl.addStretch()
         hsplit.addWidget(left)
 
         # ── 오른쪽: matplotlib 캔버스 ────────────────────────────────
-        self._blend_fig = Figure(tight_layout=True)
-        self._blend_fig.patch.set_facecolor('#1a1a2e')
+        self._blend_fig = Figure()
+        self._blend_fig.patch.set_facecolor('white')
         self._blend_canvas = FigureCanvasQTAgg(self._blend_fig)
         hsplit.addWidget(self._blend_canvas)
         hsplit.setStretchFactor(0, 0)
         hsplit.setStretchFactor(1, 1)
-
         main_vl.addWidget(hsplit, 1)
 
         # ── 로그 ────────────────────────────────────────────────────
@@ -1084,18 +1115,51 @@ class VerifyCobotWindow(QMainWindow):
 
         self.tab_widget.addTab(tab, "Blend Test")
 
-        # ── 시그널 연결 ──────────────────────────────────────────────
+        # 시그널 연결
         self.btn_blend_run.clicked.connect(self._on_blend_run)
         self.btn_blend_stop.clicked.connect(self._on_blend_stop)
         self.btn_blend_save.clicked.connect(self._on_blend_save)
         self.btn_blend_clear.clicked.connect(self._on_blend_clear)
         btn_reset_wp.clicked.connect(self._on_blend_reset_wp)
+        btn_load_csv.clicked.connect(self._on_blend_load_csv)
+        btn_clear_csv.clicked.connect(self._on_blend_clear_csv)
         self._blend_cbx_mode.currentTextChanged.connect(self._on_blend_reset_wp)
 
         self._redraw_blend_plot()
 
+    # ── Blend Test 핸들러 ─────────────────────────────────────────────────────
+
+    def _on_blend_load_csv(self):
+        from PyQt6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load Trajectory CSV", ".", "CSV Files (*.csv)")
+        if not path:
+            return
+        try:
+            data = parse_trajectory_csv(path)
+        except Exception as e:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "CSV 오류", str(e))
+            return
+        self._blend_csv_data = data
+        import pathlib
+        fname = pathlib.Path(path).name
+        self._blend_lbl_csv.setText(f"{fname}  ({len(data)} waypoints)")
+        self._blend_lbl_csv.setStyleSheet("color:#4fc3f7; font-size:10px;")
+        self._blend_grp_delta.setEnabled(False)
+        self._blend_cbx_mode.setEnabled(False)
+        self._blend_log.appendPlainText(
+            f"[CSV] {fname} loaded — {len(data)} waypoints, "
+            f"speed={data[0]['speed']:.0f} deg/s")
+
+    def _on_blend_clear_csv(self):
+        self._blend_csv_data = None
+        self._blend_lbl_csv.setText("No CSV — using delta mode")
+        self._blend_lbl_csv.setStyleSheet("color:#888; font-size:10px;")
+        self._blend_grp_delta.setEnabled(True)
+        self._blend_cbx_mode.setEnabled(True)
+
     def _on_blend_run(self):
-        import numpy as np
         robot_ip = self.edit_robot_ip.text().strip()
         if not robot_ip:
             from PyQt6.QtWidgets import QMessageBox
@@ -1104,47 +1168,61 @@ class VerifyCobotWindow(QMainWindow):
         if self._blend_runner and self._blend_runner.isRunning():
             return
 
-        # blending values 파싱
         try:
             blending_values = [float(v) for v in
                                self._blend_edit_values.text().split()]
             if not blending_values:
-                raise ValueError("비어 있음")
+                raise ValueError("empty")
         except ValueError as e:
             from PyQt6.QtWidgets import QMessageBox
-            QMessageBox.warning(self, "입력 오류", f"Blending values 오류: {e}")
+            QMessageBox.warning(self, "Blending values error", str(e))
             return
 
-        # waypoints 파싱
-        try:
-            deltas = []
-            for line in self._blend_edit_wp.toPlainText().splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                vals = [float(v) for v in line.split(',')]
-                if len(vals) != 6:
-                    raise ValueError(f"6개 값 필요, got {len(vals)}: {line}")
-                deltas.append(vals)
-            if not deltas:
-                raise ValueError("웨이포인트가 없습니다")
-        except ValueError as e:
-            from PyQt6.QtWidgets import QMessageBox
-            QMessageBox.warning(self, "입력 오류", f"Waypoints 오류: {e}")
-            return
+        use_csv = self._blend_csv_data is not None
+        speed   = float(self._blend_spin_speed.value())
+        accel   = float(self._blend_spin_accel.value())
 
-        mode = self._blend_cbx_mode.currentText()
-        params = {
-            'robot_ip':         robot_ip,
-            'mode':             mode,
-            'blending_values':  blending_values,
-            'waypoint_deltas':  deltas,
-            'speed':            float(self._blend_spin_speed.value()),
-            'accel':            float(self._blend_spin_accel.value()),
-            'speed_bar':        float(self.spin_speed_bar.value()),
-            'record_hz':        float(self._blend_spin_hz.value()),
-            'blending_option':  self._blend_cbx_blend_opt.currentText(),
-        }
+        if use_csv:
+            params = {
+                'robot_ip':        robot_ip,
+                'use_csv':         True,
+                'waypoint_data':   self._blend_csv_data,
+                'blending_values': blending_values,
+                'speed':           speed,
+                'accel':           accel,
+                'speed_bar':       float(self.spin_speed_bar.value()),
+                'record_hz':       float(self._blend_spin_hz.value()),
+            }
+        else:
+            try:
+                deltas = []
+                for line in self._blend_edit_wp.toPlainText().splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    vals = [float(v) for v in line.split(',')]
+                    if len(vals) != 6:
+                        raise ValueError(f"need 6 values: {line}")
+                    deltas.append(vals)
+                if not deltas:
+                    raise ValueError("no waypoints")
+            except ValueError as e:
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "Waypoints error", str(e))
+                return
+
+            params = {
+                'robot_ip':        robot_ip,
+                'use_csv':         False,
+                'mode':            self._blend_cbx_mode.currentText(),
+                'waypoint_deltas': deltas,
+                'blending_values': blending_values,
+                'speed':           speed,
+                'accel':           accel,
+                'speed_bar':       float(self.spin_speed_bar.value()),
+                'record_hz':       float(self._blend_spin_hz.value()),
+                'blending_option': self._blend_cbx_blend_opt.currentText(),
+            }
 
         self._blend_results = {}
         self._blend_progress.setMaximum(len(blending_values))
@@ -1152,7 +1230,16 @@ class VerifyCobotWindow(QMainWindow):
         self._blend_log.clear()
         self._redraw_blend_plot()
 
-        self._blend_runner = BlendTestRunner(params, parent=self)
+        calib = None
+        if self._calib_result:
+            calib = {'T_base_motive': self._calib_result['T_base_motive']}
+
+        self._blend_runner = BlendTestRunner(
+            params,
+            natnet_state=self._natnet_state,
+            calib=calib,
+            parent=self,
+        )
         self._blend_runner.run_progress.connect(self._on_blend_run_progress)
         self._blend_runner.run_done.connect(self._on_blend_run_done)
         self._blend_runner.all_done.connect(self._on_blend_all_done)
@@ -1180,13 +1267,24 @@ class VerifyCobotWindow(QMainWindow):
         self._redraw_blend_plot()
 
     def _on_blend_all_done(self, all_results: dict):
+        import numpy as np
         self._blend_results = all_results
         self.btn_blend_run.setEnabled(True)
         self.btn_blend_stop.setEnabled(False)
         self.btn_blend_save.setEnabled(True)
-        n = len(all_results)
-        self._blend_lbl_status.setText(
-            f"완료 — {n}개 blending 값, 결과 저장 가능.")
+
+        # 편차 요약 (CSV 모드일 때만)
+        if self._blend_csv_data:
+            parts = []
+            for bv in sorted(all_results):
+                dev = compute_plan_deviation(all_results[bv], self._blend_csv_data)
+                if len(dev):
+                    parts.append(f"blend={bv:.2f}: rmse={dev.mean():.3f} deg")
+            self._blend_lbl_status.setText(
+                f"Done — {len(all_results)} runs  |  " + "  ".join(parts))
+        else:
+            self._blend_lbl_status.setText(
+                f"Done — {len(all_results)} runs.  Save available.")
         self._redraw_blend_plot()
 
     def _on_blend_error(self, msg: str):
@@ -1204,10 +1302,10 @@ class VerifyCobotWindow(QMainWindow):
 
     def _on_blend_reset_wp(self):
         import numpy as np
-        mode = self._blend_cbx_mode.currentText()
+        mode   = self._blend_cbx_mode.currentText()
         deltas = DEFAULT_JB2_DELTAS if mode == 'jb2' else DEFAULT_PB_DELTAS
-        text = '\n'.join(','.join(f'{v:.0f}' for v in row) for row in deltas)
-        self._blend_edit_wp.setPlainText(text)
+        self._blend_edit_wp.setPlainText(
+            '\n'.join(','.join(f'{v:.0f}' for v in row) for row in deltas))
 
     def _on_blend_save(self):
         if not self._blend_results:
@@ -1220,12 +1318,20 @@ class VerifyCobotWindow(QMainWindow):
             self, "Save Blend Results", default, "JSON Files (*.json)")
         if not path:
             return
-        mode = self._blend_cbx_mode.currentText()
+        use_csv = self._blend_csv_data is not None
         payload = {
-            'mode': mode,
+            'mode':    'jb2' if use_csv else self._blend_cbx_mode.currentText(),
+            'use_csv': use_csv,
             'results': {str(bv): recs
                         for bv, recs in self._blend_results.items()},
         }
+        if use_csv:
+            payload['waypoint_data'] = [
+                {'joints': wd['joints'].tolist(),
+                 'speed':  wd['speed'],
+                 'accel':  wd['accel']}
+                for wd in self._blend_csv_data
+            ]
         with open(path, 'w', encoding='utf-8') as f:
             import json as _json
             _json.dump(payload, f)
@@ -1234,95 +1340,302 @@ class VerifyCobotWindow(QMainWindow):
     def _redraw_blend_plot(self):
         import numpy as np
         import matplotlib.cm as cm
+        from matplotlib.gridspec import GridSpec
+        from matplotlib.lines import Line2D
 
         if not hasattr(self, '_blend_fig'):
             return
 
         self._blend_fig.clear()
+        self._blend_fig.patch.set_facecolor('white')
+        use_csv = bool(self._blend_csv_data)
+
+        # ── 공통 스타일 (흰 배경) ────────────────────────────────────
+        BG  = 'white'
+        GRD = '#dddddd'
+        TC  = '#444444'
+        LBL = '#333333'
+        TTL = '#111111'
+
+        def _style(ax, ylabel='', xlabel=''):
+            ax.set_facecolor(BG)
+            ax.tick_params(colors=TC, labelsize=8)
+            ax.grid(True, alpha=0.6, color=GRD, linewidth=0.6)
+            for sp in ax.spines.values():
+                sp.set_edgecolor('#bbbbbb')
+            if ylabel:
+                ax.set_ylabel(ylabel, color=LBL, fontsize=8)
+            if xlabel:
+                ax.set_xlabel(xlabel, color=LBL, fontsize=8)
 
         if not self._blend_results:
             ax = self._blend_fig.add_subplot(111)
-            ax.set_facecolor('#1a1a2e')
-            ax.text(0.5, 0.5, 'Run을 시작하면 궤적이 표시됩니다',
-                    ha='center', va='center', color='#555', fontsize=11,
+            _style(ax)
+            ax.text(0.5, 0.5, 'Press Run to start',
+                    ha='center', va='center', color='#999', fontsize=12,
                     transform=ax.transAxes)
             ax.set_xticks([]); ax.set_yticks([])
             self._blend_canvas.draw()
             return
 
-        mode = self._blend_cbx_mode.currentText()
-        bv_list = sorted(self._blend_results.keys())
-        colors  = cm.plasma(np.linspace(0.1, 0.9, max(len(bv_list), 1)))
-
-        if mode == 'jb2':
-            # 상단: J1-J2 궤적 / 하단: J1, J2 vs time
-            ax_traj = self._blend_fig.add_subplot(3, 1, (1, 2))
-            ax_j1   = self._blend_fig.add_subplot(3, 1, 3)
-
-            ax_traj.set_facecolor('#0d1b2a')
-            ax_j1.set_facecolor('#0d1b2a')
-            ax_traj.set_title('J1 – J2 궤적  (blending 비교)',
-                              color='#ddd', fontsize=10)
-            ax_traj.set_xlabel('J1 (deg)', color='#aaa')
-            ax_traj.set_ylabel('J2 (deg)', color='#aaa')
-            ax_j1.set_xlabel('Time (s)', color='#aaa')
-            ax_j1.set_ylabel('J1 (deg)', color='#aaa')
-
-            for ax in (ax_traj, ax_j1):
-                ax.tick_params(colors='#888')
-                ax.grid(True, alpha=0.2, color='#444')
-                for spine in ax.spines.values():
-                    spine.set_edgecolor('#444')
-
-            for bv, color in zip(bv_list, colors):
-                recs = self._blend_results[bv]
-                j1 = [r['joints'][0] for r in recs]
-                j2 = [r['joints'][1] for r in recs]
-                t  = [r['t']          for r in recs]
-                lbl = f'blend={bv:.2f}'
-                ax_traj.plot(j1, j2, color=color, lw=1.6, label=lbl)
-                ax_j1.plot(t,  j1, color=color, lw=1.4, label=lbl)
-                if recs:
-                    ax_traj.scatter(j1[0], j2[0], color=color,
-                                    marker='o', s=40, zorder=5)
-
-            ax_traj.legend(fontsize=8, facecolor='#1a1a2e',
-                           labelcolor='#ccc', framealpha=0.7)
+        # ── 선택된 관절 목록 ─────────────────────────────────────────
+        J_COLORS = ['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6','#1abc9c']
+        if hasattr(self, '_blend_joint_chk'):
+            j_visible = [chk.isChecked() for chk in self._blend_joint_chk]
         else:
-            # 상단: XY 궤적 / 하단: X vs time
-            ax_traj = self._blend_fig.add_subplot(3, 1, (1, 2))
-            ax_x    = self._blend_fig.add_subplot(3, 1, 3)
+            j_visible = [True] * 6
+        visible_idx = [i for i, v in enumerate(j_visible) if v]
 
-            ax_traj.set_facecolor('#0d1b2a')
-            ax_x.set_facecolor('#0d1b2a')
-            ax_traj.set_title(f'TCP XY 궤적  (blending 비교 — {mode.upper()})',
-                              color='#ddd', fontsize=10)
-            ax_traj.set_xlabel('X (mm)', color='#aaa')
-            ax_traj.set_ylabel('Y (mm)', color='#aaa')
-            ax_x.set_xlabel('Time (s)', color='#aaa')
-            ax_x.set_ylabel('X (mm)', color='#aaa')
+        bv_list   = sorted(self._blend_results.keys())
+        n_bv      = max(len(bv_list), 1)
+        bv_colors = cm.tab10(np.linspace(0.0, 0.9, n_bv))
+        bv_ls     = ['-', '--', ':', '-.']   # blending별 선 스타일
 
-            for ax in (ax_traj, ax_x):
-                ax.tick_params(colors='#888')
-                ax.grid(True, alpha=0.2, color='#444')
-                for spine in ax.spines.values():
-                    spine.set_edgecolor('#444')
+        # ── 계획 궤적 시간 파라미터화 (CSV 모드) ─────────────────────
+        t_plan = jplan = None
+        if use_csv and self._blend_csv_data:
+            wd    = self._blend_csv_data
+            jplan = np.array([w['joints'] for w in wd])
+            spds  = np.array([w['speed']  for w in wd])
+            seg_d = np.linalg.norm(np.diff(jplan, axis=0), axis=1)
+            seg_t = np.where(seg_d > 0.01, seg_d / spds[:-1], 0.0)
+            t_plan = np.concatenate([[0.0], np.cumsum(seg_t)])
 
-            for bv, color in zip(bv_list, colors):
-                recs = self._blend_results[bv]
-                x   = [r['tcp'][0] for r in recs]
-                y   = [r['tcp'][1] for r in recs]
-                t   = [r['t']       for r in recs]
-                lbl = f'blend={bv:.2f}'
-                ax_traj.plot(x, y, color=color, lw=1.6, label=lbl)
-                ax_x.plot(t, x,    color=color, lw=1.4, label=lbl)
-                if recs:
-                    ax_traj.scatter(x[0], y[0], color=color,
-                                    marker='o', s=40, zorder=5)
+        # has_ee: 엔드이펙터 데이터 존재 여부
+        first_recs = self._blend_results[bv_list[0]]
+        has_tcp_m   = any(r.get('tcp_motive') is not None for r in first_recs)
+        has_rb      = any(r.get('rb_pos')     is not None for r in first_recs)
+        has_rb_rot  = any(r.get('rb_rot')     is not None for r in first_recs)
 
-            ax_traj.set_aspect('equal', adjustable='datalim')
-            ax_traj.legend(fontsize=8, facecolor='#1a1a2e',
-                           labelcolor='#ccc', framealpha=0.7)
+        # ── GridSpec: 5행 ────────────────────────────────────────────
+        # Row 0: 관절각    Row 1: 관절속도    Row 2: 관절가속도
+        # Row 3: EE XY | EE Z vs time
+        # Row 4: EE 선속도 | EE 각속도
+        gs = GridSpec(5, 2,
+                      figure=self._blend_fig,
+                      height_ratios=[2.8, 1.5, 1.5, 2.2, 2.2],
+                      hspace=0.60, wspace=0.32,
+                      left=0.08, right=0.97, top=0.96, bottom=0.04)
+
+        ax_j    = self._blend_fig.add_subplot(gs[0, :])
+        ax_vel  = self._blend_fig.add_subplot(gs[1, :], sharex=ax_j)
+        ax_acc  = self._blend_fig.add_subplot(gs[2, :], sharex=ax_j)
+        ax_xy   = self._blend_fig.add_subplot(gs[3, 0])
+        ax_z    = self._blend_fig.add_subplot(gs[3, 1])
+        ax_lv   = self._blend_fig.add_subplot(gs[4, 0])
+        ax_av   = self._blend_fig.add_subplot(gs[4, 1])
+
+        _style(ax_j,   ylabel='Joint angle (deg)')
+        _style(ax_vel, ylabel='Velocity (deg/s)')
+        _style(ax_acc, ylabel='Accel (deg/s²)',  xlabel='Time (s)')
+        _style(ax_xy,  ylabel='Y (m)',            xlabel='X (m)')
+        _style(ax_z,   ylabel='Z (m)',            xlabel='Time (s)')
+        _style(ax_lv,  ylabel='Lin. vel (mm/s)',  xlabel='Time (s)')
+        _style(ax_av,  ylabel='Ang. vel (deg/s)', xlabel='Time (s)')
+
+        ax_j.set_title('Joint angles vs time', color=TTL, fontsize=9, fontweight='bold')
+        ax_vel.set_title('Joint velocity (L2 norm)', color=TTL, fontsize=8)
+        ax_acc.set_title('Joint acceleration (L2 norm)', color=TTL, fontsize=8)
+        ax_xy.set_title('EE XY — TCP (line) vs NatNet RB (dot)',
+                        color=TTL, fontsize=8)
+        ax_z.set_title('EE Z vs time', color=TTL, fontsize=8)
+        ax_lv.set_title('EE linear velocity', color=TTL, fontsize=8)
+        src = 'NatNet RB' if has_rb_rot else 'TCP Euler'
+        ax_av.set_title(f'EE angular velocity ({src})', color=TTL, fontsize=8)
+
+        # ── ① 계획 궤적 오버레이 (점선 + 마커) ──────────────────────
+        if t_plan is not None and jplan is not None:
+            for j_idx in visible_idx:
+                ax_j.plot(t_plan, jplan[:, j_idx], '--',
+                          color=J_COLORS[j_idx], lw=1.0, alpha=0.45,
+                          zorder=2)
+                ax_j.scatter(t_plan, jplan[:, j_idx],
+                             color=J_COLORS[j_idx], s=14, alpha=0.55,
+                             zorder=3)
+
+        # ── ② 실제 데이터 ─────────────────────────────────────────
+        def _smooth(x: np.ndarray, w: int = 5) -> np.ndarray:
+            if len(x) < w:
+                return x
+            return np.convolve(x, np.ones(w) / w, mode='same')
+
+        def _clean(arr_t, arr_data):
+            """단조 증가 타임스탬프만 유지. 불연속 구간은 NaN 삽입."""
+            if len(arr_t) < 2:
+                return arr_t, arr_data
+            # 단조 증가 마스크
+            mono = np.concatenate([[True], np.diff(arr_t) > 1e-6])
+            t_c = arr_t[mono]
+            d_c = arr_data[mono]
+            # 시간 간격이 median의 5배 이상인 지점에 NaN 삽입 (갭 가시화)
+            dt = np.diff(t_c)
+            med_dt = np.median(dt)
+            gap_idx = np.where(dt > med_dt * 5)[0] + 1
+            if len(gap_idx):
+                t_out = np.insert(t_c.astype(float), gap_idx, np.nan)
+                d_shape = (len(t_out),) + d_c.shape[1:]
+                d_out = np.full(d_shape, np.nan)
+                # NaN 삽입된 인덱스 보정
+                mask = ~np.isnan(t_out)
+                d_out[mask] = d_c
+            else:
+                t_out, d_out = t_c, d_c
+            return t_out, d_out
+
+        for bv, bv_color, ls in zip(bv_list, bv_colors, bv_ls):
+            recs = self._blend_results[bv]
+            if not recs:
+                continue
+
+            t_raw = np.array([r['t'] for r in recs])
+            j_raw = np.array([r['joints'] for r in recs])  # (N, 6)
+
+            t, j = _clean(t_raw, j_raw)
+
+            if np.sum(~np.isnan(t)) < 2:
+                continue
+
+            # 관절각 (선택된 축만)
+            for j_idx in visible_idx:
+                ax_j.plot(t, j[:, j_idx],
+                          color=J_COLORS[j_idx], ls=ls, lw=1.4,
+                          alpha=0.9, zorder=4)
+
+            # 속도·가속도 (NaN 구간 제외 후 수치 미분)
+            t_valid = t[~np.isnan(t)]
+            j_valid = j[~np.isnan(t)]
+            if len(t_valid) >= 5 and visible_idx:
+                j_sel  = j_valid[:, visible_idx]
+                vel    = np.gradient(j_sel, t_valid, axis=0)
+                acc    = np.gradient(vel,   t_valid, axis=0)
+                vel_s  = np.column_stack([_smooth(vel[:, k])    for k in range(len(visible_idx))])
+                acc_s  = np.column_stack([_smooth(acc[:, k], 7) for k in range(len(visible_idx))])
+                vel_mag = np.linalg.norm(vel_s, axis=1)
+                acc_mag = np.linalg.norm(acc_s, axis=1)
+                ax_vel.plot(t_valid, vel_mag, color=bv_color, ls=ls, lw=1.4,
+                            label=f'blend={bv:.2f}')
+                ax_acc.plot(t_valid, acc_mag, color=bv_color, ls=ls, lw=1.4)
+
+            # ── 엔드이펙터 ───────────────────────────────────────────
+            # tcp_motive: FK + HE 변환 위치 (실선)
+            tc = tt = None
+            if has_tcp_m:
+                _pairs = [(r['t'], r['tcp_motive']) for r in recs
+                          if r.get('tcp_motive') is not None]
+                if _pairs:
+                    tt = np.array([x[0] for x in _pairs])
+                    tc = np.array([x[1] for x in _pairs])  # (N,3) m
+                    ax_xy.plot(tc[:, 0], tc[:, 1], color=bv_color,
+                               ls=ls, lw=1.8, zorder=4,
+                               label=f'FK+HE  b={bv:.2f}')
+                    ax_z.plot(tt, tc[:, 2], color=bv_color, ls=ls, lw=1.5,
+                              label=f'FK+HE  b={bv:.2f}')
+
+            # NatNet RB: 점 + 선으로 함께 표시
+            rb = rt = rb_q = None
+            if has_rb:
+                _pairs_rb = [(r['t'], r['rb_pos'], r.get('rb_rot'))
+                             for r in recs if r.get('rb_pos') is not None]
+                if _pairs_rb:
+                    rt  = np.array([x[0] for x in _pairs_rb])
+                    rb  = np.array([x[1] for x in _pairs_rb])    # (N,3) m
+                    rots = [x[2] for x in _pairs_rb]
+                    # 회전 데이터가 있는 경우만 수집
+                    if has_rb_rot and all(r is not None for r in rots):
+                        rb_q = np.array(rots)                     # (N,4) xyzw
+                    # XY 궤적: 얇은 선 + 반투명 마커로 tcp_motive 와 비교
+                    ax_xy.plot(rb[:, 0], rb[:, 1],
+                               color=bv_color, ls=':', lw=1.2, alpha=0.7,
+                               zorder=3, label=f'NatNet RB  b={bv:.2f}')
+                    ax_xy.scatter(rb[::3, 0], rb[::3, 1],  # 3샘플에 1개
+                                  color=bv_color, s=8, alpha=0.5,
+                                  marker='.', zorder=3)
+                    ax_z.plot(rt, rb[:, 2], color=bv_color, ls=':', lw=1.2,
+                              alpha=0.7, label=f'NatNet RB  b={bv:.2f}')
+
+            # ── 엔드이펙터 선속도 ─────────────────────────────────────
+            # 우선순위: NatNet RB > tcp_motive > 로봇 TCP raw
+            if rb is not None and len(rb) >= 5:
+                pos_src, t_src, lv_lbl = rb, rt, 'NatNet RB'
+            elif tc is not None and len(tc) >= 5:
+                pos_src, t_src, lv_lbl = tc, tt, 'FK+HE TCP'
+            else:
+                # 로봇 raw TCP (mm → m)
+                _pairs_raw = [(r['t'], r['tcp'][:3]) for r in recs]
+                t_src = np.array([x[0] for x in _pairs_raw])
+                pos_src = np.array([x[1] for x in _pairs_raw]) / 1000.0
+                lv_lbl = 'Robot TCP'
+
+            if pos_src is not None and len(pos_src) >= 5:
+                lv = np.gradient(pos_src, t_src, axis=0)          # m/s (N,3)
+                lv_s  = np.column_stack([_smooth(lv[:, k]) for k in range(3)])
+                lv_mag = np.linalg.norm(lv_s, axis=1) * 1000.0    # mm/s
+                ax_lv.plot(t_src, lv_mag, color=bv_color, ls=ls, lw=1.4,
+                           label=f'{lv_lbl}  b={bv:.2f}')
+
+            # ── 엔드이펙터 각속도 ─────────────────────────────────────
+            if rb_q is not None and len(rb_q) >= 5:
+                # NatNet 쿼터니언으로 각속도 계산
+                q = rb_q / np.linalg.norm(rb_q, axis=1, keepdims=True)
+                dot = np.clip(np.abs(np.einsum('ij,ij->i', q[:-1], q[1:])), 0, 1)
+                angle_deg = np.degrees(2.0 * np.arccos(dot))       # 연속 프레임 회전량
+                dt_rb = np.diff(rt)
+                omega = np.where(dt_rb > 1e-6, angle_deg / dt_rb, 0.0)  # deg/s
+                omega_s = _smooth(omega, w=7)
+                # 시간축: 중간점
+                t_mid = 0.5 * (rt[:-1] + rt[1:])
+                ax_av.plot(t_mid, omega_s, color=bv_color, ls=ls, lw=1.4,
+                           label=f'NatNet RB  b={bv:.2f}')
+            else:
+                # Fallback: TCP Euler 각도 미분
+                _pairs_e = [(r['t'], r['tcp'][3:6]) for r in recs]
+                t_e  = np.array([x[0] for x in _pairs_e])
+                euler = np.array([x[1] for x in _pairs_e])         # (N,3) deg
+                if len(t_e) >= 5:
+                    av = np.gradient(euler, t_e, axis=0)
+                    av_s = np.column_stack([_smooth(av[:, k]) for k in range(3)])
+                    av_mag = np.linalg.norm(av_s, axis=1)
+                    ax_av.plot(t_e, av_mag, color=bv_color, ls=ls, lw=1.4,
+                               label=f'TCP Euler  b={bv:.2f}')
+
+        # ── ③ 범례 ───────────────────────────────────────────────────
+        leg_kw = dict(fontsize=7, facecolor='white', edgecolor='#ccc',
+                      framealpha=0.85, loc='best')
+
+        # 관절각 범례: 색 = 축, 스타일 = blending
+        handles_j = [
+            Line2D([0],[0], color=J_COLORS[i], lw=2,
+                   label=f'J{i+1}', alpha=0.9)
+            for i in visible_idx
+        ] + [
+            Line2D([0],[0], color='#555', ls=ls, lw=1.3,
+                   label=f'blend={bv:.2f}')
+            for bv, ls in zip(bv_list, bv_ls)
+        ]
+        if handles_j:
+            ax_j.legend(handles=handles_j, ncol=min(len(handles_j), 5),
+                        **leg_kw)
+
+        ax_vel.legend(**leg_kw)
+
+        if has_tcp_m or has_rb:
+            ax_xy.legend(ncol=2, fontsize=6, facecolor='white',
+                         edgecolor='#ccc', framealpha=0.85)
+            ax_z.legend(ncol=2, fontsize=6, facecolor='white',
+                        edgecolor='#ccc', framealpha=0.85)
+            ax_xy.set_aspect('equal', adjustable='datalim')
+        else:
+            for ax, msg in ((ax_xy, 'No HE calib — load calib.json'),
+                            (ax_z,  'No NatNet / HE data')):
+                ax.text(0.5, 0.5, msg, ha='center', va='center',
+                        color='#aaa', fontsize=8, transform=ax.transAxes)
+
+        ax_lv.legend(**leg_kw)
+        ax_av.legend(**leg_kw)
+
+        # sharex → 상단 축 x tick label 숨김
+        ax_j.tick_params(labelbottom=False)
+        ax_vel.tick_params(labelbottom=False)
 
         self._blend_canvas.draw()
 
