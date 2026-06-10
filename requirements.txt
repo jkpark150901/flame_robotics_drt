@@ -5,3 +5,4 @@ pyzmq
 colorlog
 open3d
 vedo
+pyqtdarktheme
