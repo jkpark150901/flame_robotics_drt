@@ -470,11 +470,10 @@ class CsvMocapVerifyWindow(QMainWindow):
 
         R = rel.as_matrix()
         evals, evecs = np.linalg.eig(R)
-        real_mask = np.abs(evals.imag) < 1e-6
-        best = np.argmax(real_mask & (np.abs(evals.real - 1.0) < 1e-6))
+        best = int(np.argmin(np.abs(evals - 1.0)))
         axis = evecs[:, best].real
         axis /= np.linalg.norm(axis) + 1e-12
-        angle_deg = float(np.degrees(np.linalg.norm(rel.as_rotvec())))
+        angle_deg = float(np.degrees(np.max(np.abs(np.angle(evals)))))
 
         res = {
             'rb_idx': idx,
