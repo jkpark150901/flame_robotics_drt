@@ -29,6 +29,7 @@ def fit_cylinder(pcd, input_point, height_limit=0.4, search_radius=0.2):
     """Detect a cylinder near input_point."""
     pcd_tree = o3d.geometry.KDTreeFlann(pcd)
     [k, idx, _] = pcd_tree.search_radius_vector_3d(input_point, search_radius)
+    print(f"  > k = {k}, idx length = {len(idx)}, input_point = {input_point}")
     if k < 10:
         return None
     
@@ -42,6 +43,10 @@ def fit_cylinder(pcd, input_point, height_limit=0.4, search_radius=0.2):
     eigenvalues, eigenvectors = np.linalg.eigh(cov)
     axis_dir = eigenvectors[:, 0]
     
+    print(f'  > cov eigenvectors: {eigenvectors}')
+    print(f"  > Detected axis direction: {axis_dir}")
+
+
     ref_vec = np.array([1, 0, 0]) if abs(axis_dir[0]) < 0.9 else np.array([0, 1, 0])
     u = np.cross(axis_dir, ref_vec)
     u /= np.linalg.norm(u)
@@ -54,10 +59,12 @@ def fit_cylinder(pcd, input_point, height_limit=0.4, search_radius=0.2):
     best_r = 0
     best_center_2d = np.array([0, 0])
     max_inliers = 0
-    
+
     num_iterations = 500
+    iterations_run = 0  # 실제 수행된 RANSAC 반복 횟수
     for _ in range(num_iterations):
         if len(pts_2d) < 3: break
+        iterations_run += 1
         sample_idx = np.random.choice(len(pts_2d), 3, replace=False)
         p1, p2, p3 = pts_2d[sample_idx]
         
@@ -89,13 +96,27 @@ def fit_cylinder(pcd, input_point, height_limit=0.4, search_radius=0.2):
             
     if max_inliers < 10:
         return None
-    
+
     axis_origin = mean_pts + best_center_2d[0]*u + best_center_2d[1]*v
-    
+
+    # 추정된 원기둥 표면과 원본(이웃) 점들 간 평균 거리.
+    # 무한 원기둥 표면까지의 최단 거리 = |축까지의 수직 거리 - 반지름|
+    # (각 점에서 가장 가까운 표면 점까지의 거리와 동일)
+    vecs = points - axis_origin
+    proj_len = vecs @ axis_dir
+    perp = vecs - np.outer(proj_len, axis_dir)
+    dist_to_axis = np.linalg.norm(perp, axis=1)
+    surface_dists = np.abs(dist_to_axis - best_r)
+    mean_dist = float(np.mean(surface_dists))
+
     return {
         "origin": axis_origin,
         "direction": axis_dir,
-        "radius": best_r
+        "radius": best_r,
+        "iterations": iterations_run,
+        "num_neighbors": len(points),
+        "inliers": int(max_inliers),
+        "mean_distance": mean_dist,
     }
 
 def main():
@@ -104,7 +125,9 @@ def main():
     parser.add_argument("--in", dest="input_point_str", type=str, help="Input Point (x,y,z)")
     parser.add_argument("--in_csv", type=str, help="CSV file containing input points (columns: x, y, z)")
     parser.add_argument("--height", type=float, default=0.4, help="Cylinder height (default: 0.4)")
-    
+    parser.add_argument("--search_radius", type=float, default=0.2, help="Search radius for neighborhood (default: 0.2)")
+    parser.add_argument("--scale", type=float, default=1e-3, help="Scale factor for point cloud (default: 1e-3 for mm to m)")
+
     args = parser.parse_args()
     
     if not args.pcd:
@@ -119,6 +142,12 @@ def main():
             sys.exit(1)
         pcd = o3d.io.read_point_cloud(args.pcd)
         
+    if args.scale != 1.0:
+        scale = args.scale  # 사용자 정의 스케일
+        center = np.array([0.0, 0.0, 0.0])  # 원점 기준으로 스케일
+
+        pcd.scale(scale, center=center)
+
     input_points = []
     if args.in_csv:
         if not os.path.exists(args.in_csv):
@@ -156,6 +185,9 @@ def main():
             print(f"    - Origin: {result['origin']}")
             print(f"    - Direction: {result['direction']}")
             print(f"    - Radius: {result['radius']:.6f}")
+            print(f"    - RANSAC Iterations: {result['iterations']}")
+            print(f"    - Inliers / Neighbors: {result['inliers']} / {result['num_neighbors']}")
+            print(f"    - Mean Distance (shape vs pcd): {result['mean_distance']:.6f}")
             
             mesh_cylinder = o3d.geometry.TriangleMesh.create_cylinder(radius=result['radius'], height=args.height)
             color = [0.1, 0.9, 0.1] if len(input_points) == 1 else list(np.random.rand(3))

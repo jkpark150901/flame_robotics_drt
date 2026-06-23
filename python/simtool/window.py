@@ -18,6 +18,8 @@ import pathlib
 import json
 import importlib
 import inspect
+import subprocess
+import threading
 
 from util.logger.console import ConsoleLogger
 from plugins.pluginbase.plannerbase import PlannerBase
@@ -153,6 +155,21 @@ class AppWindow(QMainWindow):
         """Connect UI signals"""
         if hasattr(self, 'btn_load_spool'):
             self.btn_load_spool.clicked.connect(self.__on_btn_load_spool_clicked)
+            if not hasattr(self, 'btn_spool_flip_x'):
+                self.btn_flip_spool_x = QPushButton("Flip X", self.btn_load_spool.parent())
+                self.btn_flip_spool_x.setObjectName("btn_flip_spool_x")
+                geo = self.btn_load_spool.geometry()
+                self.btn_flip_spool_x.setGeometry(geo.x() + geo.width() + 8, geo.y(), 76, geo.height())
+                self.btn_flip_spool_x.clicked.connect(self.__on_btn_flip_spool_x_clicked)
+                self.btn_flip_spool_x.show()
+        if hasattr(self, 'btn_spool_flip_x'):
+            self.btn_spool_flip_x.clicked.connect(self.__on_btn_flip_spool_x_clicked)
+        if hasattr(self, 'btn_spool_position_move'):
+            self.btn_spool_position_move.clicked.connect(self.__on_btn_spool_position_move_clicked)
+        if hasattr(self, 'btn_spool_pose_save'):
+            self.btn_spool_pose_save.clicked.connect(self.__on_btn_spool_pose_save_clicked)
+        if hasattr(self, 'btn_spool_pose_load'):
+            self.btn_spool_pose_load.clicked.connect(self.__on_btn_spool_pose_load_clicked)
         if hasattr(self, 'btn_load_test_weld_point'):
             self.btn_load_test_weld_point.clicked.connect(self.__on_btn_load_test_weld_point_clicked)
         if hasattr(self, 'btn_load_sim_parameters'):
@@ -164,6 +181,330 @@ class AppWindow(QMainWindow):
             self.radio_mode_simulation.toggled.connect(self.__on_radio_mode_toggled)
         if hasattr(self, 'radio_mode_real'):
             self.radio_mode_real.toggled.connect(self.__on_radio_mode_toggled)
+
+        if hasattr(self, 'btn_positioner_x_move'):
+            self.btn_positioner_x_move.clicked.connect(self.__on_btn_positioner_x_move_clicked)
+        if hasattr(self, 'btn_positioner_z_move'):
+            self.btn_positioner_z_move.clicked.connect(self.__on_btn_positioner_z_move_clicked)
+        if hasattr(self, 'btn_positioner_r_move'):
+            self.btn_positioner_r_move.clicked.connect(self.__on_btn_positioner_r_move_clicked)
+        if hasattr(self, 'btn_positioner_clamp_move'):
+            self.btn_positioner_clamp_move.clicked.connect(self.__on_btn_positioner_clamp_move_clicked)
+
+        if hasattr(self, 'btn_mesh_convert'):
+            self.btn_mesh_convert.clicked.connect(self.__on_btn_mesh_convert_clicked)
+        if hasattr(self, 'btn_pcd_sor_filter'):
+            self.btn_pcd_sor_filter.clicked.connect(self.__on_btn_pcd_sor_filter_clicked)
+        if hasattr(self, 'btn_pcd_ccl_filter'):
+            self.btn_pcd_ccl_filter.clicked.connect(self.__on_btn_pcd_ccl_filter_clicked)
+        if hasattr(self, 'btn_pcd_save'):
+            self.btn_pcd_save.clicked.connect(self.__on_btn_pcd_save_clicked)
+
+        # 스풀 고정 체크박스 → 수동 컨트롤 토글 + 뷰어에 fix/unfix(offset 저장) 요청
+        if hasattr(self, 'chk_spool_fix_f_column_r'):
+            self.chk_spool_fix_f_column_r.toggled.connect(self.__on_spool_fix_toggled)
+        if hasattr(self, 'chk_spool_fix_m_column_z'):
+            self.chk_spool_fix_m_column_z.toggled.connect(self.__on_spool_fix_toggled)
+        self.__update_spool_controls_enabled()  # 초기 상태 반영
+
+    def __get_spool_fix_flags(self):
+        fix_f_column_r = (hasattr(self, 'chk_spool_fix_f_column_r') and
+                          self.chk_spool_fix_f_column_r.isChecked())
+        fix_m_column_z = (hasattr(self, 'chk_spool_fix_m_column_z') and
+                          self.chk_spool_fix_m_column_z.isChecked())
+        return fix_f_column_r, fix_m_column_z
+
+    def __spool_move_blocked_by_fix(self):
+        """스풀이 링크에 고정(r 또는 m 중 하나라도)되어 있으면 스풀 수동 이동을 차단."""
+        fix_f, fix_z = self.__get_spool_fix_flags()
+        if fix_f or fix_z:
+            self.__console.warning(
+                "스풀이 링크에 고정되어 있어 스풀 이동이 차단되었습니다. "
+                "(Spool Fixation 체크 해제 필요)")
+            return True
+        return False
+
+    def __on_spool_fix_toggled(self, *args):
+        """고정 체크 변경 시: 컨트롤 잠금 갱신 + 뷰어에 fix/unfix(offset) 요청."""
+        self.__update_spool_controls_enabled()
+        if not self.zapi:
+            return
+        fix_f, fix_z = self.__get_spool_fix_flags()
+        if fix_f or fix_z:
+            self.zapi._ZAPI_request_fix_spool()
+        else:
+            self.zapi._ZAPI_request_unfix_spool()
+
+    def __update_spool_controls_enabled(self, *args):
+        """스풀 고정 시 수동 컨트롤(슬라이더/입력/버튼)을 비활성화."""
+        fix_f, fix_z = self.__get_spool_fix_flags()
+        enabled = not (fix_f or fix_z)
+        widget_names = [
+            'slider_spool_x_pos', 'slider_spool_y_pos', 'slider_spool_z_pos',
+            'slider_spool_x_rot', 'slider_spool_z_rot',
+            'edit_spool_x_pos', 'edit_spool_y_pos', 'edit_spool_z_pos',
+            'edit_spool_x_rot', 'edit_spool_z_rot',
+            'btn_spool_position_move', 'btn_spool_flip_x', 'btn_flip_spool_x',
+        ]
+        for name in widget_names:
+            w = getattr(self, name, None)
+            if w is not None:
+                w.setEnabled(enabled)
+
+    def __on_btn_positioner_x_move_clicked(self):
+        try:
+            pos = float(self.edit_positioner_x_pos.text() or "0")
+            vel = float(self.edit_positioner_x_vel.text() or "0")
+            fix_f, fix_z = self.__get_spool_fix_flags()
+            if self.zapi:
+                self.zapi._ZAPI_request_move_positioner("x", pos, vel, fix_f, fix_z)
+        except (ValueError, AttributeError) as e:
+            self.__console.error(f"Error moving positioner X: {e}")
+
+    def __on_btn_positioner_z_move_clicked(self):
+        try:
+            pos = float(self.edit_positioner_z_pos.text() or "0")
+            vel = float(self.edit_positioner_z_vel.text() or "0")
+            fix_f, fix_z = self.__get_spool_fix_flags()
+            if self.zapi:
+                self.zapi._ZAPI_request_move_positioner("z", pos, vel, fix_f, fix_z)
+        except (ValueError, AttributeError) as e:
+            self.__console.error(f"Error moving positioner Z: {e}")
+
+    def __on_btn_positioner_r_move_clicked(self):
+        try:
+            pos = float(self.edit_positioner_r_pos.text() or "0")
+            vel = float(self.edit_positioner_r_vel.text() or "0")
+            fix_f, fix_z = self.__get_spool_fix_flags()
+            if self.zapi:
+                self.zapi._ZAPI_request_move_positioner("r", pos, vel, fix_f, fix_z)
+        except (ValueError, AttributeError) as e:
+            self.__console.error(f"Error moving positioner R: {e}")
+
+    def __on_btn_positioner_clamp_move_clicked(self):
+        try:
+            pos = float(self.edit_positioner_clamp_pos.text() or "0")
+            vel = float(self.edit_positioner_clamp_vel.text() or "0")
+            fix_f, fix_z = self.__get_spool_fix_flags()
+            if self.zapi:
+                self.zapi._ZAPI_request_move_positioner("clamp", pos, vel, fix_f, fix_z)
+        except (ValueError, AttributeError) as e:
+            self.__console.error(f"Error moving positioner clamp: {e}")
+
+    def __on_btn_spool_position_move_clicked(self):
+        """Handle manual spool position move button click."""
+        try:
+            pose = self.__get_spool_pose_from_ui()
+            self.__request_spool_pose_move(pose)
+        except (ValueError, AttributeError) as e:
+            self.__console.error(f"Error moving spool position: {e}")
+
+    def __get_spool_pose_from_ui(self):
+        return {
+            "x": float(self.edit_spool_x_pos.text() or "0"),
+            "y": float(self.edit_spool_y_pos.text() or "0"),
+            "z": float(self.edit_spool_z_pos.text() or "0"),
+            "x_rotation": float(self.edit_spool_x_rot.text() or "0"),
+            "z_rotation": float(self.edit_spool_z_rot.text() or "0"),
+        }
+
+    def __get_positioner_pose_from_ui(self):
+        return {
+            "x": float(self.edit_positioner_x_pos.text() or "0"),
+            "z": float(self.edit_positioner_z_pos.text() or "0"),
+            "r": float(self.edit_positioner_r_pos.text() or "0"),
+            "clamp": float(self.edit_positioner_clamp_pos.text() or "0"),
+        }
+
+    def __set_positioner_pose_to_ui(self, pose):
+        if not pose:
+            return None
+        positioner = pose.get("positioner", pose)
+        x = float(positioner.get("x", 0.0))
+        z = float(positioner.get("z", 0.0))
+        r = float(positioner.get("r", 0.0))
+        clamp = float(positioner.get("clamp", 0.0))
+        if hasattr(self, '_sim_param_map'):
+            self._sim_param_map.set_positioner_values(x=x, z=z, r=r, clamp=clamp)
+        else:
+            self.edit_positioner_x_pos.setText(f"{x:.3f}")
+            self.edit_positioner_z_pos.setText(f"{z:.3f}")
+            self.edit_positioner_r_pos.setText(f"{r:.3f}")
+            self.edit_positioner_clamp_pos.setText(f"{clamp:.3f}")
+        return {
+            "x": x,
+            "z": z,
+            "r": r,
+            "clamp": clamp,
+        }
+
+    def __set_spool_pose_to_ui(self, pose):
+        x = float(pose.get("x", pose.get("position", [0.0, 0.0, 0.0])[0]))
+        y = float(pose.get("y", pose.get("position", [0.0, 0.0, 0.0])[1]))
+        z = float(pose.get("z", pose.get("position", [0.0, 0.0, 0.0])[2]))
+        x_rotation = float(pose.get("x_rotation", 0.0))
+        z_rotation = float(pose.get("z_rotation", 0.0))
+        if hasattr(self, '_sim_param_map'):
+            self._sim_param_map.set_spool_pose_values(x, y, z, x_rotation, z_rotation)
+        else:
+            self.edit_spool_x_pos.setText(f"{x:.3f}")
+            self.edit_spool_y_pos.setText(f"{y:.3f}")
+            self.edit_spool_z_pos.setText(f"{z:.3f}")
+            self.edit_spool_x_rot.setText(f"{x_rotation:.3f}")
+            self.edit_spool_z_rot.setText(f"{z_rotation:.3f}")
+        return {
+            "x": x,
+            "y": y,
+            "z": z,
+            "x_rotation": x_rotation,
+            "z_rotation": z_rotation,
+        }
+
+    def __request_spool_pose_move(self, pose):
+        if self.__spool_move_blocked_by_fix():
+            return
+        if self.zapi:
+            self.zapi._ZAPI_request_move_spool(
+                pose["x"],
+                pose["y"],
+                pose["z"],
+                pose.get("x_rotation", 0.0),
+                pose.get("z_rotation", 0.0),
+            )
+            self.__console.info(
+                f"Requested to move spool pose: x={pose['x']}, y={pose['y']}, z={pose['z']}, "
+                f"x_rotation={pose.get('x_rotation', 0.0)}, z_rotation={pose.get('z_rotation', 0.0)}")
+        else:
+            self.__console.error("ZAPI instance not available")
+
+    def __request_positioner_pose_move(self, pose):
+        if not pose:
+            return
+        if self.zapi:
+            fix_f, fix_z = self.__get_spool_fix_flags()
+            self.zapi._ZAPI_request_move_positioner("x", pose["x"], 0.0, fix_f, fix_z)
+            self.zapi._ZAPI_request_move_positioner("z", pose["z"], 0.0, fix_f, fix_z)
+            self.zapi._ZAPI_request_move_positioner("r", pose["r"], 0.0, fix_f, fix_z)
+            self.zapi._ZAPI_request_move_positioner("clamp", pose["clamp"], 0.0, fix_f, fix_z)
+            self.__console.info(
+                f"Requested to move positioner pose: x={pose['x']}, z={pose['z']}, "
+                f"r={pose['r']}, clamp={pose['clamp']}")
+        else:
+            self.__console.error("ZAPI instance not available")
+
+    def __get_current_spool_path(self):
+        if hasattr(self, '_current_spool_path') and self._current_spool_path:
+            return pathlib.Path(self._current_spool_path)
+        if hasattr(self, 'cbx_pipe_spool'):
+            current_text = self.cbx_pipe_spool.currentText()
+            if current_text:
+                return pathlib.Path(self.__config.get("root_path", "")) / "sample" / current_text
+        return None
+
+    def __get_spool_pose_path(self, spool_path=None):
+        if spool_path is None:
+            spool_path = self.__get_current_spool_path()
+        if spool_path is None:
+            return None
+        return pathlib.Path(spool_path).with_suffix(".json")
+
+    def __save_spool_pose(self, spool_path=None):
+        pose_path = self.__get_spool_pose_path(spool_path)
+        if pose_path is None:
+            self.__console.warning("Cannot save spool pose: no spool file selected")
+            return
+        pose = self.__get_spool_pose_from_ui()
+        positioner_pose = self.__get_positioner_pose_from_ui()
+        fix_f, fix_z = self.__get_spool_fix_flags()
+        payload = {
+            "spool_file": pathlib.Path(spool_path or self.__get_current_spool_path()).name,
+            "spool": {
+                "x": pose["x"],
+                "y": pose["y"],
+                "z": pose["z"],
+                "x_rotation": pose["x_rotation"],
+                "z_rotation": pose["z_rotation"],
+            },
+            "positioner": {
+                "x": positioner_pose["x"],
+                "z": positioner_pose["z"],
+                "r": positioner_pose["r"],
+                "clamp": positioner_pose["clamp"],
+            },
+            # 고정(강체 부착) 상태와 chuck 기준 offset(R,t)
+            "fixed": bool(fix_f or fix_z),
+            "fix_f_column_r": bool(fix_f),
+            "fix_m_column_z": bool(fix_z),
+            "offset_R": getattr(self, '_spool_offset_R', None),
+            "offset_t": getattr(self, '_spool_offset_t', None),
+            "x": pose["x"],
+            "y": pose["y"],
+            "z": pose["z"],
+            "x_rotation": pose["x_rotation"],
+            "z_rotation": pose["z_rotation"],
+        }
+        with open(pose_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=4)
+        self.__console.info(f"Saved spool pose: {pose_path}")
+
+    def __load_spool_pose(self, spool_path=None, apply_move=False):
+        pose_path = self.__get_spool_pose_path(spool_path)
+        if pose_path is None:
+            self.__console.warning("Cannot load spool pose: no spool file selected")
+            return False
+        if not pose_path.exists():
+            self.__console.info(f"No spool pose file found: {pose_path}")
+            return False
+        with open(pose_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        positioner_pose = self.__set_positioner_pose_to_ui(payload.get("positioner"))
+        pose = self.__set_spool_pose_to_ui(payload.get("spool", payload))
+
+        fixed = bool(payload.get("fixed", False))
+        off_R = payload.get("offset_R")
+        off_t = payload.get("offset_t")
+        # 고정 체크박스 상태 복원 (시그널 차단 → 중복 fix 요청 방지)
+        self.__set_spool_fix_checks(
+            bool(payload.get("fix_f_column_r", fixed)),
+            bool(payload.get("fix_m_column_z", fixed)))
+        self.__console.info(f"Loaded spool pose: {pose_path}")
+
+        if apply_move:
+            # 1) 포지셔너를 먼저 이동 → chuck 위치 확정
+            if positioner_pose:
+                self.__request_positioner_pose_move(positioner_pose)
+            # 2) 고정이면 저장된 offset(R,t) 적용(강체 부착 복원), 아니면 스풀 절대 이동
+            if fixed and off_R is not None and off_t is not None:
+                self._spool_offset_R, self._spool_offset_t = off_R, off_t
+                self._spool_fixed_state = True
+                if self.zapi:
+                    self.zapi._ZAPI_request_set_spool_offset(off_R, off_t)
+            else:
+                self.__request_spool_pose_move(pose)
+        return True
+
+    def __set_spool_fix_checks(self, fix_f, fix_z):
+        """고정 체크박스 상태를 시그널 없이 설정하고 컨트롤 잠금만 갱신."""
+        for name, val in (('chk_spool_fix_f_column_r', fix_f),
+                          ('chk_spool_fix_m_column_z', fix_z)):
+            chk = getattr(self, name, None)
+            if chk is not None:
+                blocked = chk.blockSignals(True)
+                chk.setChecked(bool(val))
+                chk.blockSignals(blocked)
+        self.__update_spool_controls_enabled()
+
+    def __on_btn_spool_pose_save_clicked(self):
+        try:
+            self.__save_spool_pose()
+        except Exception as e:
+            self.__console.error(f"Error saving spool pose: {e}")
+
+    def __on_btn_spool_pose_load_clicked(self):
+        try:
+            self.__load_spool_pose(apply_move=True)
+        except Exception as e:
+            self.__console.error(f"Error loading spool pose: {e}")
 
     def __on_radio_mode_toggled(self, checked=False):
         """Handle execution mode radio button toggle"""
@@ -193,15 +534,30 @@ class AppWindow(QMainWindow):
                 # Resolve full path
                 sample_path = pathlib.Path(self.__config.get("root_path", "")) / "sample" / current_text
                 if sample_path.exists():
+                    self._current_spool_path = sample_path
                     if self.zapi:
                         self.zapi._ZAPI_request_load_spool(str(sample_path.absolute()))
                         self.__console.info(f"Requested to load spool: {current_text}")
+                        self.__load_spool_pose(sample_path, apply_move=True)
                     else:
                         self.__console.error("ZAPI instance not available")
                 else:
                     self.__console.error(f"Spool file not found: {sample_path}")
         except Exception as e:
             self.__console.error(f"Error loading spool: {e}")
+
+    def __on_btn_flip_spool_x_clicked(self):
+        """Handle spool X direction flip button click"""
+        try:
+            if self.__spool_move_blocked_by_fix():
+                return
+            if self.zapi:
+                self.zapi._ZAPI_request_flip_spool_x()
+                self.__console.info("Requested to flip spool X direction")
+            else:
+                self.__console.error("ZAPI instance not available")
+        except Exception as e:
+            self.__console.error(f"Error flipping spool X direction: {e}")
 
     def __on_btn_load_test_weld_point_clicked(self):
         """Handle Load Test Weld Point button click"""
@@ -258,6 +614,18 @@ class AppWindow(QMainWindow):
                 else:
                     self.zapi._ZAPI_request_set_mode("simulation")
 
+            if topic == "update_spool_pose":
+                try:
+                    pose = json.loads(msg)
+                    self.__set_spool_pose_to_ui(pose)
+                    # 저장용으로 offset(R,t)/고정상태 보관
+                    self._spool_fixed_state = bool(pose.get("fixed", False))
+                    self._spool_offset_R = pose.get("offset_R")
+                    self._spool_offset_t = pose.get("offset_t")
+                    self.__console.info(f"Updated spool pose from viewer: {pose}")
+                except json.JSONDecodeError:
+                    pass
+
             if topic == "call":
                 try:
                     payload = json.loads(msg)
@@ -276,6 +644,88 @@ class AppWindow(QMainWindow):
         except Exception as e:
             self.__console.error(f"Error handling message: {e}")
     
+    def __set_proc_status(self, msg):
+        if hasattr(self, 'label_pcd_proc_status'):
+            self.label_pcd_proc_status.setText(msg)
+
+    def __refresh_spool_combo_with_file(self, file_path):
+        if not hasattr(self, 'cbx_pipe_spool'):
+            return
+        sample_path = pathlib.Path(self.__config.get("root_path", "")) / "sample"
+        file_path = pathlib.Path(file_path)
+        if file_path.parent.resolve() != sample_path.resolve():
+            return
+        file_name = file_path.name
+        if self.cbx_pipe_spool.findText(file_name) < 0:
+            self.cbx_pipe_spool.addItem(file_name)
+
+    def __on_btn_pcd_sor_filter_clicked(self):
+        """현재 로드된 스풀에 SOR 노이즈 제거를 직접 적용."""
+        try:
+            if not self.zapi:
+                self.__set_proc_status("[!] ZAPI not available")
+                return
+            neighbors = self.spin_pcd_sor_neighbors.value() if hasattr(self, 'spin_pcd_sor_neighbors') else 20
+            std_ratio = self.spin_pcd_sor_std_ratio.value() if hasattr(self, 'spin_pcd_sor_std_ratio') else 2.0
+            self.zapi._ZAPI_request_filter_spool(
+                "sor", {"neighbors": neighbors, "std_ratio": std_ratio})
+            self.__set_proc_status(f"SOR applied (n={neighbors}, std={std_ratio}) to loaded spool")
+        except Exception as e:
+            self.__console.error(f"Error applying SOR: {e}")
+            self.__set_proc_status(f"[!] {e}")
+
+    def __on_btn_pcd_ccl_filter_clicked(self):
+        """현재 로드된 스풀에 옥트리(복셀) CCL 노이즈 제거를 직접 적용."""
+        try:
+            if not self.zapi:
+                self.__set_proc_status("[!] ZAPI not available")
+                return
+            level = self.spin_pcd_ccl_level.value() if hasattr(self, 'spin_pcd_ccl_level') else 7
+            min_points = self.spin_pcd_ccl_min_points.value() if hasattr(self, 'spin_pcd_ccl_min_points') else 30
+            self.zapi._ZAPI_request_filter_spool(
+                "ccl", {"level": level, "min_points": min_points})
+            self.__set_proc_status(f"CCL applied (lv={level}, min={min_points}) to loaded spool")
+        except Exception as e:
+            self.__console.error(f"Error applying CCL: {e}")
+            self.__set_proc_status(f"[!] {e}")
+
+    def __on_btn_mesh_convert_clicked(self):
+        """현재 로드된 스풀로 메시 재건(Marching Cubes)을 요청."""
+        try:
+            if not self.zapi:
+                self.__set_proc_status("[!] ZAPI not available")
+                return
+            resolution = self.spin_mesh_resolution.value() if hasattr(self, 'spin_mesh_resolution') else 128
+            sigma      = self.spin_mesh_sigma.value()      if hasattr(self, 'spin_mesh_sigma')      else 1.5
+            level      = self.spin_mesh_level.value()      if hasattr(self, 'spin_mesh_level')      else 0.5
+            self.zapi._ZAPI_request_reconstruct_mesh(
+                {"resolution": resolution, "sigma": sigma, "level": level})
+            self.__set_proc_status(f"Mesh reconstruct requested (res={resolution}, sigma={sigma}, lv={level})")
+        except Exception as e:
+            self.__console.error(f"Error requesting mesh reconstruct: {e}")
+            self.__set_proc_status(f"[!] {e}")
+
+    def __on_btn_pcd_save_clicked(self):
+        """현재 결과(필터된 스풀 또는 재건 메시)를 파일로 저장."""
+        try:
+            if not self.zapi:
+                self.__set_proc_status("[!] ZAPI not available")
+                return
+            file_name, _ = QFileDialog.getSaveFileName(
+                self,
+                "Save Result",
+                str(pathlib.Path(self.__config.get("root_path", "")) / "sample"),
+                "Point Cloud / Mesh (*.ply *.pcd *.stl *.obj)"
+            )
+            if not file_name:
+                return
+            self.zapi._ZAPI_request_save_spool(file_name)
+            self.__set_proc_status(f"Save requested -> {pathlib.Path(file_name).name}")
+            self.__refresh_spool_combo_with_file(file_name)
+        except Exception as e:
+            self.__console.error(f"Error saving result: {e}")
+            self.__set_proc_status(f"[!] {e}")
+
     def closeEvent(self, event:QCloseEvent) -> None:
         """ Handle close event """
         try:

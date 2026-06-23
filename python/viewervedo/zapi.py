@@ -237,6 +237,146 @@ class ZAPI(ZAPIBase):
             self.__router_socket.dispatch(reply_parts)
             self.__console.info(f"[ZAPI_VIEWERVEDO] Sent reply for {path}: {success}")
 
+    def update_spool_pose(self, pose: dict, identity=None):
+        """Send latest spool pose to SimTool so saved values match viewer state."""
+        if self.__router_socket and self.__router_socket.is_joined and identity:
+            reply_parts = [
+                identity,
+                self.__router_socket.socket_id.encode('utf-8'),
+                "update_spool_pose".encode('utf-8'),
+                json.dumps(pose).encode('utf-8')
+            ]
+            self.__router_socket.dispatch(reply_parts)
+            self.__console.info(f"[ZAPI_VIEWERVEDO] Sent spool pose update: {pose}")
+
+    def zapi_flip_spool_x(self, kwargs=None):
+        """Handle request to flip the currently loaded spool in X direction."""
+        self.__console.info(f"Received zapi_flip_spool_x with kwargs: {kwargs}")
+        request_payload = {"command": "flip_spool_x"}
+        if self._visualizer:
+            self._visualizer.push_request(request_payload)
+        else:
+            self.push_to_queue(request_payload)
+
+    def zapi_move_spool(self, kwargs=None):
+        """Handle request to move the currently loaded spool to an absolute position."""
+        self.__console.info(f"Received zapi_move_spool with kwargs: {kwargs}")
+        if not kwargs:
+            return
+        request_payload = {
+            "command": "move_spool",
+            "x": kwargs.get("x", 0.0),
+            "y": kwargs.get("y", 0.0),
+            "z": kwargs.get("z", 0.0),
+            "x_rotation": kwargs.get("x_rotation", 0.0),
+            "z_rotation": kwargs.get("z_rotation", 0.0),
+            "_identity": kwargs.get("_identity"),
+        }
+        if self._visualizer:
+            self._visualizer.push_request(request_payload)
+        else:
+            self.push_to_queue(request_payload)
+
+    def zapi_move_positioner(self, kwargs=None):
+        """Handle positioner joint move request."""
+        self.__console.info(f"Received zapi_move_positioner with kwargs: {kwargs}")
+        if not kwargs:
+            return
+        request_payload = {
+            "command": "move_positioner",
+            "axis": kwargs.get("axis"),
+            "position": kwargs.get("position", 0.0),
+            "velocity": kwargs.get("velocity", 0.0),
+            "fix_f_column_r": kwargs.get("fix_f_column_r", False),
+            "fix_m_column_z": kwargs.get("fix_m_column_z", False),
+            "_identity": kwargs.get("_identity"),
+        }
+        if self._visualizer:
+            self._visualizer.push_request(request_payload)
+        else:
+            self.push_to_queue(request_payload)
+
+    def zapi_fix_spool(self, kwargs=None):
+        """Handle fix_spool request (chuck 기준 offset 저장 후 강체 부착)."""
+        self.__console.info(f"Received zapi_fix_spool with kwargs: {kwargs}")
+        payload = {"command": "fix_spool", "_identity": (kwargs or {}).get("_identity")}
+        if self._visualizer:
+            self._visualizer.push_request(payload)
+        else:
+            self.push_to_queue(payload)
+
+    def zapi_unfix_spool(self, kwargs=None):
+        """Handle unfix_spool request (고정 해제)."""
+        self.__console.info(f"Received zapi_unfix_spool with kwargs: {kwargs}")
+        payload = {"command": "unfix_spool", "_identity": (kwargs or {}).get("_identity")}
+        if self._visualizer:
+            self._visualizer.push_request(payload)
+        else:
+            self.push_to_queue(payload)
+
+    def zapi_set_spool_offset(self, kwargs=None):
+        """Handle set_spool_offset request (로드 복원: offset 적용 강체 부착)."""
+        self.__console.info(f"Received zapi_set_spool_offset with kwargs: {kwargs}")
+        if not kwargs:
+            return
+        payload = {
+            "command": "set_spool_offset",
+            "offset_R": kwargs.get("offset_R"),
+            "offset_t": kwargs.get("offset_t"),
+            "_identity": kwargs.get("_identity"),
+        }
+        if self._visualizer:
+            self._visualizer.push_request(payload)
+        else:
+            self.push_to_queue(payload)
+
+    def zapi_filter_spool(self, kwargs=None):
+        """Handle filter_spool request (현재 로드된 스풀에 직접 적용)."""
+        self.__console.info(f"Received zapi_filter_spool with kwargs: {kwargs}")
+        if not kwargs:
+            return
+        request_payload = {
+            "command": "filter_spool",
+            "method": kwargs.get("method"),
+            "params": kwargs.get("params", {}),
+            "_identity": kwargs.get("_identity"),
+        }
+        if self._visualizer:
+            self._visualizer.push_request(request_payload)
+        else:
+            self.push_to_queue(request_payload)
+
+    def zapi_reconstruct_mesh(self, kwargs=None):
+        """Handle reconstruct_mesh request (현재 로드된 스풀로 메시 재건)."""
+        self.__console.info(f"Received zapi_reconstruct_mesh with kwargs: {kwargs}")
+        if not kwargs:
+            return
+        request_payload = {
+            "command": "reconstruct_mesh",
+            "params": kwargs.get("params", {}),
+            "_identity": kwargs.get("_identity"),
+        }
+        if self._visualizer:
+            self._visualizer.push_request(request_payload)
+        else:
+            self.push_to_queue(request_payload)
+
+    def zapi_save_spool(self, kwargs=None):
+        """Handle save_spool request (현재 로드된 스풀/메시 저장)."""
+        self.__console.info(f"Received zapi_save_spool with kwargs: {kwargs}")
+        if not kwargs or "path" not in kwargs:
+            self.__console.warning("[ZAPI_VIEWERVEDO] save_spool without path")
+            return
+        request_payload = {
+            "command": "save_spool",
+            "path": kwargs.get("path"),
+            "_identity": kwargs.get("_identity"),
+        }
+        if self._visualizer:
+            self._visualizer.push_request(request_payload)
+        else:
+            self.push_to_queue(request_payload)
+
     def zapi_load_test_weld_point(self, kwargs=None):
         """Handle load_test_weld_point request."""
         self.__console.info(f"Received zapi_load_test_weld_point with kwargs: {kwargs}")

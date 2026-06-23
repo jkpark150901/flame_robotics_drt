@@ -2,7 +2,22 @@
     "positioner_x_resolution":0.01,
     "positioner_z_resolution":0.01,
     "positioner_r_resolution":0.1,
+    "positioner_clamp_resolution":0.01,
     "positioner_x_range": [0.0, 8.0],
     "positioner_z_range": [0.0, 3.0],
-    "positioner_r_range": [0.0, 360.0]
+    "positioner_r_range": [0.0, 360.0],
+    "positioner_clamp_range": [0.0, 0.9],
+    "spool_x_resolution": 0.01,
+    "spool_y_resolution": 0.01,
+    "spool_z_resolution": 0.01,
+    "spool_x_rotation_resolution": 0.1,
+    "spool_z_rotation_resolution": 0.1,
+    "spool_x_range": [0.0, 10.0],
+    "spool_y_range": [0.0, 5.0],
+    "spool_z_range": [0.0, 5.0],
+    "spool_x_rotation_range": [0.0, 360.0],
+    "spool_z_rotation_range": [0.0, 360.0],
+    "spool_position_default": [7.311, 1.877, 1.213],
+    "spool_x_rotation_default": 0.0,
+    "spool_z_rotation_default": 0.0
 }
