@@ -58,7 +58,7 @@ class VerifyCobotWindow(QMainWindow):
         # blend test
         self._blend_runner:    BlendTestRunner | None = None
         self._blend_results:   dict = {}   # {blending_value: records}
-        self._blend_csv_data:  list | None = None  # [{'joints','speed','accel'}]
+        self._blend_csv_data:  list | None = None  # [{'joints' or 'tcp','speed','accel'}]
 
         ui_path = pathlib.Path(config['app_path']) / config['gui']
         if not ui_path.is_file():
@@ -973,6 +973,7 @@ class VerifyCobotWindow(QMainWindow):
             QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QFormLayout,
             QLabel, QPushButton, QComboBox, QDoubleSpinBox,
             QPlainTextEdit, QProgressBar, QSplitter, QLineEdit,
+            QCheckBox,
         )
         from PyQt6.QtCore import Qt
 
@@ -1031,7 +1032,7 @@ class VerifyCobotWindow(QMainWindow):
 
         self._blend_cbx_mode = QComboBox()
         self._blend_cbx_mode.addItems(['jb2', 'pb', 'lb'])
-        fl.addRow("Mode (delta only):", self._blend_cbx_mode)
+        fl.addRow("Mode:", self._blend_cbx_mode)
 
         self._blend_cbx_blend_opt = QComboBox()
         self._blend_cbx_blend_opt.addItems(['ratio', 'distance'])
@@ -1041,13 +1042,13 @@ class VerifyCobotWindow(QMainWindow):
         self._blend_spin_speed.setRange(1, 500)
         self._blend_spin_speed.setValue(80.0)
         self._blend_spin_speed.setSuffix("  deg/s")
-        fl.addRow("Speed (start/delta):", self._blend_spin_speed)
+        self._blend_spin_speed.setVisible(False)
 
         self._blend_spin_accel = QDoubleSpinBox()
         self._blend_spin_accel.setRange(1, 2000)
         self._blend_spin_accel.setValue(100.0)
         self._blend_spin_accel.setSuffix("  deg/s²")
-        fl.addRow("Accel (start/delta):", self._blend_spin_accel)
+        self._blend_spin_accel.setVisible(False)
 
         self._blend_spin_hz = QDoubleSpinBox()
         self._blend_spin_hz.setRange(5, 200)
@@ -1059,11 +1060,35 @@ class VerifyCobotWindow(QMainWindow):
         self._blend_edit_values.setPlaceholderText("0.0 0.3 0.7 1.0")
         fl.addRow("Blending values:", self._blend_edit_values)
 
+        self._blend_cbx_source = QComboBox()
+        self._blend_cbx_source.addItems(['Both', 'Robot FK/TCP', 'NatNet calibrated'])
+        fl.addRow("EE source:", self._blend_cbx_source)
+
+        self._blend_spin_time_scale = QDoubleSpinBox()
+        self._blend_spin_time_scale.setRange(0.1, 10.0)
+        self._blend_spin_time_scale.setDecimals(2)
+        self._blend_spin_time_scale.setSingleStep(0.1)
+        self._blend_spin_time_scale.setValue(1.0)
+        self._blend_spin_time_scale.setSuffix(" x")
+        fl.addRow("Time scale:", self._blend_spin_time_scale)
+
+        self._blend_chk_waypoints = QCheckBox("Show waypoint index under time axis")
+        self._blend_chk_waypoints.setChecked(True)
+        fl.addRow("", self._blend_chk_waypoints)
+
+        calib_hl = QHBoxLayout()
+        self._blend_lbl_calib = QLabel("Calibration: not loaded")
+        self._blend_lbl_calib.setStyleSheet("color:#888; font-size:10px;")
+        btn_blend_load_calib = QPushButton("Load SVD")
+        btn_blend_load_calib.setFixedWidth(80)
+        calib_hl.addWidget(self._blend_lbl_calib, 1)
+        calib_hl.addWidget(btn_blend_load_calib)
+        fl.addRow("SVD calib:", calib_hl)
+
         left_vl.addWidget(grp_set)
 
         # ③ Joint selection
         _JC = ['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6','#1abc9c']
-        from PyQt6.QtWidgets import QCheckBox
         grp_joints = QGroupBox("Joints")
         joints_hl = QHBoxLayout(grp_joints)
         joints_hl.setSpacing(4)
@@ -1093,10 +1118,13 @@ class VerifyCobotWindow(QMainWindow):
         self.btn_blend_stop.setEnabled(False)
         self.btn_blend_save = QPushButton("Save JSON")
         self.btn_blend_save.setEnabled(False)
+        self.btn_blend_save_csv = QPushButton("Save Plot CSV")
+        self.btn_blend_save_csv.setEnabled(False)
         self.btn_blend_clear = QPushButton("Clear")
         ctrl_hl.addWidget(self.btn_blend_run)
         ctrl_hl.addWidget(self.btn_blend_stop)
         ctrl_hl.addWidget(self.btn_blend_save)
+        ctrl_hl.addWidget(self.btn_blend_save_csv)
         ctrl_hl.addWidget(self.btn_blend_clear)
         ctrl_vl.addLayout(ctrl_hl)
 
@@ -1135,11 +1163,16 @@ class VerifyCobotWindow(QMainWindow):
         self.btn_blend_run.clicked.connect(self._on_blend_run)
         self.btn_blend_stop.clicked.connect(self._on_blend_stop)
         self.btn_blend_save.clicked.connect(self._on_blend_save)
+        self.btn_blend_save_csv.clicked.connect(self._on_blend_save_plot_csv)
         self.btn_blend_clear.clicked.connect(self._on_blend_clear)
         btn_reset_wp.clicked.connect(self._on_blend_reset_wp)
         btn_load_csv.clicked.connect(self._on_blend_load_csv)
         btn_clear_csv.clicked.connect(self._on_blend_clear_csv)
+        btn_blend_load_calib.clicked.connect(self._on_blend_load_calib)
         self._blend_cbx_mode.currentTextChanged.connect(self._on_blend_reset_wp)
+        self._blend_cbx_source.currentTextChanged.connect(self._redraw_blend_plot)
+        self._blend_spin_time_scale.valueChanged.connect(self._redraw_blend_plot)
+        self._blend_chk_waypoints.stateChanged.connect(self._redraw_blend_plot)
 
         self._redraw_blend_plot()
 
@@ -1160,13 +1193,15 @@ class VerifyCobotWindow(QMainWindow):
         self._blend_csv_data = data
         import pathlib
         fname = pathlib.Path(path).name
-        self._blend_lbl_csv.setText(f"{fname}  ({len(data)} waypoints)")
+        kind = 'joint' if 'joints' in data[0] else 'tcp'
+        self._blend_lbl_csv.setText(
+            f"{fname}  ({len(data)} {kind} waypoints)")
         self._blend_lbl_csv.setStyleSheet("color:#4fc3f7; font-size:10px;")
         self._blend_grp_delta.setEnabled(False)
-        self._blend_cbx_mode.setEnabled(False)
+        self._blend_cbx_mode.setEnabled(True)
         self._blend_log.appendPlainText(
-            f"[CSV] {fname} loaded — {len(data)} waypoints, "
-            f"speed={data[0]['speed']:.0f} deg/s")
+            f"[CSV] {fname} loaded — {len(data)} {kind} waypoints, "
+            f"speed={data[0]['speed']:.0f}")
 
     def _on_blend_clear_csv(self):
         self._blend_csv_data = None
@@ -1175,13 +1210,37 @@ class VerifyCobotWindow(QMainWindow):
         self._blend_grp_delta.setEnabled(True)
         self._blend_cbx_mode.setEnabled(True)
 
+    def _on_blend_load_calib(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load Calibration SVD JSON",
+            str(self._config.get('root_path', '.')),
+            "JSON Files (*.json)")
+        if not path:
+            return
+        before = self._calib_result
+        self._load_calibration_json(path)
+        if self._calib_result is not before and hasattr(self, '_blend_lbl_calib'):
+            self._blend_lbl_calib.setText(f"Calibration: {pathlib.Path(path).name}")
+            self._blend_lbl_calib.setStyleSheet("color:#00c853; font-size:10px;")
+            self._redraw_blend_plot()
+
     def _on_blend_run(self):
         robot_ip = self.edit_robot_ip.text().strip()
         if not robot_ip:
-            from PyQt6.QtWidgets import QMessageBox
             QMessageBox.warning(self, "IP 없음", "Robot IP를 입력하세요.")
             return
         if self._blend_runner and self._blend_runner.isRunning():
+            return
+
+        if self._calib_result is None:
+            QMessageBox.warning(
+                self, "Calibration SVD 없음",
+                "Blend Test 실행 전에 왼쪽 Settings의 Load SVD로 calibration_svd.json을 먼저 선택하세요.")
+            return
+        if 'T_base_motive' not in self._calib_result or 'T_rb_tcp' not in self._calib_result:
+            QMessageBox.warning(
+                self, "Calibration SVD 오류",
+                "선택한 calibration JSON에 T_base_motive 또는 T_rb_tcp가 없습니다.")
             return
 
         try:
@@ -1190,18 +1249,21 @@ class VerifyCobotWindow(QMainWindow):
             if not blending_values:
                 raise ValueError("empty")
         except ValueError as e:
-            from PyQt6.QtWidgets import QMessageBox
             QMessageBox.warning(self, "Blending values error", str(e))
             return
 
         use_csv = self._blend_csv_data is not None
         speed   = float(self._blend_spin_speed.value())
         accel   = float(self._blend_spin_accel.value())
+        if use_csv and self._blend_csv_data:
+            speed = float(self._blend_csv_data[0].get('speed', speed))
+            accel = float(self._blend_csv_data[0].get('accel', accel))
 
         if use_csv:
             params = {
                 'robot_ip':        robot_ip,
                 'use_csv':         True,
+                'mode':            self._blend_cbx_mode.currentText(),
                 'waypoint_data':   self._blend_csv_data,
                 'blending_values': blending_values,
                 'speed':           speed,
@@ -1223,7 +1285,6 @@ class VerifyCobotWindow(QMainWindow):
                 if not deltas:
                     raise ValueError("no waypoints")
             except ValueError as e:
-                from PyQt6.QtWidgets import QMessageBox
                 QMessageBox.warning(self, "Waypoints error", str(e))
                 return
 
@@ -1248,7 +1309,17 @@ class VerifyCobotWindow(QMainWindow):
 
         calib = None
         if self._calib_result:
-            calib = {'T_base_motive': self._calib_result['T_base_motive']}
+            import numpy as np
+            calib = {
+                'T_base_motive': self._calib_result['T_base_motive'],
+                'T_rb_tcp': self._calib_result.get('T_rb_tcp', np.eye(4).tolist()),
+            }
+            if hasattr(self, '_blend_lbl_calib'):
+                self._blend_lbl_calib.setText("Calibration: loaded")
+                self._blend_lbl_calib.setStyleSheet("color:#00c853; font-size:10px;")
+        else:
+            self._blend_log.appendPlainText(
+                "[WARN] No calibration loaded. NatNet calibrated curves will be unavailable.")
 
         self._blend_runner = BlendTestRunner(
             params,
@@ -1265,6 +1336,7 @@ class VerifyCobotWindow(QMainWindow):
         self.btn_blend_run.setEnabled(False)
         self.btn_blend_stop.setEnabled(True)
         self.btn_blend_save.setEnabled(False)
+        self.btn_blend_save_csv.setEnabled(False)
         self._blend_lbl_status.setText("Running …")
         self._blend_runner.start()
 
@@ -1288,9 +1360,10 @@ class VerifyCobotWindow(QMainWindow):
         self.btn_blend_run.setEnabled(True)
         self.btn_blend_stop.setEnabled(False)
         self.btn_blend_save.setEnabled(True)
+        self.btn_blend_save_csv.setEnabled(True)
 
         # 편차 요약 (CSV 모드일 때만)
-        if self._blend_csv_data:
+        if self._blend_csv_data and 'joints' in self._blend_csv_data[0]:
             parts = []
             for bv in sorted(all_results):
                 dev = compute_plan_deviation(all_results[bv], self._blend_csv_data)
@@ -1314,6 +1387,8 @@ class VerifyCobotWindow(QMainWindow):
         self._blend_progress.setValue(0)
         self._blend_lbl_status.setText("Ready.")
         self._blend_log.clear()
+        self.btn_blend_save.setEnabled(False)
+        self.btn_blend_save_csv.setEnabled(False)
         self._redraw_blend_plot()
 
     def _on_blend_reset_wp(self):
@@ -1336,22 +1411,223 @@ class VerifyCobotWindow(QMainWindow):
             return
         use_csv = self._blend_csv_data is not None
         payload = {
-            'mode':    'jb2' if use_csv else self._blend_cbx_mode.currentText(),
+            'mode':    self._blend_cbx_mode.currentText(),
             'use_csv': use_csv,
             'results': {str(bv): recs
                         for bv, recs in self._blend_results.items()},
         }
         if use_csv:
             payload['waypoint_data'] = [
-                {'joints': wd['joints'].tolist(),
-                 'speed':  wd['speed'],
-                 'accel':  wd['accel']}
+                {**({'joints': wd['joints'].tolist()} if 'joints' in wd else {}),
+                 **({'tcp': wd['tcp'].tolist()} if 'tcp' in wd else {}),
+                 'speed': wd['speed'],
+                 'accel': wd['accel']}
                 for wd in self._blend_csv_data
             ]
         with open(path, 'w', encoding='utf-8') as f:
             import json as _json
             _json.dump(payload, f)
         self._log(f"Blend results saved → {path}")
+
+    def _on_blend_save_plot_csv(self):
+        if not self._blend_results:
+            return
+        import csv as _csv
+        import datetime
+        from PyQt6.QtWidgets import QFileDialog, QMessageBox
+
+        rows = self._collect_blend_plot_rows()
+        if not rows:
+            QMessageBox.warning(self, "저장할 데이터 없음",
+                                "플롯으로 내보낼 데이터가 없습니다.")
+            return
+        stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        default = str(self._config.get('root_path', '.')) + f'/blend_plot_{stamp}.csv'
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Blend Plot CSV", default, "CSV Files (*.csv)")
+        if not path:
+            return
+        fieldnames = list(rows[0].keys())
+        with open(path, 'w', newline='', encoding='utf-8') as f:
+            writer = _csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+        self._log(f"Blend plot CSV saved → {path}")
+
+    def _collect_blend_plot_rows(self) -> list[dict]:
+        import numpy as np
+
+        if not self._blend_results:
+            return []
+
+        time_scale = (float(self._blend_spin_time_scale.value())
+                      if hasattr(self, '_blend_spin_time_scale') else 1.0)
+        source_mode = (self._blend_cbx_source.currentText()
+                       if hasattr(self, '_blend_cbx_source') else 'Both')
+        show_robot = source_mode in ('Both', 'Robot FK/TCP')
+        show_natnet = source_mode in ('Both', 'NatNet calibrated')
+        selected_joint = 0
+        if hasattr(self, '_blend_joint_chk'):
+            for idx, chk in enumerate(self._blend_joint_chk):
+                if chk.isChecked():
+                    selected_joint = idx
+                    break
+
+        def _smooth(x: np.ndarray, w: int = 5) -> np.ndarray:
+            if len(x) < w:
+                return x
+            return np.convolve(x, np.ones(w) / w, mode='same')
+
+        def _finite(t_src, values):
+            t_src = np.asarray(t_src, dtype=float)
+            values = np.asarray(values, dtype=float)
+            mask = np.isfinite(t_src)
+            if values.ndim == 1:
+                mask &= np.isfinite(values)
+            else:
+                mask &= np.all(np.isfinite(values), axis=1)
+            t_src = t_src[mask]
+            values = values[mask]
+            if len(t_src) > 1:
+                mono = np.concatenate([[True], np.diff(t_src) > 1e-6])
+                t_src = t_src[mono]
+                values = values[mono]
+            return t_src, values
+
+        def _linear_rows(blend, source, t_src, pos_m):
+            t_src, pos_m = _finite(t_src, pos_m)
+            if len(t_src) == 0:
+                return []
+            if len(t_src) >= 5:
+                vel = np.gradient(pos_m, t_src, axis=0)
+                acc = np.gradient(vel, t_src, axis=0)
+                vel = np.column_stack([_smooth(vel[:, k]) for k in range(3)])
+                acc = np.column_stack([_smooth(acc[:, k], 7) for k in range(3)])
+                lin_v = np.linalg.norm(vel, axis=1) * 1000.0
+                lin_a = np.linalg.norm(acc, axis=1) * 1000.0
+            else:
+                lin_v = np.full(len(t_src), np.nan)
+                lin_a = np.full(len(t_src), np.nan)
+            return [{
+                'blend': blend,
+                'source': source,
+                't_s': float(t_src[i]),
+                'x_m': float(pos_m[i, 0]),
+                'y_m': float(pos_m[i, 1]),
+                'z_m': float(pos_m[i, 2]),
+                'lin_vel_mm_s': float(lin_v[i]) if np.isfinite(lin_v[i]) else '',
+                'lin_accel_mm_s2': float(lin_a[i]) if np.isfinite(lin_a[i]) else '',
+                'ang_vel_deg_s': '',
+                'ang_accel_deg_s2': '',
+                f'J{selected_joint + 1}_deg': '',
+            } for i in range(len(t_src))]
+
+        def _robot_ang_rows(blend, t_src, euler_deg):
+            t_src, euler_deg = _finite(t_src, euler_deg)
+            if len(t_src) < 5:
+                return []
+            euler_deg = np.degrees(np.unwrap(np.radians(euler_deg), axis=0))
+            av = np.gradient(euler_deg, t_src, axis=0)
+            aa = np.gradient(av, t_src, axis=0)
+            av = np.column_stack([_smooth(av[:, k]) for k in range(3)])
+            aa = np.column_stack([_smooth(aa[:, k], 7) for k in range(3)])
+            av_mag = np.linalg.norm(av, axis=1)
+            aa_mag = np.linalg.norm(aa, axis=1)
+            return [{
+                'blend': blend,
+                'source': 'Robot FK/TCP angular',
+                't_s': float(t_src[i]),
+                'x_m': '',
+                'y_m': '',
+                'z_m': '',
+                'lin_vel_mm_s': '',
+                'lin_accel_mm_s2': '',
+                'ang_vel_deg_s': float(av_mag[i]),
+                'ang_accel_deg_s2': float(aa_mag[i]),
+                f'J{selected_joint + 1}_deg': '',
+            } for i in range(len(t_src))]
+
+        def _natnet_ang_rows(blend, t_src, quat_xyzw):
+            t_src, quat_xyzw = _finite(t_src, quat_xyzw)
+            if len(t_src) < 5:
+                return []
+            q = quat_xyzw / np.linalg.norm(quat_xyzw, axis=1, keepdims=True)
+            dot = np.clip(np.abs(np.einsum('ij,ij->i', q[:-1], q[1:])), 0, 1)
+            angle_deg = np.degrees(2.0 * np.arccos(dot))
+            dt = np.diff(t_src)
+            omega = np.where(dt > 1e-6, angle_deg / dt, 0.0)
+            t_mid = 0.5 * (t_src[:-1] + t_src[1:])
+            omega = _smooth(omega, w=7)
+            alpha = np.gradient(omega, t_mid) if len(t_mid) >= 5 else np.full(len(t_mid), np.nan)
+            alpha = np.abs(_smooth(alpha, w=7))
+            return [{
+                'blend': blend,
+                'source': 'NatNet calibrated angular',
+                't_s': float(t_mid[i]),
+                'x_m': '',
+                'y_m': '',
+                'z_m': '',
+                'lin_vel_mm_s': '',
+                'lin_accel_mm_s2': '',
+                'ang_vel_deg_s': float(omega[i]),
+                'ang_accel_deg_s2': float(alpha[i]) if np.isfinite(alpha[i]) else '',
+                f'J{selected_joint + 1}_deg': '',
+            } for i in range(len(t_mid))]
+
+        rows: list[dict] = []
+        for bv in sorted(self._blend_results):
+            recs = self._blend_results[bv]
+            if not recs:
+                continue
+            blend_label = f"{bv:.6g}"
+            if show_robot:
+                pairs = [(r['t'] * time_scale, r['tcp'][:3])
+                         for r in recs
+                         if r.get('tcp') is not None and len(r['tcp']) >= 3]
+                if pairs:
+                    t = np.array([p[0] for p in pairs])
+                    pos = np.array([p[1] for p in pairs]) / 1000.0
+                    rows.extend(_linear_rows(blend_label, 'Robot FK/TCP', t, pos))
+                pairs_e = [(r['t'] * time_scale, r['tcp'][3:6])
+                           for r in recs
+                           if r.get('tcp') is not None and len(r['tcp']) >= 6]
+                if pairs_e:
+                    t = np.array([p[0] for p in pairs_e])
+                    e = np.array([p[1] for p in pairs_e])
+                    rows.extend(_robot_ang_rows(blend_label, t, e))
+
+            if show_natnet:
+                pairs = [(r['t'] * time_scale, r.get('rb_tcp_base'), r.get('rb_rot'))
+                         for r in recs
+                         if r.get('rb_tcp_base') is not None]
+                if pairs:
+                    t = np.array([p[0] for p in pairs])
+                    pos = np.array([p[1] for p in pairs])
+                    rows.extend(_linear_rows(blend_label, 'NatNet calibrated', t, pos))
+                    rots = [p[2] for p in pairs]
+                    if all(q is not None for q in rots):
+                        rows.extend(_natnet_ang_rows(
+                            blend_label, t, np.array(rots)))
+
+            joints = [(r['t'] * time_scale, r['joints'][selected_joint])
+                      for r in recs
+                      if r.get('joints') is not None
+                      and len(r['joints']) > selected_joint]
+            for t, q in joints:
+                rows.append({
+                    'blend': blend_label,
+                    'source': 'Joint feedback',
+                    't_s': float(t),
+                    'x_m': '',
+                    'y_m': '',
+                    'z_m': '',
+                    'lin_vel_mm_s': '',
+                    'lin_accel_mm_s2': '',
+                    'ang_vel_deg_s': '',
+                    'ang_accel_deg_s2': '',
+                    f'J{selected_joint + 1}_deg': float(q),
+                })
+        return rows
 
     def _redraw_blend_plot(self):
         import numpy as np
@@ -1409,65 +1685,89 @@ class VerifyCobotWindow(QMainWindow):
 
         # ── 계획 궤적 시간 파라미터화 (CSV 모드) ─────────────────────
         t_plan = jplan = None
+        time_scale = 1.0
+        if hasattr(self, '_blend_spin_time_scale'):
+            time_scale = float(self._blend_spin_time_scale.value())
+
         if use_csv and self._blend_csv_data:
             wd    = self._blend_csv_data
-            jplan = np.array([w['joints'] for w in wd])
-            spds  = np.array([w['speed']  for w in wd])
-            seg_d = np.linalg.norm(np.diff(jplan, axis=0), axis=1)
+            spds  = np.array([w['speed'] for w in wd])
+            if 'joints' in wd[0]:
+                jplan = np.array([w['joints'] for w in wd])
+                plan_values = jplan
+            else:
+                plan_values = np.array([w['tcp'] for w in wd])
+            seg_d = np.linalg.norm(np.diff(plan_values, axis=0), axis=1)
             seg_t = np.where(seg_d > 0.01, seg_d / spds[:-1], 0.0)
             t_plan = np.concatenate([[0.0], np.cumsum(seg_t)])
+            rec_t_max = max(
+                (max((r.get('t', 0.0) for r in recs), default=0.0)
+                 for recs in self._blend_results.values()),
+                default=0.0,
+            )
+            if t_plan[-1] > 1e-6 and rec_t_max > t_plan[-1]:
+                t_plan = t_plan * (rec_t_max / t_plan[-1])
+            t_plan = t_plan * time_scale
 
         # has_ee: 엔드이펙터 데이터 존재 여부
-        first_recs = self._blend_results[bv_list[0]]
-        has_tcp_m   = any(r.get('tcp_motive') is not None for r in first_recs)
-        has_rb      = any(r.get('rb_pos')     is not None for r in first_recs)
-        has_rb_rot  = any(r.get('rb_rot')     is not None for r in first_recs)
+        all_recs = [r for recs in self._blend_results.values() for r in recs]
+        has_tcp_m   = any(r.get('tcp_motive') is not None for r in all_recs)
+        has_tcp_raw = any(r.get('tcp')        is not None for r in all_recs)
+        has_rb      = any(r.get('rb_tcp_base') is not None for r in all_recs)
+        has_rb_rot  = any(r.get('rb_rot')     is not None for r in all_recs)
+        source_mode = (self._blend_cbx_source.currentText()
+                       if hasattr(self, '_blend_cbx_source') else 'Both')
+        show_robot = source_mode in ('Both', 'Robot FK/TCP')
+        show_natnet = source_mode in ('Both', 'NatNet calibrated')
 
-        # ── GridSpec: 5행 ────────────────────────────────────────────
-        # Row 0: 관절각    Row 1: 관절속도    Row 2: 관절가속도
-        # Row 3: EE XY | EE Z vs time
-        # Row 4: EE 선속도 | EE 각속도
-        gs = GridSpec(5, 2,
+        # ── GridSpec: EE 속도/가속도 우선 배치 ────────────────────────
+        # Row 0-3: EE 선속도, 선가속도, 각속도, 각가속도 (크게)
+        # Row 4: EE X/Z position (작게)
+        # Row 5: 선택 joint angle (작게)
+        gs = GridSpec(6, 2,
                       figure=self._blend_fig,
-                      height_ratios=[2.8, 1.5, 1.5, 2.2, 2.2],
-                      hspace=0.60, wspace=0.32,
-                      left=0.08, right=0.97, top=0.96, bottom=0.04)
+                      height_ratios=[2.2, 2.2, 2.2, 2.2, 1.25, 1.35],
+                      hspace=0.72, wspace=0.28,
+                      left=0.08, right=0.97, top=0.96, bottom=0.05)
 
-        ax_j    = self._blend_fig.add_subplot(gs[0, :])
-        ax_vel  = self._blend_fig.add_subplot(gs[1, :], sharex=ax_j)
-        ax_acc  = self._blend_fig.add_subplot(gs[2, :], sharex=ax_j)
-        ax_xy   = self._blend_fig.add_subplot(gs[3, 0])
-        ax_z    = self._blend_fig.add_subplot(gs[3, 1])
-        ax_lv   = self._blend_fig.add_subplot(gs[4, 0])
-        ax_av   = self._blend_fig.add_subplot(gs[4, 1])
+        ax_lv = self._blend_fig.add_subplot(gs[0, :])
+        ax_la = self._blend_fig.add_subplot(gs[1, :], sharex=ax_lv)
+        ax_av = self._blend_fig.add_subplot(gs[2, :], sharex=ax_lv)
+        ax_aa = self._blend_fig.add_subplot(gs[3, :], sharex=ax_lv)
+        ax_x  = self._blend_fig.add_subplot(gs[4, 0], sharex=ax_lv)
+        ax_z  = self._blend_fig.add_subplot(gs[4, 1], sharex=ax_lv)
+        ax_j  = self._blend_fig.add_subplot(gs[5, :], sharex=ax_lv)
 
-        _style(ax_j,   ylabel='Joint angle (deg)')
-        _style(ax_vel, ylabel='Velocity (deg/s)')
-        _style(ax_acc, ylabel='Accel (deg/s²)',  xlabel='Time (s)')
-        _style(ax_xy,  ylabel='Y (m)',            xlabel='X (m)')
-        _style(ax_z,   ylabel='Z (m)',            xlabel='Time (s)')
-        _style(ax_lv,  ylabel='Lin. vel (mm/s)',  xlabel='Time (s)')
-        _style(ax_av,  ylabel='Ang. vel (deg/s)', xlabel='Time (s)')
+        time_label = 'Display time (s)'
+        if abs(time_scale - 1.0) > 1e-6:
+            time_label = f'Display time (s, x{time_scale:.2f})'
+        _style(ax_lv, ylabel='Lin. vel (mm/s)')
+        _style(ax_la, ylabel='Lin. accel (mm/s²)')
+        _style(ax_av, ylabel='Ang. vel (deg/s)')
+        _style(ax_aa, ylabel='Ang. accel (deg/s²)', xlabel=time_label)
+        _style(ax_x,  ylabel='X (m)', xlabel=time_label)
+        _style(ax_z,  ylabel='Z (m)', xlabel=time_label)
+        _style(ax_j,  ylabel='Joint angle (deg)', xlabel=time_label)
 
-        ax_j.set_title('Joint angles vs time', color=TTL, fontsize=9, fontweight='bold')
-        ax_vel.set_title('Joint velocity (L2 norm)', color=TTL, fontsize=8)
-        ax_acc.set_title('Joint acceleration (L2 norm)', color=TTL, fontsize=8)
-        ax_xy.set_title('EE XY — TCP (line) vs NatNet RB (dot)',
-                        color=TTL, fontsize=8)
-        ax_z.set_title('EE Z vs time', color=TTL, fontsize=8)
-        ax_lv.set_title('EE linear velocity', color=TTL, fontsize=8)
-        src = 'NatNet RB' if has_rb_rot else 'TCP Euler'
-        ax_av.set_title(f'EE angular velocity ({src})', color=TTL, fontsize=8)
+        ax_lv.set_title('EE linear velocity',
+                        color=TTL, fontsize=9, fontweight='bold')
+        ax_la.set_title('EE linear acceleration',
+                        color=TTL, fontsize=9, fontweight='bold')
+        ax_av.set_title('EE angular velocity',
+                        color=TTL, fontsize=9, fontweight='bold')
+        ax_aa.set_title('EE angular acceleration',
+                        color=TTL, fontsize=9, fontweight='bold')
+        ax_x.set_title('EE X position', color=TTL, fontsize=8)
+        ax_z.set_title('EE Z position', color=TTL, fontsize=8)
 
         # ── ① 계획 궤적 오버레이 (점선 + 마커) ──────────────────────
+        selected_joint = visible_idx[0] if visible_idx else 0
         if t_plan is not None and jplan is not None:
-            for j_idx in visible_idx:
-                ax_j.plot(t_plan, jplan[:, j_idx], '--',
-                          color=J_COLORS[j_idx], lw=1.0, alpha=0.45,
-                          zorder=2)
-                ax_j.scatter(t_plan, jplan[:, j_idx],
-                             color=J_COLORS[j_idx], s=14, alpha=0.55,
-                             zorder=3)
+            ax_j.plot(t_plan, jplan[:, selected_joint], color='#777777',
+                      ls='--', lw=1.0, alpha=0.55, zorder=2,
+                      label=f'Plan J{selected_joint + 1}')
+            ax_j.scatter(t_plan, jplan[:, selected_joint],
+                         color='#777777', s=12, alpha=0.45, zorder=3)
 
         # ── ② 실제 데이터 ─────────────────────────────────────────
         def _smooth(x: np.ndarray, w: int = 5) -> np.ndarray:
@@ -1498,12 +1798,80 @@ class VerifyCobotWindow(QMainWindow):
                 t_out, d_out = t_c, d_c
             return t_out, d_out
 
-        for bv, bv_color, ls in zip(bv_list, bv_colors, bv_ls):
+        def _finite_xy(t_src, values):
+            if t_src is None or values is None:
+                return None, None
+            t_src = np.asarray(t_src, dtype=float)
+            values = np.asarray(values, dtype=float)
+            mask = np.isfinite(t_src)
+            if values.ndim == 1:
+                mask &= np.isfinite(values)
+            else:
+                mask &= np.all(np.isfinite(values), axis=1)
+            t_src = t_src[mask]
+            values = values[mask]
+            if len(t_src) > 1:
+                mono = np.concatenate([[True], np.diff(t_src) > 1e-6])
+                t_src = t_src[mono]
+                values = values[mono]
+            return t_src, values
+
+        def _plot_linear_kinematics(t_src, pos_src, color, ls, label):
+            t_src, pos_src = _finite_xy(t_src, pos_src)
+            if t_src is None or len(t_src) < 5:
+                return
+            vel = np.gradient(pos_src, t_src, axis=0)
+            acc = np.gradient(vel, t_src, axis=0)
+            vel_s = np.column_stack([_smooth(vel[:, k]) for k in range(3)])
+            acc_s = np.column_stack([_smooth(acc[:, k], 7) for k in range(3)])
+            vel_mag = np.linalg.norm(vel_s, axis=1) * 1000.0
+            acc_mag = np.linalg.norm(acc_s, axis=1) * 1000.0
+            ax_lv.plot(t_src, vel_mag, color=color, ls=ls, lw=1.45,
+                       label=label)
+            ax_la.plot(t_src, acc_mag, color=color, ls=ls, lw=1.45,
+                       label=label)
+
+        def _plot_robot_angular(t_src, euler_deg, color, ls, label):
+            t_src, euler_deg = _finite_xy(t_src, euler_deg)
+            if t_src is None or len(t_src) < 5:
+                return
+            euler_deg = np.degrees(np.unwrap(np.radians(euler_deg), axis=0))
+            av = np.gradient(euler_deg, t_src, axis=0)
+            aa = np.gradient(av, t_src, axis=0)
+            av_s = np.column_stack([_smooth(av[:, k]) for k in range(3)])
+            aa_s = np.column_stack([_smooth(aa[:, k], 7) for k in range(3)])
+            ax_av.plot(t_src, np.linalg.norm(av_s, axis=1),
+                       color=color, ls=ls, lw=1.45, label=label)
+            ax_aa.plot(t_src, np.linalg.norm(aa_s, axis=1),
+                       color=color, ls=ls, lw=1.45, label=label)
+
+        def _plot_natnet_angular(t_src, quat_xyzw, color, ls, label):
+            t_src, quat_xyzw = _finite_xy(t_src, quat_xyzw)
+            if t_src is None or len(t_src) < 5:
+                return
+            q = quat_xyzw / np.linalg.norm(quat_xyzw, axis=1, keepdims=True)
+            dot = np.clip(np.abs(np.einsum('ij,ij->i', q[:-1], q[1:])), 0, 1)
+            angle_deg = np.degrees(2.0 * np.arccos(dot))
+            dt = np.diff(t_src)
+            omega = np.where(dt > 1e-6, angle_deg / dt, 0.0)
+            t_mid = 0.5 * (t_src[:-1] + t_src[1:])
+            omega_s = _smooth(omega, w=7)
+            ax_av.plot(t_mid, omega_s, color=color, ls=ls, lw=1.45,
+                       label=label)
+            if len(t_mid) >= 5:
+                alpha = np.gradient(omega_s, t_mid)
+                ax_aa.plot(t_mid, np.abs(_smooth(alpha, w=7)),
+                           color=color, ls=ls, lw=1.45, label=label)
+
+        for bv_i, bv in enumerate(bv_list):
+            bv_color = bv_colors[bv_i]
+            robot_ls = '-'
+            natnet_ls = '--'
             recs = self._blend_results[bv]
             if not recs:
                 continue
 
-            t_raw = np.array([r['t'] for r in recs])
+            t_raw = np.array([r['t'] for r in recs]) * time_scale
             j_raw = np.array([r['joints'] for r in recs])  # (N, 6)
 
             t, j = _clean(t_raw, j_raw)
@@ -1511,147 +1879,120 @@ class VerifyCobotWindow(QMainWindow):
             if np.sum(~np.isnan(t)) < 2:
                 continue
 
-            # 관절각 (선택된 축만)
-            for j_idx in visible_idx:
-                ax_j.plot(t, j[:, j_idx],
-                          color=J_COLORS[j_idx], ls=ls, lw=1.4,
-                          alpha=0.9, zorder=4)
+            # 선택 joint 하나만 표시한다. 색은 joint가 아니라 blend를 의미한다.
+            ax_j.plot(t, j[:, selected_joint],
+                      color=bv_color, ls='-', lw=1.5,
+                      alpha=0.95, zorder=4, label=f'blend={bv:.2f}')
 
-            # 속도·가속도 (NaN 구간 제외 후 수치 미분)
-            t_valid = t[~np.isnan(t)]
-            j_valid = j[~np.isnan(t)]
-            if len(t_valid) >= 5 and visible_idx:
-                j_sel  = j_valid[:, visible_idx]
-                vel    = np.gradient(j_sel, t_valid, axis=0)
-                acc    = np.gradient(vel,   t_valid, axis=0)
-                vel_s  = np.column_stack([_smooth(vel[:, k])    for k in range(len(visible_idx))])
-                acc_s  = np.column_stack([_smooth(acc[:, k], 7) for k in range(len(visible_idx))])
-                vel_mag = np.linalg.norm(vel_s, axis=1)
-                acc_mag = np.linalg.norm(acc_s, axis=1)
-                ax_vel.plot(t_valid, vel_mag, color=bv_color, ls=ls, lw=1.4,
-                            label=f'blend={bv:.2f}')
-                ax_acc.plot(t_valid, acc_mag, color=bv_color, ls=ls, lw=1.4)
-
-            # ── 엔드이펙터 ───────────────────────────────────────────
-            # tcp_motive: FK + HE 변환 위치 (실선)
             tc = tt = None
-            if has_tcp_m:
-                _pairs = [(r['t'], r['tcp_motive']) for r in recs
-                          if r.get('tcp_motive') is not None]
-                if _pairs:
-                    tt = np.array([x[0] for x in _pairs])
-                    tc = np.array([x[1] for x in _pairs])  # (N,3) m
-                    ax_xy.plot(tc[:, 0], tc[:, 1], color=bv_color,
-                               ls=ls, lw=1.8, zorder=4,
-                               label=f'FK+HE  b={bv:.2f}')
-                    ax_z.plot(tt, tc[:, 2], color=bv_color, ls=ls, lw=1.5,
-                              label=f'FK+HE  b={bv:.2f}')
+            _pairs_tcp = [(r['t'], r['tcp'][:3]) for r in recs
+                          if r.get('tcp') is not None and len(r['tcp']) >= 3]
+            if _pairs_tcp:
+                tt = np.array([x[0] for x in _pairs_tcp]) * time_scale
+                tc = np.array([x[1] for x in _pairs_tcp]) / 1000.0
 
-            # NatNet RB: 점 + 선으로 함께 표시
+            if show_robot and tc is not None and tt is not None:
+                robot_label = f'Robot FK/TCP  b={bv:.2f}'
+                ax_x.plot(tt, tc[:, 0], color=bv_color,
+                          ls=robot_ls, lw=1.35, label=robot_label)
+                ax_z.plot(tt, tc[:, 2], color=bv_color,
+                          ls=robot_ls, lw=1.35, label=robot_label)
+                _plot_linear_kinematics(tt, tc, bv_color, robot_ls, robot_label)
+
             rb = rt = rb_q = None
             if has_rb:
-                _pairs_rb = [(r['t'], r['rb_pos'], r.get('rb_rot'))
-                             for r in recs if r.get('rb_pos') is not None]
+                _pairs_rb = [(r['t'], r.get('rb_tcp_base'), r.get('rb_rot'))
+                             for r in recs if r.get('rb_tcp_base') is not None]
                 if _pairs_rb:
-                    rt  = np.array([x[0] for x in _pairs_rb])
-                    rb  = np.array([x[1] for x in _pairs_rb])    # (N,3) m
+                    rt  = np.array([x[0] for x in _pairs_rb]) * time_scale
+                    rb  = np.array([x[1] for x in _pairs_rb])    # calibrated TCP or raw RB
                     rots = [x[2] for x in _pairs_rb]
                     # 회전 데이터가 있는 경우만 수집
                     if has_rb_rot and all(r is not None for r in rots):
                         rb_q = np.array(rots)                     # (N,4) xyzw
-                    # XY 궤적: 얇은 선 + 반투명 마커로 tcp_motive 와 비교
-                    ax_xy.plot(rb[:, 0], rb[:, 1],
-                               color=bv_color, ls=':', lw=1.2, alpha=0.7,
-                               zorder=3, label=f'NatNet RB  b={bv:.2f}')
-                    ax_xy.scatter(rb[::3, 0], rb[::3, 1],  # 3샘플에 1개
-                                  color=bv_color, s=8, alpha=0.5,
-                                  marker='.', zorder=3)
-                    ax_z.plot(rt, rb[:, 2], color=bv_color, ls=':', lw=1.2,
-                              alpha=0.7, label=f'NatNet RB  b={bv:.2f}')
+                    if show_natnet:
+                        natnet_label = f'NatNet calibrated  b={bv:.2f}'
+                        ax_x.plot(rt, rb[:, 0], color=bv_color,
+                                  ls=natnet_ls, lw=1.35, label=natnet_label)
+                        ax_z.plot(rt, rb[:, 2], color=bv_color,
+                                  ls=natnet_ls, lw=1.35, label=natnet_label)
+                        _plot_linear_kinematics(rt, rb, bv_color,
+                                                natnet_ls, natnet_label)
 
-            # ── 엔드이펙터 선속도 ─────────────────────────────────────
-            # 우선순위: NatNet RB > tcp_motive > 로봇 TCP raw
-            if rb is not None and len(rb) >= 5:
-                pos_src, t_src, lv_lbl = rb, rt, 'NatNet RB'
-            elif tc is not None and len(tc) >= 5:
-                pos_src, t_src, lv_lbl = tc, tt, 'FK+HE TCP'
-            else:
-                # 로봇 raw TCP (mm → m)
-                _pairs_raw = [(r['t'], r['tcp'][:3]) for r in recs]
-                t_src = np.array([x[0] for x in _pairs_raw])
-                pos_src = np.array([x[1] for x in _pairs_raw]) / 1000.0
-                lv_lbl = 'Robot TCP'
+            # ── 엔드이펙터 각속도 / 각가속도 ───────────────────────────
+            _pairs_e = [(r['t'], r['tcp'][3:6]) for r in recs
+                        if r.get('tcp') is not None and len(r['tcp']) >= 6]
+            if show_robot and _pairs_e:
+                t_e = np.array([x[0] for x in _pairs_e]) * time_scale
+                euler = np.array([x[1] for x in _pairs_e])
+                _plot_robot_angular(t_e, euler, bv_color, robot_ls,
+                                    f'Robot TCP Euler  b={bv:.2f}')
 
-            if pos_src is not None and len(pos_src) >= 5:
-                lv = np.gradient(pos_src, t_src, axis=0)          # m/s (N,3)
-                lv_s  = np.column_stack([_smooth(lv[:, k]) for k in range(3)])
-                lv_mag = np.linalg.norm(lv_s, axis=1) * 1000.0    # mm/s
-                ax_lv.plot(t_src, lv_mag, color=bv_color, ls=ls, lw=1.4,
-                           label=f'{lv_lbl}  b={bv:.2f}')
-
-            # ── 엔드이펙터 각속도 ─────────────────────────────────────
-            if rb_q is not None and len(rb_q) >= 5:
-                # NatNet 쿼터니언으로 각속도 계산
-                q = rb_q / np.linalg.norm(rb_q, axis=1, keepdims=True)
-                dot = np.clip(np.abs(np.einsum('ij,ij->i', q[:-1], q[1:])), 0, 1)
-                angle_deg = np.degrees(2.0 * np.arccos(dot))       # 연속 프레임 회전량
-                dt_rb = np.diff(rt)
-                omega = np.where(dt_rb > 1e-6, angle_deg / dt_rb, 0.0)  # deg/s
-                omega_s = _smooth(omega, w=7)
-                # 시간축: 중간점
-                t_mid = 0.5 * (rt[:-1] + rt[1:])
-                ax_av.plot(t_mid, omega_s, color=bv_color, ls=ls, lw=1.4,
-                           label=f'NatNet RB  b={bv:.2f}')
-            else:
-                # Fallback: TCP Euler 각도 미분
-                _pairs_e = [(r['t'], r['tcp'][3:6]) for r in recs]
-                t_e  = np.array([x[0] for x in _pairs_e])
-                euler = np.array([x[1] for x in _pairs_e])         # (N,3) deg
-                if len(t_e) >= 5:
-                    av = np.gradient(euler, t_e, axis=0)
-                    av_s = np.column_stack([_smooth(av[:, k]) for k in range(3)])
-                    av_mag = np.linalg.norm(av_s, axis=1)
-                    ax_av.plot(t_e, av_mag, color=bv_color, ls=ls, lw=1.4,
-                               label=f'TCP Euler  b={bv:.2f}')
+            if show_natnet:
+                _plot_natnet_angular(rt, rb_q, bv_color, natnet_ls,
+                                     f'NatNet RB  b={bv:.2f}')
 
         # ── ③ 범례 ───────────────────────────────────────────────────
         leg_kw = dict(fontsize=7, facecolor='white', edgecolor='#ccc',
                       framealpha=0.85, loc='best')
 
-        # 관절각 범례: 색 = 축, 스타일 = blending
-        handles_j = [
-            Line2D([0],[0], color=J_COLORS[i], lw=2,
-                   label=f'J{i+1}', alpha=0.9)
-            for i in visible_idx
-        ] + [
-            Line2D([0],[0], color='#555', ls=ls, lw=1.3,
+        # 범례: 색=blending, 선스타일=source.
+        blend_color_handles = [
+            Line2D([0], [0], color=bv_colors[bv_i], lw=1.8,
                    label=f'blend={bv:.2f}')
-            for bv, ls in zip(bv_list, bv_ls)
+            for bv_i, bv in enumerate(bv_list)
         ]
-        if handles_j:
-            ax_j.legend(handles=handles_j, ncol=min(len(handles_j), 5),
-                        **leg_kw)
+        source_style_handles = []
+        if show_robot:
+            source_style_handles.append(
+                Line2D([0], [0], color='#555', ls='-', lw=1.4,
+                       label='Robot FK/TCP'))
+        if show_natnet:
+            source_style_handles.append(
+                Line2D([0], [0], color='#555', ls='--', lw=1.4,
+                       label='NatNet calibrated'))
+        joint_handles = [
+            Line2D([0], [0], color=bv_colors[bv_i], lw=1.8,
+                   label=f'blend={bv:.2f}')
+            for bv_i, bv in enumerate(bv_list)
+        ]
+        if t_plan is not None and jplan is not None:
+            joint_handles.insert(0, Line2D([0], [0], color='#777777',
+                                           ls='--', lw=1.2,
+                                           label=f'Plan J{selected_joint + 1}'))
+        ax_j.set_title(f'Joint J{selected_joint + 1} angle vs time',
+                       color=TTL, fontsize=8)
+        ax_j.legend(handles=joint_handles, ncol=min(len(joint_handles), 5),
+                    **leg_kw)
 
-        ax_vel.legend(**leg_kw)
-
-        if has_tcp_m or has_rb:
-            ax_xy.legend(ncol=2, fontsize=6, facecolor='white',
-                         edgecolor='#ccc', framealpha=0.85)
-            ax_z.legend(ncol=2, fontsize=6, facecolor='white',
-                        edgecolor='#ccc', framealpha=0.85)
-            ax_xy.set_aspect('equal', adjustable='datalim')
+        if has_tcp_m or has_tcp_raw or has_rb:
+            ee_handles = blend_color_handles + source_style_handles
+            for ax in (ax_lv, ax_la, ax_av, ax_aa, ax_x, ax_z):
+                ax.legend(handles=ee_handles, ncol=min(len(ee_handles), 5),
+                          fontsize=6, facecolor='white', edgecolor='#ccc',
+                          framealpha=0.85, loc='best')
         else:
-            for ax, msg in ((ax_xy, 'No HE calib — load calib.json'),
-                            (ax_z,  'No NatNet / HE data')):
+            for ax, msg in ((ax_x, 'No robot / NatNet position data'),
+                            (ax_z, 'No robot / NatNet position data')):
                 ax.text(0.5, 0.5, msg, ha='center', va='center',
                         color='#aaa', fontsize=8, transform=ax.transAxes)
 
-        ax_lv.legend(**leg_kw)
-        ax_av.legend(**leg_kw)
-
         # sharex → 상단 축 x tick label 숨김
-        ax_j.tick_params(labelbottom=False)
-        ax_vel.tick_params(labelbottom=False)
+        for ax in (ax_lv, ax_la, ax_av):
+            ax.tick_params(labelbottom=False)
+
+        show_wp = (hasattr(self, '_blend_chk_waypoints')
+                   and self._blend_chk_waypoints.isChecked()
+                   and t_plan is not None
+                   and len(t_plan) > 0)
+        if show_wp:
+            wp_axis = ax_j.secondary_xaxis('bottom')
+            wp_axis.spines['bottom'].set_position(('outward', 34))
+            wp_axis.set_xticks(t_plan)
+            wp_axis.set_xticklabels([str(i + 1) for i in range(len(t_plan))],
+                                    fontsize=7)
+            wp_axis.set_xlabel('Waypoint index', fontsize=8, color=LBL)
+            wp_axis.tick_params(colors=TC, labelsize=7, pad=1)
 
         self._blend_canvas.draw()
 

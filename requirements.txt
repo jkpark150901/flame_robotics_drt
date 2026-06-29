@@ -1,6 +1,7 @@
 pyqt6
 numpy
 scipy
+scikit-image
 pyzmq
 colorlog
 open3d
