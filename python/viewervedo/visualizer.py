@@ -253,28 +253,13 @@ class Visualizer:
         return center + rotated
 
     def _get_spool_pose_payload(self):
-        if getattr(self, '_spool_fixed', False):
-            # 고정 시 UI 포즈는 0 (offset이 배치를 담음)
-            payload = {
-                "x": 0.0, "y": 0.0, "z": 0.0,
-                "x_rotation": 0.0, "z_rotation": 0.0,
-                "fixed": True,
-            }
-        else:
-            pos = np.array(getattr(self, '_spool_manual_pos', [0.0, 0.0, 0.0]), dtype=float)
-            payload = {
-                "x": float(pos[0]),
-                "y": float(pos[1]),
-                "z": float(pos[2]),
-                "x_rotation": float(getattr(self, '_spool_manual_x_rot_deg', 0.0)),
-                "z_rotation": float(getattr(self, '_spool_manual_z_rot_deg', 0.0)),
-                "fixed": False,
-            }
-        off = getattr(self, '_spool_offset_T', None)
-        if off is not None:
-            payload["offset_R"] = off[:3, :3].tolist()
-            payload["offset_t"] = off[:3, 3].tolist()
-        return payload
+        # 스풀 포즈 = chuck 기준 오프셋 (포지셔너가 움직여도 값은 그대로)
+        x, y, z = getattr(self, '_spool_offset_xyz', (0.0, 0.0, 0.0))
+        return {
+            "x": float(x), "y": float(y), "z": float(z),
+            "x_rotation": float(getattr(self, '_spool_offset_xrot', 0.0)),
+            "z_rotation": float(getattr(self, '_spool_offset_zrot', 0.0)),
+        }
 
     def _send_spool_pose_update(self, identity=None):
         if hasattr(self, 'zapi') and self.zapi and identity:
@@ -306,9 +291,15 @@ class Visualizer:
             self.plotter.remove(recon)
             self._spool_recon_mesh = None
             self._spool_recon_mesh_o3d = None
-        new_actor = vedo.Points(np.asarray(new_pts, dtype=np.float64))
+        new_pts = np.asarray(new_pts, dtype=np.float64)
+        new_actor = vedo.Points(new_pts)
         self.plotter.add(new_actor)
         self._loaded_spool_mesh = new_actor
+        # 오프셋 모델 일관성: world 점을 현재 chuck@offset 기준 local로 환산
+        Tc = self._chuck_world_T()
+        if Tc is not None and getattr(self, '_spool_local_verts', None) is not None:
+            Tinv = np.linalg.inv(Tc @ self._spool_offset_T())
+            self._spool_local_verts = (Tinv[:3, :3] @ new_pts.T).T + Tinv[:3, 3]
         self.plotter.render()
 
     def _filter_loaded_spool(self, request_data):
@@ -371,14 +362,30 @@ class Visualizer:
                 self.__console.warning("reconstruct_mesh: 빈 메시")
                 return
             vmesh = vedo.Mesh([verts, faces]).c("gray")
-            old = getattr(self, '_spool_recon_mesh', None)
-            if old is not None:
-                self.plotter.remove(old)
+
+            # 기존 pcd 스풀 + 이전 재건 메시 제거
+            old_pcd = getattr(self, '_loaded_spool_mesh', None)
+            if old_pcd is not None:
+                self.plotter.remove(old_pcd)
+            old_recon = getattr(self, '_spool_recon_mesh', None)
+            if old_recon is not None and old_recon is not old_pcd:
+                self.plotter.remove(old_recon)
+
             self.plotter.add(vmesh)
+            # 재건 메시를 새 스풀로 삼아 오프셋 모델에 연결 → 포지셔너 추종(같이 이동)
+            self._loaded_spool_mesh = vmesh
             self._spool_recon_mesh = vmesh
-            self._spool_recon_mesh_o3d = mesh_o3d  # 저장용 원본 보관
+            self._spool_recon_mesh_o3d = mesh_o3d  # 저장용 (면 정보)
+            T = self._spool_world_T if getattr(self, '_spool_world_T', None) is not None else np.eye(4)
+            Tinv = np.linalg.inv(T)
+            # verts(월드) → local 로 환산해 world = T @ local 유지 (현재 위치 보존 + 추종 가능)
+            self._spool_local_verts = (Tinv[:3, :3] @ verts.T).T + Tinv[:3, 3]
+            self._spool_world_T = T
+            Tc = self._chuck_world_T()
+            if Tc is not None:
+                self._chuck_prev_T = Tc
             self.plotter.render()
-            self.__console.info(f"reconstruct_mesh: 정점 {len(verts)}, 면 {len(faces)}")
+            self.__console.info(f"reconstruct_mesh: 정점 {len(verts)}, 면 {len(faces)} (pcd 제거, 메시가 스풀로 전환)")
         except Exception as e:
             self.__console.error(f"reconstruct_mesh 실패: {e}")
 
@@ -389,8 +396,14 @@ class Visualizer:
             return
         try:
             recon_o3d = getattr(self, '_spool_recon_mesh_o3d', None)
-            if getattr(self, '_spool_recon_mesh', None) is not None and recon_o3d is not None:
-                _o3d.io.write_triangle_mesh(path, recon_o3d)
+            recon = getattr(self, '_spool_recon_mesh', None)
+            if recon is not None and recon_o3d is not None:
+                # 현재(추종 반영된) 메시 정점으로 갱신해 저장 (면 정보는 유지)
+                m = _o3d.geometry.TriangleMesh()
+                m.vertices = _o3d.utility.Vector3dVector(np.asarray(recon.vertices))
+                m.triangles = recon_o3d.triangles
+                m.compute_vertex_normals()
+                _o3d.io.write_triangle_mesh(path, m)
                 self.__console.info(f"save_spool: 메시 저장 {path}")
             else:
                 pts = self._get_spool_points()
@@ -424,6 +437,24 @@ class Visualizer:
         T = np.eye(4); T[:3, 3] = np.asarray(v, dtype=float)
         return T
 
+    @staticmethod
+    def _rot_about_axis(axis, center, deg):
+        """center를 지나는 axis 둘레로 deg도 회전하는 4x4 (월드)."""
+        axis = np.asarray(axis, dtype=float)
+        n = np.linalg.norm(axis)
+        if n < 1e-9:
+            return np.eye(4)
+        x, y, z = axis / n
+        th = np.deg2rad(deg); c, s = np.cos(th), np.sin(th); C = 1 - c
+        R = np.array([
+            [c + x*x*C,   x*y*C - z*s, x*z*C + y*s],
+            [y*x*C + z*s, c + y*y*C,   y*z*C - x*s],
+            [z*x*C - y*s, z*y*C + x*s, c + z*z*C],
+        ])
+        center = np.asarray(center, dtype=float)
+        T = np.eye(4); T[:3, :3] = R; T[:3, 3] = center - R @ center
+        return T
+
     def _chuck_world_T(self):
         """column m chuck joint(m_column_passive_r) 링크의 4x4 월드 변환."""
         for model in getattr(self, '_robot_models', []):
@@ -433,71 +464,39 @@ class Visualizer:
                     return np.asarray(T, dtype=float)
         return None
 
-    def _render_spool_world_T(self):
-        """_spool_world_T 와 _spool_local_verts 로 스풀 actor 정점을 절대 갱신."""
+    def _spool_offset_T(self):
+        """UI(=chuck 기준) 오프셋 포즈를 4x4 변환으로. spool_world = T_chuck @ T_offset @ local"""
+        x, y, z = getattr(self, '_spool_offset_xyz', (0.0, 0.0, 0.0))
+        xrot = getattr(self, '_spool_offset_xrot', 0.0)
+        zrot = getattr(self, '_spool_offset_zrot', 0.0)
+        return self._transl([x, y, z]) @ self._rotz(zrot) @ self._rotx(xrot)
+
+    def _apply_spool_world_T(self):
+        """현재 _spool_world_T 로 스풀 actor 정점 갱신 (world = T @ local)."""
         local = getattr(self, '_spool_local_verts', None)
         spool = getattr(self, '_loaded_spool_mesh', None)
         T = getattr(self, '_spool_world_T', None)
         if local is None or spool is None or T is None:
             return False
-        actors = spool if isinstance(spool, (list, tuple)) else [spool]
-        if not actors:
-            return False
         world = (T[:3, :3] @ local.T).T + T[:3, 3]
-        a = actors[0]
-        if hasattr(a, 'vertices'):
-            a.vertices = world
+        actors = spool if isinstance(spool, (list, tuple)) else [spool]
+        if actors and hasattr(actors[0], 'vertices'):
+            actors[0].vertices = world
             return True
         return False
 
-    def _fix_spool(self, request_data=None):
-        """현재 chuck 기준 스풀 offset(R,t)을 저장하고 강체 부착(고정)한다.
-        고정 시 UI 포즈는 0으로 초기화되며 이후 포지셔너 이동에 따라 절대 재계산된다.
-        """
-        if getattr(self, '_spool_local_verts', None) is None or getattr(self, '_spool_world_T', None) is None:
-            self.__console.warning("fix_spool: 스풀 프레임 정보가 없습니다(미로드/비PCD)")
-            return
+    def _render_spool_offset(self):
+        """수동 배치: 현재 chuck 기준으로 스풀을 절대 배치 (spool_world = T_chuck @ T_offset)."""
+        local = getattr(self, '_spool_local_verts', None)
+        spool = getattr(self, '_loaded_spool_mesh', None)
+        if local is None or spool is None:
+            return False
         Tc = self._chuck_world_T()
         if Tc is None:
-            self.__console.warning("fix_spool: chuck 변환을 찾을 수 없습니다")
-            return
-        self._spool_offset_T = np.linalg.inv(Tc) @ self._spool_world_T
-        self._spool_fixed = True
-        # UI 포즈 0 초기화 (offset이 배치를 담으므로)
-        self._spool_manual_x_rot_deg = 0.0
-        self._spool_manual_z_rot_deg = 0.0
-        self.__console.info("fix_spool: chuck 기준 offset 저장, 스풀 강체 부착")
-        if request_data is not None:
-            self._send_spool_pose_update(request_data.get("_identity"))
-
-    def _unfix_spool(self, request_data=None):
-        """고정 해제. 스풀은 현재 위치에 그대로 머문다."""
-        self._spool_fixed = False
-        self._spool_offset_T = None
-        self.__console.info("unfix_spool: 스풀 고정 해제")
-        if request_data is not None:
-            self._send_spool_pose_update(request_data.get("_identity"))
-
-    def _set_spool_offset(self, request_data):
-        """로드 복원용: 저장된 offset(R,t)을 적용해 현재 chuck에 강체 부착."""
-        if getattr(self, '_spool_local_verts', None) is None:
-            self.__console.warning("set_spool_offset: 스풀 프레임 정보 없음")
-            return
-        R = np.asarray(request_data.get("offset_R"), dtype=float)
-        t = np.asarray(request_data.get("offset_t"), dtype=float)
-        if R.shape != (3, 3) or t.shape != (3,):
-            self.__console.warning("set_spool_offset: offset 형식 오류")
-            return
-        off = np.eye(4); off[:3, :3] = R; off[:3, 3] = t
-        Tc = self._chuck_world_T()
-        if Tc is None:
-            return
-        self._spool_offset_T = off
-        self._spool_fixed = True
-        self._spool_world_T = Tc @ off
-        self._render_spool_world_T()
-        self.plotter.render()
-        self.__console.info("set_spool_offset: offset 적용 및 강체 부착 복원")
+            return False
+        self._spool_world_T = Tc @ self._spool_offset_T()
+        self._chuck_prev_T = Tc
+        return self._apply_spool_world_T()
 
     def _process_request(self, request_data):
         """Process a request from the ZApi queue."""
@@ -519,60 +518,51 @@ class Visualizer:
                             else:
                                 mesh = vedo.load(path)
                             if mesh is not None:
-                                # 포지셔너 원점 상태에서 척 조인트 중심을 대략 계산한다.
-                                # URDF 기준: base_to_m_column(8.0, 1.377, 0.328)
-                                #        + m_column_z_to_m_column_passive_r(-0.247, 0, 0.885)
-                                # viewervedo 설정에서 positioner base가 y=0.5만큼 이동되어 있다.
-                                chuck_center = [7.753, 1.877, 1.213]
-                                # m_column_passive_r visual mesh의 X 방향 길이는 약 0.442 m이다.
-                                # 배관 원점을 척 길이만큼 x 방향으로 보낸 뒤 Z축 기준 -90도로 정렬한다.
-                                spool_origin = [chuck_center[0] - 0.442, chuck_center[1], chuck_center[2]]
-                                self._loaded_spool_origin = spool_origin
-                                self._spool_manual_pos = np.array(spool_origin, dtype=float)
-                                self._spool_manual_x_rot_deg = 0.0
-                                self._spool_manual_z_rot_deg = 0.0
-                                # 스풀 프레임 추적: local verts(배치 전, 스케일만) + world_T(배치 변환)
-                                # world = R @ local + t  형태로 절대 변환 관리 (고정 시 강체 부착에 사용)
+                                # 스풀 위치는 chuck 조인트(m_column_passive_r)를 원점으로 본다.
+                                # spool_world = T_chuck @ T_offset @ local
+                                #  - local: 점군을 centroid로 중심화 + 기본정렬(chuck 기준 상수)
+                                #    → 포지셔너 위치와 무관하게 reload 시 항상 현재 chuck 기준으로 배치
+                                #  - T_offset: UI(chuck 기준) 위치/회전, 처음엔 0
                                 _is_pcd = _pl.Path(path).suffix.lower() == ".pcd"
-                                self._spool_local_verts = (_pts * 1e-3) if _is_pcd else None
-                                _Tb = self._rotz(-90)
-                                _Tb[:3, 3] = np.asarray(spool_origin, dtype=float)
-                                self._spool_world_T = _Tb
-                                self._spool_fixed = False
-                                self._spool_offset_T = None
-                                if isinstance(mesh, (list, tuple)):
-                                    for actor in mesh:
-                                        if hasattr(actor, "scale"):
-                                            actor.scale(1e-3, origin=False)
-                                        if hasattr(actor, "shift"):
-                                            actor.shift(*spool_origin)
-                                        if hasattr(actor, "rotate_z"):
-                                            actor.rotate_z(-90, around=spool_origin)
-                                elif hasattr(mesh, "scale"):
-                                    mesh.scale(1e-3, origin=False)
-                                    if hasattr(mesh, "shift"):
-                                        mesh.shift(*spool_origin)
-                                    if hasattr(mesh, "rotate_z"):
-                                        mesh.rotate_z(-90, around=spool_origin)
+                                _default_x = -0.442  # 척 길이만큼 x로 (chuck 기준)
 
-                                if getattr(self, '_loaded_spool_mesh', None) is not None:
-                                    self.plotter.remove(self._loaded_spool_mesh)
-                                
-                                self.plotter.add(mesh)
-                                self._loaded_spool_mesh = mesh
+                                # 기존에 로드된 스풀/재건 메시 모두 제거 (새 파이프로 교체)
+                                _old_sp = getattr(self, '_loaded_spool_mesh', None)
+                                if _old_sp is not None:
+                                    self.plotter.remove(_old_sp)
+                                    self._loaded_spool_mesh = None
+                                _old_rc = getattr(self, '_spool_recon_mesh', None)
+                                if _old_rc is not None:
+                                    if _old_rc is not _old_sp:
+                                        self.plotter.remove(_old_rc)
+                                    self._spool_recon_mesh = None
+                                    self._spool_recon_mesh_o3d = None
+
+                                self._spool_offset_xyz = [0.0, 0.0, 0.0]
+                                self._spool_offset_xrot = 0.0
+                                self._spool_offset_zrot = 0.0
+                                self._spool_fix_r = False
+                                self._positioner_r_deg = 0.0
+                                self._spool_world_T = None
+                                self._chuck_prev_T = None
                                 self._loaded_spool_x_flipped = False
-                                self._spool_r_angle_deg = 0.0
-                                # 현재 FK 기준 척 조인트 위치를 추적 기준점으로 저장
-                                self._spool_chuck_pos = np.array(chuck_center)
-                                for model in getattr(self, '_robot_models', []):
-                                    pos = model.get_link_world_pos("m_column_passive_r")
-                                    if pos is not None:
-                                        self._spool_chuck_pos = pos
-                                    r_rad = getattr(model, '_joint_cfg', {}).get("f_column_z_to_f_column_r")
-                                    if r_rad is not None:
-                                        self._spool_r_angle_deg = float(np.rad2deg(r_rad))
-                                    if pos is not None:
-                                        break
+
+                                if _is_pcd:
+                                    scaled = _pts * 1e-3
+                                    centroid = scaled.mean(axis=0)
+                                    Rz = self._rotz(-90)[:3, :3]
+                                    # centroid 중심화 → -90도 정렬 → chuck 기준 x 오프셋(상수)
+                                    self._spool_local_verts = (
+                                        (Rz @ (scaled - centroid).T).T + np.array([_default_x, 0.0, 0.0]))
+                                    self.plotter.add(mesh)
+                                    self._loaded_spool_mesh = mesh
+                                    self._render_spool_offset()
+                                else:
+                                    # PLY 등(저장된 메시/점군): 이미 월드(미터) 좌표이므로 스케일 없이 그대로 표시
+                                    self._spool_local_verts = None
+                                    self.plotter.add(mesh)
+                                    self._loaded_spool_mesh = mesh
+
                                 self.plotter.render()
                                 self.__console.info(f"Successfully loaded {path}")
                                 
@@ -620,63 +610,31 @@ class Visualizer:
                     self.__console.info(
                         f"Flipped spool X direction: {self._loaded_spool_x_flipped}")
                 elif command == "move_spool":
+                    # 스풀 위치/회전을 chuck 기준 오프셋으로 설정 (x,y,z,x_rot,z_rot)
                     spool = getattr(self, '_loaded_spool_mesh', None)
-                    if spool is None or (isinstance(spool, (list, tuple)) and len(spool) == 0):
-                        self.__console.warning("Cannot move spool position: no spool loaded")
+                    if spool is None or getattr(self, '_spool_local_verts', None) is None:
+                        self.__console.warning("move_spool: 로드된 스풀(PCD)이 없습니다")
                         return True
-                    if getattr(self, '_spool_fixed', False):
-                        # 고정 상태에서는 수동 이동 무시 (UI에서도 잠겨 있음)
-                        self.__console.warning("move_spool 무시: 스풀이 고정되어 있음")
-                        return True
-
-                    target_pos = np.array([
+                    self._spool_offset_xyz = [
                         float(request_data.get("x", 0.0)),
                         float(request_data.get("y", 0.0)),
                         float(request_data.get("z", 0.0)),
-                    ], dtype=float)
-                    target_x_rot = float(request_data.get("x_rotation", 0.0))
-                    target_z_rot = float(request_data.get("z_rotation", 0.0))
-                    current_pos = getattr(self, '_spool_manual_pos', None)
-                    if current_pos is None:
-                        current_pos = np.array(getattr(self, '_loaded_spool_origin', [0.0, 0.0, 0.0]), dtype=float)
-                    current_x_rot = getattr(self, '_spool_manual_x_rot_deg', 0.0)
-                    current_z_rot = getattr(self, '_spool_manual_z_rot_deg', 0.0)
-
-                    delta = target_pos - current_pos
-                    delta_x_rot = target_x_rot - current_x_rot
-                    delta_z_rot = target_z_rot - current_z_rot
-                    actors = spool if isinstance(spool, (list, tuple)) else [spool]
-                    for actor in actors:
-                        if hasattr(actor, "shift"):
-                            actor.shift(delta.tolist())
-                        if hasattr(actor, "rotate_x") and abs(delta_x_rot) > 1e-9:
-                            actor.rotate_x(delta_x_rot, around=target_pos.tolist())
-                        if hasattr(actor, "rotate_z") and abs(delta_z_rot) > 1e-9:
-                            actor.rotate_z(delta_z_rot, around=target_pos.tolist())
-
-                    self._spool_manual_pos = target_pos
-                    self._spool_manual_x_rot_deg = target_x_rot
-                    self._spool_manual_z_rot_deg = target_z_rot
-                    self._loaded_spool_origin = target_pos.tolist()
-
-                    # 프레임 추적: 동일한 delta 변환을 _spool_world_T에도 합성 (fix 시 offset 정확성)
-                    if getattr(self, '_spool_world_T', None) is not None:
-                        Tsh = self._transl(delta)
-                        Tt = self._transl(target_pos)
-                        A = Tt @ self._rotx(delta_x_rot) @ self._transl(-target_pos)
-                        B = Tt @ self._rotz(delta_z_rot) @ self._transl(-target_pos)
-                        self._spool_world_T = B @ A @ Tsh @ self._spool_world_T
-
+                    ]
+                    self._spool_offset_xrot = float(request_data.get("x_rotation", 0.0))
+                    self._spool_offset_zrot = float(request_data.get("z_rotation", 0.0))
+                    self._render_spool_offset()
                     self.plotter.render()
-                    self._send_spool_pose_update(request_data.get("_identity"))
                     self.__console.info(
-                        f"Moved spool pose to {target_pos.tolist()}, "
-                        f"x_rotation={target_x_rot}, z_rotation={target_z_rot}")
+                        f"Spool offset set to xyz={self._spool_offset_xyz}, "
+                        f"x_rot={self._spool_offset_xrot}, z_rot={self._spool_offset_zrot}")
                 elif command == "move_positioner":
                     import math
                     axis = request_data.get("axis")
                     position = float(request_data.get("position", 0.0))
                     velocity = float(request_data.get("velocity", 0.0))
+                    fix_m_column_z = bool(request_data.get("fix_m_column_z", False))
+                    fix_f_column_r = bool(request_data.get("fix_f_column_r", False))
+                    self._spool_fix_r = fix_f_column_r
 
                     for model in getattr(self, '_robot_models', []):
                         joint_map = model._urdf._joint_map if model._urdf else {}
@@ -694,25 +652,33 @@ class Visualizer:
                             continue
                         model.update_fk()
 
-                    # 스풀이 chuck(column m)에 고정되어 있으면 저장된 offset(R,t)으로
-                    # spool_world = T_chuck @ offset 재계산해 따라가게 한다. 해제 시엔 정지.
-                    if (getattr(self, '_spool_fixed', False)
-                            and getattr(self, '_spool_offset_T', None) is not None
-                            and getattr(self, '_spool_local_verts', None) is not None):
-                        Tc = self._chuck_world_T()
-                        if Tc is not None:
-                            self._spool_world_T = Tc @ self._spool_offset_T
-                            self._render_spool_world_T()
-                            self._send_spool_pose_update(request_data.get("_identity"))
+                    # 스풀 추종은 "고정된 축"에 대해서만. (체크 안 하면 안 따라감)
+                    Tc_now = self._chuck_world_T()
+                    has_frame = (getattr(self, '_spool_world_T', None) is not None
+                                 and getattr(self, '_spool_local_verts', None) is not None)
+                    if has_frame and Tc_now is not None:
+                        if axis in ("x", "z") and fix_m_column_z and getattr(self, '_chuck_prev_T', None) is not None:
+                            # column m 고정: chuck 병진량만큼 스풀 평행이동
+                            dt = Tc_now[:3, 3] - self._chuck_prev_T[:3, 3]
+                            T = np.eye(4); T[:3, 3] = dt
+                            self._spool_world_T = T @ self._spool_world_T
+                            self._apply_spool_world_T()
+                        elif axis == "r" and fix_f_column_r:
+                            # column r 고정: chuck joint 중심·축(chuck x축) 기준으로 스풀 회전
+                            r_prev = getattr(self, '_positioner_r_deg', 0.0)
+                            delta_r = position - r_prev
+                            center = Tc_now[:3, 3]
+                            axis_w = Tc_now[:3, :3] @ np.array([1.0, 0.0, 0.0])
+                            Rm = self._rot_about_axis(axis_w, center, delta_r)
+                            self._spool_world_T = Rm @ self._spool_world_T
+                            self._apply_spool_world_T()
+                    if Tc_now is not None:
+                        self._chuck_prev_T = Tc_now
+                    if axis == "r":
+                        self._positioner_r_deg = position
 
                     self.plotter.render()
                     self.__console.info(f"Positioner {axis} moved to {position} (vel={velocity})")
-                elif command == "fix_spool":
-                    self._fix_spool(request_data)
-                elif command == "unfix_spool":
-                    self._unfix_spool(request_data)
-                elif command == "set_spool_offset":
-                    self._set_spool_offset(request_data)
                 elif command == "filter_spool":
                     self._filter_loaded_spool(request_data)
                 elif command == "reconstruct_mesh":

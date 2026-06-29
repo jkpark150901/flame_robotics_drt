@@ -200,11 +200,11 @@ class AppWindow(QMainWindow):
         if hasattr(self, 'btn_pcd_save'):
             self.btn_pcd_save.clicked.connect(self.__on_btn_pcd_save_clicked)
 
-        # 스풀 고정 체크박스 → 수동 컨트롤 토글 + 뷰어에 fix/unfix(offset 저장) 요청
+        # 스풀 고정 체크박스 → 수동 컨트롤(슬라이더/이동) 잠금 토글
         if hasattr(self, 'chk_spool_fix_f_column_r'):
-            self.chk_spool_fix_f_column_r.toggled.connect(self.__on_spool_fix_toggled)
+            self.chk_spool_fix_f_column_r.toggled.connect(self.__update_spool_controls_enabled)
         if hasattr(self, 'chk_spool_fix_m_column_z'):
-            self.chk_spool_fix_m_column_z.toggled.connect(self.__on_spool_fix_toggled)
+            self.chk_spool_fix_m_column_z.toggled.connect(self.__update_spool_controls_enabled)
         self.__update_spool_controls_enabled()  # 초기 상태 반영
 
     def __get_spool_fix_flags(self):
@@ -223,17 +223,6 @@ class AppWindow(QMainWindow):
                 "(Spool Fixation 체크 해제 필요)")
             return True
         return False
-
-    def __on_spool_fix_toggled(self, *args):
-        """고정 체크 변경 시: 컨트롤 잠금 갱신 + 뷰어에 fix/unfix(offset) 요청."""
-        self.__update_spool_controls_enabled()
-        if not self.zapi:
-            return
-        fix_f, fix_z = self.__get_spool_fix_flags()
-        if fix_f or fix_z:
-            self.zapi._ZAPI_request_fix_spool()
-        else:
-            self.zapi._ZAPI_request_unfix_spool()
 
     def __update_spool_controls_enabled(self, *args):
         """스풀 고정 시 수동 컨트롤(슬라이더/입력/버튼)을 비활성화."""
@@ -360,8 +349,8 @@ class AppWindow(QMainWindow):
             "z_rotation": z_rotation,
         }
 
-    def __request_spool_pose_move(self, pose):
-        if self.__spool_move_blocked_by_fix():
+    def __request_spool_pose_move(self, pose, force=False):
+        if not force and self.__spool_move_blocked_by_fix():
             return
         if self.zapi:
             self.zapi._ZAPI_request_move_spool(
@@ -431,12 +420,9 @@ class AppWindow(QMainWindow):
                 "r": positioner_pose["r"],
                 "clamp": positioner_pose["clamp"],
             },
-            # 고정(강체 부착) 상태와 chuck 기준 offset(R,t)
-            "fixed": bool(fix_f or fix_z),
+            # 고정(체크) 상태 — spool 포즈는 chuck 기준 오프셋이다
             "fix_f_column_r": bool(fix_f),
             "fix_m_column_z": bool(fix_z),
-            "offset_R": getattr(self, '_spool_offset_R', None),
-            "offset_t": getattr(self, '_spool_offset_t', None),
             "x": pose["x"],
             "y": pose["y"],
             "z": pose["z"],
@@ -459,28 +445,18 @@ class AppWindow(QMainWindow):
             payload = json.load(f)
         positioner_pose = self.__set_positioner_pose_to_ui(payload.get("positioner"))
         pose = self.__set_spool_pose_to_ui(payload.get("spool", payload))
-
-        fixed = bool(payload.get("fixed", False))
-        off_R = payload.get("offset_R")
-        off_t = payload.get("offset_t")
-        # 고정 체크박스 상태 복원 (시그널 차단 → 중복 fix 요청 방지)
-        self.__set_spool_fix_checks(
-            bool(payload.get("fix_f_column_r", fixed)),
-            bool(payload.get("fix_m_column_z", fixed)))
         self.__console.info(f"Loaded spool pose: {pose_path}")
 
+        # 고정 체크박스 상태 먼저 복원 → 포지셔너 이동 시 r-fix 동기화가 반영되도록
+        self.__set_spool_fix_checks(
+            bool(payload.get("fix_f_column_r", False)),
+            bool(payload.get("fix_m_column_z", False)))
         if apply_move:
-            # 1) 포지셔너를 먼저 이동 → chuck 위치 확정
+            # 1) 포지셔너 먼저 이동 → chuck 위치/회전 확정 (r-fix면 passive r 동기화)
             if positioner_pose:
                 self.__request_positioner_pose_move(positioner_pose)
-            # 2) 고정이면 저장된 offset(R,t) 적용(강체 부착 복원), 아니면 스풀 절대 이동
-            if fixed and off_R is not None and off_t is not None:
-                self._spool_offset_R, self._spool_offset_t = off_R, off_t
-                self._spool_fixed_state = True
-                if self.zapi:
-                    self.zapi._ZAPI_request_set_spool_offset(off_R, off_t)
-            else:
-                self.__request_spool_pose_move(pose)
+            # 2) 스풀 오프셋(chuck 기준) 적용 (고정 가드 무시하고 강제 적용)
+            self.__request_spool_pose_move(pose, force=True)
         return True
 
     def __set_spool_fix_checks(self, fix_f, fix_z):
@@ -618,10 +594,6 @@ class AppWindow(QMainWindow):
                 try:
                     pose = json.loads(msg)
                     self.__set_spool_pose_to_ui(pose)
-                    # 저장용으로 offset(R,t)/고정상태 보관
-                    self._spool_fixed_state = bool(pose.get("fixed", False))
-                    self._spool_offset_R = pose.get("offset_R")
-                    self._spool_offset_t = pose.get("offset_t")
                     self.__console.info(f"Updated spool pose from viewer: {pose}")
                 except json.JSONDecodeError:
                     pass
@@ -722,9 +694,33 @@ class AppWindow(QMainWindow):
             self.zapi._ZAPI_request_save_spool(file_name)
             self.__set_proc_status(f"Save requested -> {pathlib.Path(file_name).name}")
             self.__refresh_spool_combo_with_file(file_name)
+            # 포지셔너 자세가 있으면 같은 이름의 .json으로 함께 저장
+            self.__save_positioner_json(file_name)
         except Exception as e:
             self.__console.error(f"Error saving result: {e}")
             self.__set_proc_status(f"[!] {e}")
+
+    def __save_positioner_json(self, geom_path):
+        """저장한 지오메트리 옆에 포지셔너 자세를 <name>.json 으로 기록."""
+        try:
+            pos = self.__get_positioner_pose_from_ui()
+        except (ValueError, AttributeError):
+            return
+        if pos is None:
+            return
+        json_path = pathlib.Path(geom_path).with_suffix(".json")
+        payload = {
+            "geometry_file": pathlib.Path(geom_path).name,
+            "positioner": {
+                "x": pos["x"],
+                "z": pos["z"],
+                "r": pos["r"],
+                "clamp": pos["clamp"],
+            },
+        }
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=4)
+        self.__console.info(f"Saved positioner pose: {json_path}")
 
     def closeEvent(self, event:QCloseEvent) -> None:
         """ Handle close event """

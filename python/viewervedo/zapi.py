@@ -296,40 +296,6 @@ class ZAPI(ZAPIBase):
         else:
             self.push_to_queue(request_payload)
 
-    def zapi_fix_spool(self, kwargs=None):
-        """Handle fix_spool request (chuck 기준 offset 저장 후 강체 부착)."""
-        self.__console.info(f"Received zapi_fix_spool with kwargs: {kwargs}")
-        payload = {"command": "fix_spool", "_identity": (kwargs or {}).get("_identity")}
-        if self._visualizer:
-            self._visualizer.push_request(payload)
-        else:
-            self.push_to_queue(payload)
-
-    def zapi_unfix_spool(self, kwargs=None):
-        """Handle unfix_spool request (고정 해제)."""
-        self.__console.info(f"Received zapi_unfix_spool with kwargs: {kwargs}")
-        payload = {"command": "unfix_spool", "_identity": (kwargs or {}).get("_identity")}
-        if self._visualizer:
-            self._visualizer.push_request(payload)
-        else:
-            self.push_to_queue(payload)
-
-    def zapi_set_spool_offset(self, kwargs=None):
-        """Handle set_spool_offset request (로드 복원: offset 적용 강체 부착)."""
-        self.__console.info(f"Received zapi_set_spool_offset with kwargs: {kwargs}")
-        if not kwargs:
-            return
-        payload = {
-            "command": "set_spool_offset",
-            "offset_R": kwargs.get("offset_R"),
-            "offset_t": kwargs.get("offset_t"),
-            "_identity": kwargs.get("_identity"),
-        }
-        if self._visualizer:
-            self._visualizer.push_request(payload)
-        else:
-            self.push_to_queue(payload)
-
     def zapi_filter_spool(self, kwargs=None):
         """Handle filter_spool request (현재 로드된 스풀에 직접 적용)."""
         self.__console.info(f"Received zapi_filter_spool with kwargs: {kwargs}")

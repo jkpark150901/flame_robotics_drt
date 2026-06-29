@@ -15,9 +15,9 @@ class SimParameterMap:
         self.spool_z_res = 0.01
         self.spool_x_rot_res = 0.1
         self.spool_z_rot_res = 0.1
-        self.spool_x_range = [0.0, 10.0]
-        self.spool_y_range = [0.0, 5.0]
-        self.spool_z_range = [0.0, 5.0]
+        self.spool_x_range = [-10.0, 10.0]
+        self.spool_y_range = [-5.0, 5.0]
+        self.spool_z_range = [-5.0, 5.0]
         self.spool_x_rot_range = [0.0, 360.0]
         self.spool_z_rot_range = [0.0, 360.0]
 
@@ -83,25 +83,26 @@ class SimParameterMap:
 
     def _update_ui_parameters(self, params):
         """Update the range and resolution of the sliders based on loaded parameters"""
-        self.x_res = params.get('positioner_x_resolution', 0.01)
-        self.z_res = params.get('positioner_z_resolution', 0.01)
-        self.r_res = params.get('positioner_r_resolution', 0.1)
-        self.clamp_res = params.get('positioner_clamp_resolution', 0.01)
-        self.spool_x_res = params.get('spool_x_resolution', 0.01)
-        self.spool_y_res = params.get('spool_y_resolution', 0.01)
-        self.spool_z_res = params.get('spool_z_resolution', 0.01)
-        self.spool_x_rot_res = params.get('spool_x_rotation_resolution', 0.1)
-        self.spool_z_rot_res = params.get('spool_z_rotation_resolution', 0.1)
+        # 기본값은 __init__에서 설정한 현재 값을 사용 (config에 키가 없으면 그대로 유지)
+        self.x_res = params.get('positioner_x_resolution', self.x_res)
+        self.z_res = params.get('positioner_z_resolution', self.z_res)
+        self.r_res = params.get('positioner_r_resolution', self.r_res)
+        self.clamp_res = params.get('positioner_clamp_resolution', self.clamp_res)
+        self.spool_x_res = params.get('spool_x_resolution', self.spool_x_res)
+        self.spool_y_res = params.get('spool_y_resolution', self.spool_y_res)
+        self.spool_z_res = params.get('spool_z_resolution', self.spool_z_res)
+        self.spool_x_rot_res = params.get('spool_x_rotation_resolution', self.spool_x_rot_res)
+        self.spool_z_rot_res = params.get('spool_z_rotation_resolution', self.spool_z_rot_res)
 
         x_range = params.get('positioner_x_range', [0.0, 8.0])
         z_range = params.get('positioner_z_range', [0.0, 3.0])
         r_range = params.get('positioner_r_range', [0.0, 360.0])
         clamp_range = params.get('positioner_clamp_range', [0.0, 0.9])
-        self.spool_x_range = params.get('spool_x_range', [0.0, 10.0])
-        self.spool_y_range = params.get('spool_y_range', [0.0, 5.0])
-        self.spool_z_range = params.get('spool_z_range', [0.0, 5.0])
-        self.spool_x_rot_range = params.get('spool_x_rotation_range', [0.0, 360.0])
-        self.spool_z_rot_range = params.get('spool_z_rotation_range', [0.0, 360.0])
+        self.spool_x_range = params.get('spool_x_range', self.spool_x_range)
+        self.spool_y_range = params.get('spool_y_range', self.spool_y_range)
+        self.spool_z_range = params.get('spool_z_range', self.spool_z_range)
+        self.spool_x_rot_range = params.get('spool_x_rotation_range', self.spool_x_rot_range)
+        self.spool_z_rot_range = params.get('spool_z_rotation_range', self.spool_z_rot_range)
 
         if hasattr(self.ui, 'slider_positioner_x_pos'):
             self.ui.slider_positioner_x_pos.setMinimum(0)

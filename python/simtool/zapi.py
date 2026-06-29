@@ -148,31 +148,6 @@ class ZAPI(QObject, ZAPIBase):
         else:
             self.__console.warning("[ZAPI] Cannot send move_positioner: Socket not connected")
 
-    def _ZAPI_request_fix_spool(self):
-        """스풀을 chuck에 강체 부착(고정). 뷰어가 offset(R,t)을 계산/저장."""
-        if self.__dealer_socket and self.__dealer_socket.is_joined:
-            self.call(self.__dealer_socket, "zapi_fix_spool", {})
-            self.__console.info("[ZAPI] Sent fix_spool request")
-        else:
-            self.__console.warning("[ZAPI] Cannot send fix_spool: Socket not connected")
-
-    def _ZAPI_request_unfix_spool(self):
-        """스풀 고정 해제."""
-        if self.__dealer_socket and self.__dealer_socket.is_joined:
-            self.call(self.__dealer_socket, "zapi_unfix_spool", {})
-            self.__console.info("[ZAPI] Sent unfix_spool request")
-        else:
-            self.__console.warning("[ZAPI] Cannot send unfix_spool: Socket not connected")
-
-    def _ZAPI_request_set_spool_offset(self, offset_R, offset_t):
-        """로드 복원: 저장된 offset(R,t)으로 강체 부착 재설정."""
-        if self.__dealer_socket and self.__dealer_socket.is_joined:
-            self.call(self.__dealer_socket, "zapi_set_spool_offset",
-                      {"offset_R": offset_R, "offset_t": offset_t})
-            self.__console.info("[ZAPI] Sent set_spool_offset request")
-        else:
-            self.__console.warning("[ZAPI] Cannot send set_spool_offset: Socket not connected")
-
     def _ZAPI_request_filter_spool(self, method: str, params: dict = None):
         """현재 로드된 스풀에 직접 노이즈 필터를 적용. method: 'sor'|'ccl'"""
         if self.__dealer_socket and self.__dealer_socket.is_joined:
