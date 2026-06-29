@@ -205,21 +205,34 @@
                  </item>
 
                  <item>
+                  <widget class="QLineEdit" name="edit_natnet_client">
+                   <property name="text"><string>auto</string></property>
+                   <property name="placeholderText"><string>Client IP</string></property>
+                  </widget>
+                 </item>
+
+                 <item>
                   <layout class="QHBoxLayout">
                    <item>
-                    <widget class="QLineEdit" name="edit_natnet_client">
-                     <property name="text"><string>auto</string></property>
-                     <property name="placeholderText"><string>Client IP</string></property>
+                    <widget class="QLabel">
+                     <property name="text"><string>Rigid Body ID</string></property>
+                     <property name="styleSheet"><string>font-weight: bold; color: #f0c060;</string></property>
                     </widget>
                    </item>
-                   <item><widget class="QLabel"><property name="text"><string>RB#</string></property></widget></item>
                    <item>
                     <widget class="QSpinBox" name="spin_rb_id">
                      <property name="minimum"><number>0</number></property>
                      <property name="maximum"><number>99</number></property>
                      <property name="value"><number>1</number></property>
-                     <property name="maximumWidth"><number>50</number></property>
+                     <property name="minimumWidth"><number>70</number></property>
+                     <property name="styleSheet"><string>QSpinBox { font-weight: bold; font-size: 14px; }</string></property>
                     </widget>
+                   </item>
+                   <item>
+                    <spacer>
+                     <property name="orientation"><enum>Qt::Horizontal</enum></property>
+                     <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+                    </spacer>
                    </item>
                   </layout>
                  </item>
@@ -331,6 +344,37 @@
                 <widget class="QLabel" name="lbl_rb_tracking">
                  <property name="text"><string>---</string></property>
                  <property name="styleSheet"><string>font-weight: bold;</string></property>
+                </widget>
+               </item>
+
+               <item row="6" column="0" colspan="2">
+                <widget class="QFrame">
+                 <property name="frameShape"><enum>QFrame::HLine</enum></property>
+                 <property name="frameShadow"><enum>QFrame::Sunken</enum></property>
+                </widget>
+               </item>
+
+               <item row="7" column="0">
+                <widget class="QLabel"><property name="text"><string>dx dy dz</string></property></widget>
+               </item>
+               <item row="7" column="1">
+                <widget class="QLabel" name="lbl_rb_delta">
+                 <property name="text"><string>---</string></property>
+                 <property name="font"><font><family>Courier New</family><pointsize>9</pointsize></font></property>
+                </widget>
+               </item>
+
+               <item row="8" column="0">
+                <widget class="QLabel">
+                 <property name="text"><string>r² dist</string></property>
+                 <property name="styleSheet"><string>font-weight: bold;</string></property>
+                </widget>
+               </item>
+               <item row="8" column="1">
+                <widget class="QLabel" name="lbl_rb_r2_dist">
+                 <property name="text"><string>--- mm</string></property>
+                 <property name="styleSheet"><string>font-weight: bold; color: #60d0ff;</string></property>
+                 <property name="font"><font><family>Courier New</family><pointsize>9</pointsize></font></property>
                 </widget>
                </item>
 

@@ -62,8 +62,17 @@ class NatNetWorker(QThread):
         self._last_emit:   dict[int, float]       = {}   # rb_id → 마지막 emit 시각
         self._fps: dict[int, float]               = {}
         self._EMIT_INTERVAL = 1.0 / 30.0
-        # UI 쓰로틀 없이 모든 프레임을 받을 raw 콜백 (CalibRunner/VerifyRunner 용)
+
+        # 쓰로틀 없이 모든 프레임을 받을 raw 콜백
+        # signature: raw_rb_listener(rb_id: int, pos: list, quat: list, timestamp: float)
+        #   use_natnet_ts=True  → timestamp: Motive 시작 후 경과 시간(초, NatNet double)
+        #   use_natnet_ts=False → timestamp: time.time() (PC 수신 시각)
         self.raw_rb_listener: callable | None = None
+
+        # True  → new_frame_with_data_listener 사용 (NatNet 타임스탬프 포함)
+        # False → rigid_body_listener 사용 (PC 타임스탬프, 기존 동작)
+        # connect 전에 설정해야 함
+        self.use_natnet_ts: bool = True
 
     # ──────────────────────────────────────────────
     # Public API
@@ -92,7 +101,13 @@ class NatNetWorker(QThread):
         client.set_server_address(self._server_ip)
         client.set_client_address(client_ip)
         client.set_use_multicast(False)
-        client.rigid_body_listener = self._on_rigid_body
+
+        if self.use_natnet_ts:
+            client.new_frame_with_data_listener = self._on_new_frame_with_data
+            log.info("NatNet: using new_frame_with_data_listener (NatNet timestamp mode)")
+        else:
+            client.rigid_body_listener = self._on_rigid_body
+            log.info("NatNet: using rigid_body_listener (PC timestamp mode)")
 
         if self._force_version:
             major, minor = self._force_version
@@ -147,7 +162,7 @@ class NatNetWorker(QThread):
     # ──────────────────────────────────────────────
 
     def _on_rigid_body(self, rb_id, position, rotation):
-        if self._stop_event.is_set():   # 종료 중이면 즉시 무시
+        if self._stop_event.is_set():
             return
         rid = int(rb_id)
         if rid not in self._rb_ids:
@@ -158,10 +173,9 @@ class NatNetWorker(QThread):
         pos  = [float(v) for v in position]
         quat = [float(v) for v in rotation]
 
-        # CalibRunner/VerifyRunner: 쓰로틀 없이 모든 프레임 전달
         if self.raw_rb_listener is not None:
             try:
-                self.raw_rb_listener(rid, pos, quat)
+                self.raw_rb_listener(rid, pos, quat, now)
             except Exception:
                 pass
 
@@ -170,6 +184,37 @@ class NatNetWorker(QThread):
             return
         self._last_emit[rid] = now
         self.rb_updated.emit(rid, pos, quat)
+
+    def _on_new_frame_with_data(self, data_dict: dict):
+        if self._stop_event.is_set():
+            return
+        mocap_data = data_dict.get("mocap_data")
+        if mocap_data is None or mocap_data.rigid_body_data is None:
+            return
+        timestamp: float = data_dict.get("timestamp", -1.0)
+        now = time.time()
+
+        for rb in mocap_data.rigid_body_data.rigid_body_list:
+            rid = int(rb.id_num)
+            if rid not in self._rb_ids:
+                continue
+            if not rb.tracking_valid:
+                continue
+
+            self._frame_times.setdefault(rid, []).append(now)
+            pos  = [float(v) for v in rb.pos]
+            quat = [float(v) for v in rb.rot]
+
+            if self.raw_rb_listener is not None:
+                try:
+                    self.raw_rb_listener(rid, pos, quat, timestamp)
+                except Exception:
+                    pass
+
+            if now - self._last_emit.get(rid, 0.0) < self._EMIT_INTERVAL:
+                continue
+            self._last_emit[rid] = now
+            self.rb_updated.emit(rid, pos, quat)
 
     # ──────────────────────────────────────────────
     # IP helpers (copied from check_mocap_unicast)

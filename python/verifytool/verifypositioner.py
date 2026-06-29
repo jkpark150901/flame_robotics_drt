@@ -60,10 +60,11 @@ class CsvMocapVerifyWindow(QMainWindow):
         self._natnet_worker: NatNetWorker | None = None
 
         # RB별 데이터 (index 0~3)
-        self._rolling: list[list] = [[] for _ in range(_N_RB)]  # (pos, quat)
-        self._traj:    list[list] = [[] for _ in range(_N_RB)]  # (pos, quat) during motion
-        self._start:   list      = [None] * _N_RB               # (pos_list, quat_list)
-        self._result:  list      = [None] * _N_RB               # computed delta dict
+        self._rolling:   list[list] = [[] for _ in range(_N_RB)]  # (pos, quat)
+        self._traj:      list[list] = [[] for _ in range(_N_RB)]  # (pos, quat) during motion
+        self._start:     list       = [None] * _N_RB               # (pos_list, quat_list)
+        self._result:    list       = [None] * _N_RB               # computed delta dict
+        self._rb_origins: list      = [None] * _N_RB               # first received pos per RB
 
         self.setWindowTitle("Verify Positioner")
         self.setStyleSheet(f"background-color: {_DARK_BG}; color: #eee;")
@@ -95,6 +96,7 @@ class CsvMocapVerifyWindow(QMainWindow):
         left_vl.addWidget(self._build_motion_grp())
         left_vl.addWidget(self._build_results_grp())
         left_vl.addWidget(self._build_scale_grp())
+        left_vl.addWidget(self._build_rb_live_grp())
         left_vl.addStretch()
 
         self.log_panel = QPlainTextEdit()
@@ -163,29 +165,75 @@ class CsvMocapVerifyWindow(QMainWindow):
         grid = QGridLayout(grp)
         grid.setSpacing(4)
         grid.setContentsMargins(8, 4, 8, 8)
-        for col, txt in enumerate(["En", "ID", "Position (m)"]):
+        grid.setColumnStretch(0, 0)
+        grid.setColumnStretch(1, 1)
+        for col, txt in enumerate(["En", "RB ID"]):
             lbl = QLabel(txt)
             lbl.setStyleSheet("color:#666; font-size:10px;")
             grid.addWidget(lbl, 0, col)
-        self._rb_checks, self._rb_spins, self._rb_lbls = [], [], []
+        self._rb_checks, self._rb_spins = [], []
+        self._rb_status_lbls: list[QLabel] = []
+        _spin_style = (
+            "QSpinBox { background:#2a2a3e; color:#ffffff; border:1px solid #555;"
+            " border-radius:3px; padding:2px 4px; font-size:12px; }"
+            "QSpinBox::up-button { width:16px; } QSpinBox::down-button { width:16px; }"
+        )
         for i in range(_N_RB):
             chk = QCheckBox()
             chk.setChecked(i == 0)
             chk.setStyleSheet(
-                f"QCheckBox::indicator{{border:1px solid {_RB_COLOR[i]}; width:12px; height:12px;}}"
+                f"QCheckBox::indicator{{border:2px solid {_RB_COLOR[i]};"
+                f" width:14px; height:14px; border-radius:2px;}}"
                 f"QCheckBox::indicator:checked{{background:{_RB_COLOR[i]};}}")
+            grid.addWidget(chk, i + 1, 0)
+
             spin = QSpinBox()
             spin.setRange(1, 99)
             spin.setValue(i + 1)
-            spin.setFixedWidth(42)
-            lbl = QLabel("—")
-            lbl.setStyleSheet(f"color:{_RB_COLOR[i]}; font-size:10px;")
-            grid.addWidget(chk, i+1, 0)
-            grid.addWidget(spin, i+1, 1)
-            grid.addWidget(lbl, i+1, 2)
+            spin.setMinimumWidth(72)
+            spin.setFixedHeight(26)
+            spin.setStyleSheet(_spin_style)
+            grid.addWidget(spin, i + 1, 1)
+
             self._rb_checks.append(chk)
             self._rb_spins.append(spin)
-            self._rb_lbls.append(lbl)
+            self._rb_status_lbls.append(QLabel(""))  # placeholder, unused
+        return grp
+
+    def _build_rb_live_grp(self):
+        grp = QGroupBox("Live Position")
+        grp.setStyleSheet(_GRP_STYLE)
+        grid = QGridLayout(grp)
+        grid.setSpacing(2)
+        grid.setContentsMargins(8, 4, 8, 8)
+        for col, txt in enumerate(["RB", "pos (mm)", "r² dist"]):
+            lbl = QLabel(txt)
+            lbl.setStyleSheet("color:#666; font-size:10px;")
+            grid.addWidget(lbl, 0, col)
+        self._rb_lbls:       list[QLabel] = []
+        self._rb_delta_lbls: list[QLabel] = []
+        self._rb_dist_lbls:  list[QLabel] = []
+        for i in range(_N_RB):
+            row = i * 2 + 1
+            lbl_id = QLabel(f"RB{i+1}")
+            lbl_id.setStyleSheet(f"color:{_RB_COLOR[i]}; font-size:10px; font-weight:bold;")
+            grid.addWidget(lbl_id, row, 0, 2, 1)
+
+            lbl_pos = QLabel("—")
+            lbl_pos.setStyleSheet(f"color:{_RB_COLOR[i]}; font-size:10px;")
+            grid.addWidget(lbl_pos, row, 1)
+
+            lbl_delta = QLabel("dx:— dy:— dz:—")
+            lbl_delta.setStyleSheet("color:#777; font-size:9px;")
+            grid.addWidget(lbl_delta, row + 1, 1)
+
+            lbl_dist = QLabel("—")
+            lbl_dist.setStyleSheet(f"color:{_RB_COLOR[i]}; font-size:10px; font-weight:bold;")
+            grid.addWidget(lbl_dist, row, 2, 2, 1)
+
+            self._rb_lbls.append(lbl_pos)
+            self._rb_delta_lbls.append(lbl_delta)
+            self._rb_dist_lbls.append(lbl_dist)
         return grp
 
     def _build_motion_grp(self):
@@ -234,7 +282,7 @@ class CsvMocapVerifyWindow(QMainWindow):
         row_defs = [
             ('dx','dx(mm)'),('dy','dy(mm)'),('dz','dz(mm)'),
             ('dr','droll'),('dp','dpitch'),('dyw','dyaw'),
-            ('angle','angle'),('axis','axis'),
+            ('angle','angle'),('axis','axis'),('r2','r² dist'),
         ]
         for i in range(_N_RB):
             hdr = QLabel(f"── RB {i+1}")
@@ -318,6 +366,7 @@ class CsvMocapVerifyWindow(QMainWindow):
         self._natnet_worker.disconnected.connect(self._on_disconnected)
         self._natnet_worker.error.connect(lambda m: self._log(f"[NatNet] {m}"))
         self._natnet_worker.rb_updated.connect(self._on_rb_updated)
+        self._natnet_worker.raw_rb_listener = self._on_raw_rb
         self._natnet_worker.fps_updated.connect(self._on_fps)
         self.btn_connect.setEnabled(False)
         self.lbl_status.setText("connecting …")
@@ -342,11 +391,19 @@ class CsvMocapVerifyWindow(QMainWindow):
         self.lbl_status.setStyleSheet("color:#e53935; font-weight:bold; font-size:11px;")
         self.btn_connect.setEnabled(True)
         self.btn_disconnect.setEnabled(False)
+        self._rb_origins = [None] * _N_RB
         self._log("NatNet disconnected.")
         self._refresh_buttons()
 
     def _on_fps(self, fps: float):
         self.lbl_fps.setText(f"FPS: {fps:.1f} Hz")
+
+    def _on_raw_rb(self, rb_id: int, pos: list, quat: list, timestamp: float):
+        idx = self._rb_index(rb_id)
+        if idx is None:
+            return
+        if self._state == 'MOVING':
+            self._traj[idx].append((list(pos), list(quat), timestamp))
 
     def _on_rb_updated(self, rb_id: int, pos: list, quat: list):
         idx = self._rb_index(rb_id)
@@ -356,10 +413,17 @@ class CsvMocapVerifyWindow(QMainWindow):
         buf.append((list(pos), list(quat)))
         if len(buf) > _MAX_BUF:
             buf.pop(0)
-        if self._state == 'MOVING':
-            self._traj[idx].append((list(pos), list(quat)))
-        self._rb_lbls[idx].setText(
-            f"{pos[0]*1000:+6.1f} {pos[1]*1000:+6.1f} {pos[2]*1000:+6.1f}")
+        x, y, z = pos[0]*1000, pos[1]*1000, pos[2]*1000
+        self._rb_lbls[idx].setText(f"{x:+.1f}  {y:+.1f}  {z:+.1f}")
+        self._rb_status_lbls[idx].setText("● OK")
+        self._rb_status_lbls[idx].setStyleSheet(f"color:{_RB_COLOR[idx]}; font-size:10px;")
+        if self._rb_origins[idx] is None:
+            self._rb_origins[idx] = list(pos)
+        ox, oy, oz = [v*1000 for v in self._rb_origins[idx]]
+        dx, dy, dz = x - ox, y - oy, z - oz
+        r = (dx**2 + dy**2 + dz**2) ** 0.5
+        self._rb_delta_lbls[idx].setText(f"dx:{dx:+.1f} dy:{dy:+.1f} dz:{dz:+.1f}")
+        self._rb_dist_lbls[idx].setText(f"{r:.2f} mm")
 
     def _snapshot(self, i: int):
         """가장 최근 샘플을 그대로 반환. 데이터 없으면 None."""
@@ -482,6 +546,7 @@ class CsvMocapVerifyWindow(QMainWindow):
             'timestamp_stop':  ts_stop.strftime('%Y-%m-%d %H:%M:%S.%f'),
             'duration_s': (ts_stop - ts_start).total_seconds(),
             'dx_mm': float(dp[0]), 'dy_mm': float(dp[1]), 'dz_mm': float(dp[2]),
+            'r2_mm': float(np.linalg.norm(dp)),
             'droll_deg': float(roll), 'dpitch_deg': float(pitch), 'dyaw_deg': float(yaw),
             'angle_deg': angle_deg,
             'axis_x': float(axis[0]), 'axis_y': float(axis[1]), 'axis_z': float(axis[2]),
@@ -508,6 +573,8 @@ class CsvMocapVerifyWindow(QMainWindow):
             labels['angle'].setText(f"{res['angle_deg']:.4f}°")
             labels['axis'].setText(
                 f"[{res['axis_x']:+.3f},{res['axis_y']:+.3f},{res['axis_z']:+.3f}]")
+            labels['r2'].setText(f"{res['r2_mm']:.3f} mm")
+            labels['r2'].setStyleSheet("color:#60d0ff; font-size:10px; font-weight:bold;")
 
     # ──────────────────────────────────────────────────────────────────────────
     # 플롯
@@ -554,7 +621,7 @@ class CsvMocapVerifyWindow(QMainWindow):
             if pts[-1] is not frames[-1]:
                 frames = frames + [pts[-1]]
             t_vals = np.linspace(0.35, 1.0, len(frames))
-            for k, (pos, quat) in enumerate(frames):
+            for k, (pos, quat, *_) in enumerate(frames):
                 R_plot = self._T @ Rotation.from_quat(quat).as_matrix()
                 px, py, pz = self._p(pos)
                 fade = t_vals[k]
@@ -621,12 +688,13 @@ class CsvMocapVerifyWindow(QMainWindow):
                 ts_start_str = res['timestamp_start']
                 with open(tp, 'w', newline='', encoding='utf-8-sig') as f:
                     w = csv.DictWriter(f, fieldnames=[
-                        'frame', 'timestamp_start', 'x_m', 'y_m', 'z_m',
-                        'qx', 'qy', 'qz', 'qw'])
+                        'frame', 'timestamp_start', 'timestamp',
+                        'x_m', 'y_m', 'z_m', 'qx', 'qy', 'qz', 'qw'])
                     w.writeheader()
-                    for fr, (pos, quat) in enumerate(traj):
+                    for fr, (pos, quat, ts) in enumerate(traj):
                         w.writerow({
                             'frame': fr, 'timestamp_start': ts_start_str,
+                            'timestamp': ts,
                             'x_m': pos[0], 'y_m': pos[1], 'z_m': pos[2],
                             'qx': quat[0], 'qy': quat[1], 'qz': quat[2], 'qw': quat[3],
                         })

@@ -15,6 +15,8 @@ if /I "%1"=="viewer" goto viewer
 if /I "%1"=="controller" goto controller
 if /I "%1"=="zproxy" goto zproxy
 if /I "%1"=="simtool" goto simtool
+if /I "%1"=="verifycobot" goto verifycobot
+if /I "%1"=="verifypositioner" goto verifypositioner
 if /I "%1"=="run" goto run
 
 echo Unknown target: %1
@@ -40,6 +42,14 @@ goto end
 "%PYTHON%" python\simtool.py --config "%~dp0python\simtool.cfg"
 goto end
 
+:verifycobot
+"%PYTHON%" python\verifycobot.py --config "%~dp0python\verifycobot.cfg"
+goto end
+
+:verifypositioner
+"%PYTHON%" python\verifypositioner.py --config "%~dp0python\verifypositioner.cfg"
+goto end
+
 :run
 rem Start background processes
 start "zproxy" "%PYTHON%" python\zproxy.py --config "%~dp0python\zproxy.cfg"
@@ -50,7 +60,7 @@ goto end
 
 :help
 echo Usage: run.bat [target]
-echo Targets: monitor, viewer, controller, zproxy, simtool, run
+echo Targets: monitor, viewer, controller, zproxy, simtool, verifycobot, verifypositioner, run
 goto end
 
 :end

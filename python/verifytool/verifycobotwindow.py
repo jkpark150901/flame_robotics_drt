@@ -41,6 +41,7 @@ class VerifyCobotWindow(QMainWindow):
         self._natnet_worker: NatNetWorker | None = None
         self._last_rb_pos: list | None = None
         self._last_rb_quat: list | None = None
+        self._rb_origin: list | None = None
         self._natnet_state = NatNetStateProxy()
         self._calib_runner: CalibRunner | None = None
         self._scatter_rb = None
@@ -273,7 +274,7 @@ class VerifyCobotWindow(QMainWindow):
         self._natnet_worker.rb_updated.connect(self._on_rb_updated)
         # raw_rb_listener: Qt 시그널 쓰로틀(30Hz) 없이 모든 프레임을 state proxy에 전달
         self._natnet_worker.raw_rb_listener = (
-            lambda rb_id, pos, quat: self._natnet_state.update(pos, quat)
+            lambda rb_id, pos, quat, ts: self._natnet_state.update(pos, quat)
         )
         self._natnet_worker.fps_updated.connect(self._on_natnet_fps)
 
@@ -298,6 +299,7 @@ class VerifyCobotWindow(QMainWindow):
         self._set_natnet_status("disconnected", "#e53935")
         self.btn_natnet_connect.setEnabled(True)
         self.btn_natnet_disconnect.setEnabled(False)
+        self._rb_origin = None
         self._log("NatNet: disconnected.")
 
     def _set_natnet_status(self, text: str, color: str):
@@ -312,6 +314,8 @@ class VerifyCobotWindow(QMainWindow):
     def _on_rb_updated(self, rb_id: int, pos: list, quat: list):
         self._last_rb_pos  = pos
         self._last_rb_quat = quat
+        if self._rb_origin is None:
+            self._rb_origin = list(pos)
         if hasattr(self, 'lbl_rb_pos'):
             self.lbl_rb_pos.setText(
                 f"X:{pos[0]*1000:.1f}  Y:{pos[1]*1000:.1f}  Z:{pos[2]*1000:.1f} mm")
@@ -324,6 +328,18 @@ class VerifyCobotWindow(QMainWindow):
         if hasattr(self, 'lbl_hdr_rb_pos'):
             self.lbl_hdr_rb_pos.setText(
                 f"RB: {pos[0]*1000:.0f}, {pos[1]*1000:.0f}, {pos[2]*1000:.0f} mm")
+        if hasattr(self, 'lbl_rb_delta') and self._rb_origin is not None:
+            dx = (pos[0] - self._rb_origin[0]) * 1000
+            dy = (pos[1] - self._rb_origin[1]) * 1000
+            dz = (pos[2] - self._rb_origin[2]) * 1000
+            self.lbl_rb_delta.setText(
+                f"dx:{dx:+.1f}  dy:{dy:+.1f}  dz:{dz:+.1f} mm")
+        if hasattr(self, 'lbl_rb_r2_dist') and self._rb_origin is not None:
+            dx = (pos[0] - self._rb_origin[0]) * 1000
+            dy = (pos[1] - self._rb_origin[1]) * 1000
+            dz = (pos[2] - self._rb_origin[2]) * 1000
+            r = (dx**2 + dy**2 + dz**2) ** 0.5
+            self.lbl_rb_r2_dist.setText(f"{r:.2f} mm")
 
     def _on_natnet_fps(self, fps: float):
         if hasattr(self, 'lbl_natnet_fps'):
