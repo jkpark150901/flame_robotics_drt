@@ -296,6 +296,39 @@ class ZAPI(ZAPIBase):
         else:
             self.push_to_queue(request_payload)
 
+    def zapi_move_manipulator(self, kwargs=None):
+        """Handle manipulator joint move (보간 이동) request."""
+        self.__console.info(f"Received zapi_move_manipulator with kwargs: {kwargs}")
+        if not kwargs:
+            return
+        request_payload = {
+            "command": "move_manipulator",
+            "robot": kwargs.get("robot"),
+            "joint": kwargs.get("joint"),
+            "target": kwargs.get("target", 0.0),
+            "speed": kwargs.get("speed", 1.0),
+            "accel": kwargs.get("accel"),
+            "_identity": kwargs.get("_identity"),
+        }
+        if self._visualizer:
+            self._visualizer.push_request(request_payload)
+        else:
+            self.push_to_queue(request_payload)
+
+    def zapi_stop_manipulator(self, kwargs=None):
+        """Handle manipulator stop request."""
+        self.__console.info(f"Received zapi_stop_manipulator with kwargs: {kwargs}")
+        request_payload = {
+            "command": "stop_manipulator",
+            "robot": (kwargs or {}).get("robot"),
+            "joint": (kwargs or {}).get("joint"),
+            "_identity": (kwargs or {}).get("_identity"),
+        }
+        if self._visualizer:
+            self._visualizer.push_request(request_payload)
+        else:
+            self.push_to_queue(request_payload)
+
     def zapi_filter_spool(self, kwargs=None):
         """Handle filter_spool request (현재 로드된 스풀에 직접 적용)."""
         self.__console.info(f"Received zapi_filter_spool with kwargs: {kwargs}")

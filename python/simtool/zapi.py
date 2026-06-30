@@ -174,6 +174,24 @@ class ZAPI(QObject, ZAPIBase):
         else:
             self.__console.warning("[ZAPI] Cannot send save_spool: Socket not connected")
 
+    def _ZAPI_request_move_manipulator(self, robot: str, joint: str,
+                                       target: float, speed: float = 1.0, accel: float = None):
+        """매니퓰레이터 조인트를 target으로 사다리꼴 프로파일 이동(가감속). 예: 레일 베이스."""
+        if self.__dealer_socket and self.__dealer_socket.is_joined:
+            kwargs = {"robot": robot, "joint": joint, "target": target, "speed": speed, "accel": accel}
+            self.call(self.__dealer_socket, "zapi_move_manipulator", kwargs)
+            self.__console.info(f"[ZAPI] Sent move_manipulator: {robot}.{joint} → {target} (speed={speed})")
+        else:
+            self.__console.warning("[ZAPI] Cannot send move_manipulator: Socket not connected")
+
+    def _ZAPI_request_stop_manipulator(self, robot: str, joint: str = None):
+        """매니퓰레이터 조인트 애니메이션 중지."""
+        if self.__dealer_socket and self.__dealer_socket.is_joined:
+            self.call(self.__dealer_socket, "zapi_stop_manipulator", {"robot": robot, "joint": joint})
+            self.__console.info(f"[ZAPI] Sent stop_manipulator: {robot} {joint}")
+        else:
+            self.__console.warning("[ZAPI] Cannot send stop_manipulator: Socket not connected")
+
     def _ZAPI_request_set_mode(self, mode: str):
         """Sends command to set execution mode (simulation or real)."""
         if self.__dealer_socket and self.__dealer_socket.is_joined:

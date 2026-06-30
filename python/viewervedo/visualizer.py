@@ -55,6 +55,11 @@ class Visualizer:
         # Flag for external termination (set by Zapi)
         self._should_close = False
 
+        # 매니퓰레이터 조인트 애니메이션(보간 이동) 상태
+        # 각 항목: {"model", "joint", "target", "speed"}  speed 단위/프레임당 = unit/s
+        self._joint_animations = []
+        self._last_anim_time = None
+
         self.loop_count = 0
         self.last_log_time = time.time()
         self.last_frame_time = time.time()
@@ -234,8 +239,99 @@ class Visualizer:
             
             self._process_request(request_data)
             processed_count += 1
-        
+
+        # 3. Step manipulator joint animations (보간 이동)
+        now = time.time()
+        dt = 0.0 if self._last_anim_time is None else (now - self._last_anim_time)
+        self._last_anim_time = now
+        if self._joint_animations and dt > 0:
+            self._step_joint_animations(min(dt, 0.1))   # 큰 dt는 클램프
+
         return True
+
+    def _find_robot(self, name):
+        for m in getattr(self, '_robot_models', []):
+            if getattr(m, 'name', None) == name:
+                return m
+        return None
+
+    def _step_joint_animations(self, dt):
+        """활성 조인트 애니메이션을 사다리꼴 속도 프로파일로 한 스텝 진행.
+        가속(accel)으로 max_speed까지 올린 뒤 순항, target 도달 전 감속해 정지.
+        """
+        still = []
+        for anim in self._joint_animations:
+            model = anim["model"]; jn = anim["joint"]
+            tgt = float(anim["target"])
+            vmax = max(float(anim["speed"]), 1e-6)
+            accel = max(float(anim["accel"]), 1e-6)
+            cur = float(model._joint_cfg.get(jn, 0.0))
+            vel = float(anim.get("vel", 0.0))
+
+            d_rem = tgt - cur
+            dist = abs(d_rem)
+            direction = np.sign(d_rem) if d_rem != 0 else 0.0
+
+            # 정지 임박: 남은 거리·속도가 충분히 작으면 스냅
+            if dist <= 1e-6 and vel <= accel * dt:
+                model.set_joint(jn, tgt); model.update_fk()
+                continue
+
+            # 감속에 필요한 거리 = v² / (2a). 그보다 가까우면 감속, 아니면 가속/순항
+            stop_dist = (vel * vel) / (2.0 * accel)
+            if dist <= stop_dist:
+                vel = max(0.0, vel - accel * dt)      # 감속
+            else:
+                vel = min(vmax, vel + accel * dt)     # 가속 후 vmax 순항
+
+            new_cur = cur + direction * vel * dt
+            # target을 지나치면 스냅하고 종료
+            if (tgt - new_cur) * direction <= 0:
+                model.set_joint(jn, tgt); model.update_fk()
+                continue
+
+            anim["vel"] = vel
+            model.set_joint(jn, new_cur); model.update_fk()
+            still.append(anim)
+        self._joint_animations = still
+
+    def _set_joint_animation(self, robot_name, joint_name, target, speed, accel=None):
+        """해당 로봇/조인트의 기존 애니메이션을 교체하고 사다리꼴 프로파일로 이동 시작.
+        accel 미지정 시 speed의 2배(약 0.5s 가속)로 기본 설정.
+        """
+        model = self._find_robot(robot_name)
+        if model is None or model._urdf is None:
+            self.__console.warning(f"move_manipulator: 로봇 없음 '{robot_name}'")
+            return
+        if joint_name not in model._urdf._joint_map:
+            self.__console.warning(f"move_manipulator: 조인트 없음 '{joint_name}'")
+            return
+        spd = float(speed)
+        acc = float(accel) if accel is not None else max(spd * 2.0, 1e-6)
+        # 같은 (robot, joint)의 현재 속도는 이어받아 부드럽게 재타게팅
+        prev_vel = 0.0
+        for a in self._joint_animations:
+            if a["model"] is model and a["joint"] == joint_name:
+                prev_vel = a.get("vel", 0.0)
+        self._joint_animations = [
+            a for a in self._joint_animations
+            if not (a["model"] is model and a["joint"] == joint_name)
+        ]
+        self._joint_animations.append({
+            "model": model, "joint": joint_name,
+            "target": float(target), "speed": spd, "accel": acc, "vel": prev_vel,
+        })
+        self.__console.info(
+            f"move_manipulator: {robot_name}.{joint_name} → {target} (vmax={spd}, accel={acc})")
+
+    def _stop_joint_animation(self, robot_name, joint_name=None):
+        """해당 로봇(또는 특정 조인트)의 애니메이션을 즉시 중지."""
+        model = self._find_robot(robot_name)
+        self._joint_animations = [
+            a for a in self._joint_animations
+            if not (a["model"] is model and (joint_name is None or a["joint"] == joint_name))
+        ]
+        self.__console.info(f"stop_manipulator: {robot_name} {joint_name or '(all)'}")
 
     def _rotate_point_about_x(self, point, angle_deg, center):
         """Rotate a point around the global X axis."""
@@ -679,6 +775,17 @@ class Visualizer:
 
                     self.plotter.render()
                     self.__console.info(f"Positioner {axis} moved to {position} (vel={velocity})")
+                elif command == "move_manipulator":
+                    self._set_joint_animation(
+                        request_data.get("robot"),
+                        request_data.get("joint"),
+                        request_data.get("target", 0.0),
+                        request_data.get("speed", 1.0),
+                        request_data.get("accel"))
+                elif command == "stop_manipulator":
+                    self._stop_joint_animation(
+                        request_data.get("robot"),
+                        request_data.get("joint"))
                 elif command == "filter_spool":
                     self._filter_loaded_spool(request_data)
                 elif command == "reconstruct_mesh":

@@ -28,6 +28,36 @@ from simtool.param import SimParameterMap
 
 
 class AppWindow(QMainWindow):
+    # 모션 속도/가속 (사다리꼴 프로파일). kind별 단위: lin=m, rot=deg(전송 시 rad 변환)
+    _LIN_SPEED, _LIN_ACCEL = 1.0, 2.0               # m/s, m/s^2
+    _ROT_SPEED, _ROT_ACCEL = 60.0, 120.0            # deg/s, deg/s^2
+    _LIN_RES, _ROT_RES = 0.01, 1.0                  # 슬라이더 분해능 (m, deg)
+
+    _SOURCE_ROBOT = "rb20_1900es"
+    _DDA_ROBOT = "dda_rb10_1300e"
+
+    # 관절 테이블: (slider, edit, joint, kind, lo, hi)  kind: 'lin'(m) | 'rot'(deg)
+    _SOURCE_JOINTS = [
+        ('slider_source_base_pos',   'edit_source_base_pos',   'rt_joint_linear_track', 'lin',   0.0,  7.9),
+        ('slider_source_base_pos_2', 'edit_source_base_pos_2', 'rt_joint_carriage',     'lin',   0.0,  0.5),
+        ('slider_source_base_pos_3', 'edit_source_base_pos_3', 'rt_base',               'rot', -180.0, 180.0),
+        ('slider_source_base_pos_4', 'edit_source_base_pos_4', 'rt_shoulder',           'rot', -180.0, 180.0),
+        ('slider_source_base_pos_5', 'edit_source_base_pos_5', 'rt_elbow',              'rot', -180.0, 180.0),
+        ('slider_source_base_pos_6', 'edit_source_base_pos_6', 'rt_wrist1',             'rot', -180.0, 180.0),
+        ('slider_source_base_pos_7', 'edit_source_base_pos_7', 'rt_wrist2',             'rot', -180.0, 180.0),
+        ('slider_source_base_pos_8', 'edit_source_base_pos_8', 'rt_wrist3',             'rot', -180.0, 180.0),
+    ]
+    _DDA_JOINTS = [
+        ('slider_source_base_pos_9',  'edit_source_base_pos_9',  'dda_joint_linear_track', 'lin',   0.0,  7.9),
+        ('slider_source_base_pos_10', 'edit_source_base_pos_10', 'dda_joint_carriage',     'lin',   0.0,  0.5),
+        ('slider_source_base_pos_11', 'edit_source_base_pos_11', 'dda_joint_base',         'rot', -180.0, 180.0),
+        ('slider_source_base_pos_12', 'edit_source_base_pos_12', 'dda_joint_shoulder',     'rot', -180.0, 180.0),
+        ('slider_source_base_pos_13', 'edit_source_base_pos_13', 'dda_joint_elbow',        'rot', -180.0, 180.0),
+        ('slider_source_base_pos_14', 'edit_source_base_pos_14', 'dda_joint_wrist1',       'rot', -180.0, 180.0),
+        ('slider_source_base_pos_15', 'edit_source_base_pos_15', 'dda_joint_wrist2',       'rot', -180.0, 180.0),
+        ('slider_source_base_pos_16', 'edit_source_base_pos_16', 'dda_joint_wrist3',       'rot', -180.0, 180.0),
+    ]
+
     def __init__(self, config:dict, zpipe):
         """ initialization """
         super().__init__()
@@ -199,6 +229,12 @@ class AppWindow(QMainWindow):
             self.btn_pcd_ccl_filter.clicked.connect(self.__on_btn_pcd_ccl_filter_clicked)
         if hasattr(self, 'btn_pcd_save'):
             self.btn_pcd_save.clicked.connect(self.__on_btn_pcd_save_clicked)
+
+        # 매니퓰레이터(Source/DDA) 전체 관절 = 보간 애니메이션 모션
+        self.__wire_manipulator(self._SOURCE_ROBOT, self._SOURCE_JOINTS,
+                                'btn_robot_source_move', 'btn_robot_source_stop')
+        self.__wire_manipulator(self._DDA_ROBOT, self._DDA_JOINTS,
+                                'btn_robot_dda_move', 'btn_robot_dda_stop')
 
         # 스풀 고정 체크박스 → 수동 컨트롤(슬라이더/이동) 잠금 토글
         if hasattr(self, 'chk_spool_fix_f_column_r'):
@@ -699,6 +735,75 @@ class AppWindow(QMainWindow):
         except Exception as e:
             self.__console.error(f"Error saving result: {e}")
             self.__set_proc_status(f"[!] {e}")
+
+    # ── 매니퓰레이터 전체 관절 모션 (source/DDA 공통, 테이블 기반) ──
+    def __res_of(self, kind):
+        return self._LIN_RES if kind == 'lin' else self._ROT_RES
+
+    def __wire_manipulator(self, robot, table, move_btn, stop_btn):
+        """관절 테이블의 슬라이더↔edit 동기화 + Move/Stop 버튼 연결."""
+        for slider, edit, joint, kind, lo, hi in table:
+            res = self.__res_of(kind)
+            s = getattr(self, slider, None); e = getattr(self, edit, None)
+            if s is not None:
+                s.setMinimum(int(round(lo / res)))
+                s.setMaximum(int(round(hi / res)))
+                s.valueChanged.connect(
+                    lambda v, ed=edit, r=res: self.__manip_slider_changed(ed, v, r))
+            if e is not None:
+                e.editingFinished.connect(
+                    lambda ed=edit, sl=slider, r=res, _lo=lo, _hi=hi:
+                        self.__manip_edit_changed(ed, sl, r, _lo, _hi))
+        mb = getattr(self, move_btn, None); sb = getattr(self, stop_btn, None)
+        if mb is not None:
+            mb.clicked.connect(lambda _=False, rb=robot, tb=table: self.__manip_move(rb, tb))
+        if sb is not None:
+            sb.clicked.connect(lambda _=False, rb=robot: self.__manip_stop(rb))
+
+    def __manip_slider_changed(self, edit_name, value, res):
+        e = getattr(self, edit_name, None)
+        if e is not None:
+            e.setText(f"{value * res:.3f}")
+
+    def __manip_edit_changed(self, edit_name, slider_name, res, lo, hi):
+        e = getattr(self, edit_name, None); s = getattr(self, slider_name, None)
+        if e is None or s is None:
+            return
+        try:
+            val = float(e.text())
+        except ValueError:
+            return
+        val = max(lo, min(val, hi))
+        blocked = s.blockSignals(True)
+        s.setValue(int(round(val / res)))
+        s.blockSignals(blocked)
+
+    def __manip_move(self, robot, table):
+        """테이블의 모든 관절을 edit 목표값으로 보간 이동 (한 번에 팔 전체)."""
+        if not self.zapi:
+            return
+        import math
+        for _slider, edit, joint, kind, lo, hi in table:
+            e = getattr(self, edit, None)
+            if e is None:
+                continue
+            try:
+                val = float(e.text() or "0")
+            except ValueError:
+                continue
+            val = max(lo, min(val, hi))
+            if kind == 'rot':
+                target = math.radians(val)             # deg → rad
+                speed, accel = math.radians(self._ROT_SPEED), math.radians(self._ROT_ACCEL)
+            else:
+                target = val                           # m
+                speed, accel = self._LIN_SPEED, self._LIN_ACCEL
+            self.zapi._ZAPI_request_move_manipulator(robot, joint, target, speed, accel)
+        self.__console.info(f"Manipulator move requested: {robot} ({len(table)} joints)")
+
+    def __manip_stop(self, robot):
+        if self.zapi:
+            self.zapi._ZAPI_request_stop_manipulator(robot, None)   # 해당 로봇 전체 정지
 
     def __save_positioner_json(self, geom_path):
         """저장한 지오메트리 옆에 포지셔너 자세를 <name>.json 으로 기록."""
