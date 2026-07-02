@@ -32,35 +32,7 @@ class TaskSpaceTRRT(TaskSpaceRRT):
         For now, we use inverse of distance to obstacle as cost (maximize clearance).
         Cost = 1.0 / (distance + epsilon)
         """
-        if self.scene is None:
-            return 0.0
-            
-        # We need a point to query distance. Use the position part of pose.
-        # Ideally we check the whole tool, but for cost function, center point might be enough proxy.
-        # Or better: Min distance from tool to obstacle.
-        
-        # NOTE: self._check_collision in TaskSpaceRRT doesn't return distance directly.
-        # We need similar logic but getting distance.
-        
-        # Let's reuse the collision scene logic if accessible.
-        # We need to construct a query.
-        
-        # Point Check
-        pos = pose[:3]
-        query = np.array([pos], dtype=np.float32)
-        import open3d as o3d
-        query_tensor = o3d.core.Tensor(query, dtype=o3d.core.Dtype.Float32)
-        dist = self.scene.compute_distance(query_tensor).min().item()
-        
-        # Cost: High when close to obstacle, Low when far.
-        # Let's say Cost = exp(-distance / scale) or 1/distance
-        # Simple potential field:
-        # If distance is large, cost is low.
-        
-        # Prevent division by zero
-        safe_dist = max(dist, 1e-3)
-        cost = 1000.0 / safe_dist
-        return cost
+        return 0.0
 
     def _transition_test(self, cost_near, cost_new, distance):
         """

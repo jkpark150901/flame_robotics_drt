@@ -9,8 +9,21 @@
 import threading
 from collections import deque
 import time
+import importlib
+import inspect
+import sys
+import types
+import os
 import numpy as np
 import vedo
+try:
+    import pinocchio as pin
+except ImportError:
+    pin = None
+
+# Open3D core geometry is used here; the optional ML module can fail in this
+# workspace because of NumPy/SciPy ABI mismatch.
+sys.modules.setdefault("open3d.ml", types.ModuleType("open3d.ml"))
 import open3d as _o3d
 from util.logger.console import ConsoleLogger
 from common.graphic_device import GraphicDevice
@@ -21,6 +34,7 @@ class Visualizer:
     def __init__(self, config:dict=None):
         if config is None:
             config = {}
+        self._config = config
     
         self.__console = ConsoleLogger.get_logger()
 
@@ -59,6 +73,19 @@ class Visualizer:
         # 각 항목: {"model", "joint", "target", "speed"}  speed 단위/프레임당 = unit/s
         self._joint_animations = []
         self._last_anim_time = None
+        self._inspection_pick_enabled = False
+        self._inspection_pick_identity = None
+        self._inspection_point = None
+        self._inspection_marker = None
+        self._inspection_path_actor = None
+        self._last_inspection_path = None
+        self._last_inspection_q_path = None
+        self._last_inspection_edge_collisions = []
+        self._last_inspection_robot = None
+        self._robot_path_playback = None
+        self._path_playback = None
+        self._path_playback_marker = None
+        self._collision_highlight_original_colors = {}
 
         self.loop_count = 0
         self.last_log_time = time.time()
@@ -73,6 +100,7 @@ class Visualizer:
 
         # Register key callback
         self.plotter.add_callback("KeyPress", self._on_key_press)
+        self.plotter.add_callback("mouse click", self._on_mouse_click)
 
     def _setup_c_space(self, config: dict):
         """Add C-Space bounding box and axes to the plotter."""
@@ -178,6 +206,497 @@ class Visualizer:
         if label:
             self.__console.info(f"Camera set to {label}")
 
+    def _on_mouse_click(self, event):
+        """Pick an inspection point on the currently loaded pipe when pick mode is armed."""
+        if not getattr(self, '_inspection_pick_enabled', False):
+            return
+        pts = self._get_spool_points()
+        if pts is None or len(pts) == 0:
+            self.__console.warning("inspection pick: 로드된 스풀이 없습니다")
+            return
+
+        picked = getattr(event, "picked3d", None)
+        if picked is None:
+            self.__console.warning("inspection pick: pipe 표면 클릭 좌표를 얻지 못했습니다")
+            return
+
+        picked = np.asarray(picked, dtype=float)
+        # PCD/mesh 모두에서 실제 pipe 점으로 스냅해 저장한다.
+        idx = int(np.argmin(np.linalg.norm(pts - picked, axis=1)))
+        point = np.asarray(pts[idx], dtype=float)
+        self._set_inspection_point(point)
+        self._inspection_pick_enabled = False
+
+        identity = getattr(self, '_inspection_pick_identity', None)
+        if hasattr(self, 'zapi') and self.zapi and identity:
+            self.zapi.update_inspection_point({"point": point.tolist()}, identity=identity)
+        self.__console.info(f"inspection point picked: {np.round(point, 4)}")
+
+    def _set_inspection_point(self, point):
+        self._inspection_point = np.asarray(point, dtype=float)
+        old = getattr(self, '_inspection_marker', None)
+        if old is not None:
+            self.plotter.remove(old)
+        marker = vedo.Sphere(pos=self._inspection_point, r=0.045, c="tomato")
+        marker.pickable(False)
+        self._inspection_marker = marker
+        self.plotter.add(marker)
+        self.plotter.render()
+
+    def _clear_inspection_visuals(self, clear_point=True):
+        if getattr(self, '_inspection_path_actor', None) is not None:
+            self.plotter.remove(self._inspection_path_actor)
+            self._inspection_path_actor = None
+        if clear_point and getattr(self, '_inspection_marker', None) is not None:
+            self.plotter.remove(self._inspection_marker)
+            self._inspection_marker = None
+            self._inspection_point = None
+        self.plotter.render()
+
+    def _robot_target_link_name(self, robot_name):
+        if robot_name == "rb20_1900es":
+            return "rt_link_end"
+        if robot_name == "dda_rb10_1300e":
+            return "dda_link_end"
+        model = self._find_robot(robot_name)
+        if model is not None and model._urdf is not None:
+            for preferred in ("link_end", "end"):
+                for link in model._urdf.links:
+                    lname = getattr(link, "name", "")
+                    if preferred in lname.lower() and "tcp" not in lname.lower():
+                        return lname
+        return self._robot_tcp_link_name(robot_name)
+
+    def _robot_tcp_link_name(self, robot_name):
+        if robot_name == "rb20_1900es":
+            return "rt_tcp"
+        if robot_name == "dda_rb10_1300e":
+            return "dda_link_tcp"
+        model = self._find_robot(robot_name)
+        if model is not None and model._urdf is not None:
+            for link in model._urdf.links:
+                lname = getattr(link, "name", "")
+                if "tcp" in lname.lower():
+                    return lname
+        return None
+
+    def _get_robot_target_pose(self, robot_name):
+        model = self._find_robot(robot_name)
+        if model is None:
+            return None
+        link_name = self._robot_target_link_name(robot_name)
+        if link_name is None:
+            return None
+        T = model.get_link_world_T(link_name)
+        if T is None:
+            return None
+        pose = np.zeros(6, dtype=float)
+        pose[:3] = T[:3, 3]
+        return pose
+
+    def _get_robot_tcp_pose(self, robot_name):
+        return self._get_robot_target_pose(robot_name)
+
+    def _load_path_planner(self, module_name):
+        from plugins.pluginbase.plannerbase import PlannerBase
+        module = importlib.import_module(f"plugins.pathplanner.{module_name}")
+        for _, obj in inspect.getmembers(module, inspect.isclass):
+            if issubclass(obj, PlannerBase) and obj is not PlannerBase:
+                return obj()
+        raise RuntimeError(f"Planner plugin class not found: {module_name}")
+
+    def _inspection_q_space_planner_name(self, planner_name):
+        q_space_planners = {"rrt_connect", "rrt_star"}
+        planner_name = str(planner_name or "rrt_connect")
+        if planner_name in q_space_planners:
+            return planner_name
+        self.__console.warning(
+            f"inspection path: planner '{planner_name}' is task-space or does not support "
+            "q-space Pinocchio collision; using rrt_connect")
+        return "rrt_connect"
+
+    def _current_spool_collision_mesh(self):
+        """Build an Open3D mesh from the currently rendered pipe. Positioner/pipe are static here."""
+        spool = getattr(self, '_loaded_spool_mesh', None)
+        actors = spool if isinstance(spool, (list, tuple)) else [spool]
+        mesh_actor = next(
+            (actor for actor in actors
+             if actor is not None
+             and hasattr(actor, "vertices")
+             and hasattr(actor, "cells")
+             and len(getattr(actor, "cells", [])) > 0),
+            None)
+        if mesh_actor is not None:
+            mesh = _o3d.geometry.TriangleMesh()
+            mesh.vertices = _o3d.utility.Vector3dVector(np.asarray(mesh_actor.vertices, dtype=float))
+            mesh.triangles = _o3d.utility.Vector3iVector(np.asarray(mesh_actor.cells, dtype=np.int32))
+            mesh.compute_vertex_normals()
+            return mesh
+
+        pts = self._get_spool_points()
+        if pts is None or len(pts) < 4:
+            return None
+        pcd = _o3d.geometry.PointCloud()
+        pcd.points = _o3d.utility.Vector3dVector(np.asarray(pts, dtype=float))
+        try:
+            pcd.remove_non_finite_points()
+            pcd.remove_duplicated_points()
+        except Exception:
+            pass
+        try:
+            # Alpha-shape often emits many "invalid tetra" warnings for noisy or
+            # nearly co-planar pipe PCDs. They are not actionable for this
+            # EF-only collision mesh, so suppress Open3D warning spam here.
+            with _o3d.utility.VerbosityContextManager(_o3d.utility.VerbosityLevel.Error):
+                mesh = _o3d.geometry.TriangleMesh.create_from_point_cloud_alpha_shape(pcd, 0.06)
+            if mesh.has_triangles():
+                mesh.remove_degenerate_triangles()
+                mesh.remove_duplicated_triangles()
+                mesh.remove_duplicated_vertices()
+                mesh.remove_unreferenced_vertices()
+                mesh.compute_vertex_normals()
+                return mesh
+        except Exception as exc:
+            self.__console.warning(f"inspection path: alpha mesh failed, convex hull fallback ({exc})")
+        mesh, _ = pcd.compute_convex_hull()
+        mesh.compute_vertex_normals()
+        return mesh
+
+    def _configure_inspection_planner(self, planner, obstacle_mesh, start, goal, step_size, max_iter, robot_name=None):
+        mn = np.minimum(obstacle_mesh.get_min_bound(), np.minimum(start[:3], goal[:3]))
+        mx = np.maximum(obstacle_mesh.get_max_bound(), np.maximum(start[:3], goal[:3]))
+        ext = np.maximum(mx - mn, 1e-6)
+        pad = np.maximum(ext * 0.5, 0.5)
+        bounds = {
+            "x_min": float(mn[0] - pad[0]), "x_max": float(mx[0] + pad[0]),
+            "y_min": float(mn[1] - pad[1]), "y_max": float(mx[1] + pad[1]),
+            "z_min": float(mn[2] - pad[2]), "z_max": float(mx[2] + pad[2]),
+            "roll_min": -np.pi, "roll_max": np.pi,
+            "pitch_min": -np.pi, "pitch_max": np.pi,
+            "yaw_min": -np.pi, "yaw_max": np.pi,
+        }
+        if hasattr(planner, "bounds"):
+            planner.bounds = bounds
+        if hasattr(planner, "step_size"):
+            planner.step_size = float(step_size)
+        if hasattr(planner, "max_iter"):
+            planner.max_iter = int(max_iter)
+        if hasattr(planner, "max_iterations"):
+            planner.max_iterations = int(max_iter)
+        if hasattr(planner, "pin_collision_sample_resolution"):
+            planner.pin_collision_sample_resolution = float(step_size)
+        if robot_name is not None and hasattr(planner, "setup_pinocchio_collision"):
+            model = self._find_robot(robot_name)
+            urdf_path = getattr(model, "urdf_path", None) if model is not None else None
+            if urdf_path:
+                try:
+                    planner.setup_pinocchio_collision(
+                        urdf_path,
+                        package_dirs=[os.path.dirname(urdf_path)],
+                    )
+                except Exception as exc:
+                    self.__console.warning(f"inspection path: Pinocchio collision setup failed ({exc})")
+        planner.add_collision_object(obstacle_mesh)
+        return bounds
+
+    def _probe_current_spool_pinocchio_collision(self, reason="spool"):
+        """Add the currently loaded spool mesh to Pinocchio and check current robot q."""
+        obstacle_mesh = self._current_spool_collision_mesh()
+        if obstacle_mesh is None or not obstacle_mesh.has_triangles():
+            self.__console.warning(f"{reason}: spool collision mesh is not available")
+            return []
+
+        from plugins.pluginbase.plannerbase import PlannerBase
+
+        class _CollisionProbe(PlannerBase):
+            def generate(self, current_pose, target_pose, step_callback=None):
+                return []
+
+        results = []
+        for model in getattr(self, '_robot_models', []):
+            urdf_path = getattr(model, "urdf_path", None)
+            if not urdf_path:
+                continue
+            try:
+                probe = _CollisionProbe()
+                probe.setup_pinocchio_collision(
+                    urdf_path,
+                    package_dirs=[os.path.dirname(urdf_path)],
+                )
+                geom_id = probe.add_collision_object(obstacle_mesh)
+                if geom_id is None:
+                    self.__console.warning(
+                        f"{reason}: failed to add spool mesh to Pinocchio for {model.name}")
+                    continue
+                q = self._current_robot_q(model, probe.pin_model)
+                hit, pairs = probe.check_pinocchio_collision(q, return_pairs=True)
+                result = {
+                    "robot": getattr(model, "name", ""),
+                    "object_geom_id": geom_id,
+                    "collision": bool(hit),
+                    "pairs": [list(pair) for pair in pairs],
+                }
+                results.append(result)
+                if hit:
+                    pair_text = ", ".join(f"{a} <-> {b}" for a, b in pairs)
+                    self.__console.warning(
+                        f"{reason}: current robot collision detected for {model.name}: {pair_text}")
+                else:
+                    self.__console.info(
+                        f"{reason}: spool mesh added to Pinocchio for {model.name} "
+                        f"(object_geom_id={geom_id}), no collision at current q")
+            except Exception as exc:
+                self.__console.warning(
+                    f"{reason}: Pinocchio spool collision probe failed for "
+                    f"{getattr(model, 'name', 'robot')} ({exc})")
+        self._last_spool_collision_probe = results
+        return results
+
+    def _pin_joint_names(self, pin_model):
+        return [str(name) for name in list(pin_model.names)[1:1 + pin_model.nq]]
+
+    def _current_robot_q(self, model, pin_model):
+        q = np.zeros(pin_model.nq, dtype=float)
+        for i, joint_name in enumerate(self._pin_joint_names(pin_model)):
+            q[i] = float(model._joint_cfg.get(joint_name, 0.0))
+        return q
+
+    def _apply_robot_q(self, model, pin_model, q):
+        for i, joint_name in enumerate(self._pin_joint_names(pin_model)):
+            model.set_joint(joint_name, float(q[i]))
+        model.update_fk()
+
+    def _pin_target_frame_id(self, pin_model, robot_name):
+        link_name = self._robot_target_link_name(robot_name)
+        if link_name:
+            try:
+                fid = pin_model.getFrameId(link_name)
+                if fid < pin_model.nframes:
+                    return fid
+            except Exception:
+                pass
+        return pin_model.nframes - 1
+
+    def _pin_target_world_T(self, model, pin_model, q, robot_name):
+        if pin is None:
+            return None
+        data = pin_model.createData()
+        pin.forwardKinematics(pin_model, data, q)
+        pin.updateFramePlacements(pin_model, data)
+        fid = self._pin_target_frame_id(pin_model, robot_name)
+        local_T = data.oMf[fid].homogeneous
+        return model._base_T @ local_T
+
+    def _pin_tcp_world_T(self, model, pin_model, q, robot_name):
+        return self._pin_target_world_T(model, pin_model, q, robot_name)
+
+    def _solve_inspection_ik(self, model, planner, robot_name, target_world, q_init):
+        if pin is None or planner.pin_model is None:
+            return None
+
+        pin_model = planner.pin_model
+        data = pin_model.createData()
+        fid = self._pin_target_frame_id(pin_model, robot_name)
+
+        current_world_T = self._pin_target_world_T(model, pin_model, q_init, robot_name)
+        if current_world_T is None:
+            return None
+
+        target_world_T = current_world_T.copy()
+        target_world_T[:3, 3] = np.asarray(target_world, dtype=float)
+        target_local_T = np.linalg.inv(model._base_T) @ target_world_T
+        target_se3 = pin.SE3(target_local_T[:3, :3], target_local_T[:3, 3])
+
+        q = np.asarray(q_init, dtype=float).copy()
+        damping = 1e-3
+        dt = 0.35
+        tol = 1e-4
+        max_iter = 600
+
+        for _ in range(max_iter):
+            pin.forwardKinematics(pin_model, data, q)
+            pin.updateFramePlacements(pin_model, data)
+            err = pin.log6(data.oMf[fid].inverse() * target_se3).vector
+            if np.linalg.norm(err) < tol:
+                return q
+            J = pin.computeFrameJacobian(pin_model, data, q, fid, pin.ReferenceFrame.LOCAL)
+            JJt = J @ J.T
+            dq = J.T @ np.linalg.solve(JJt + damping * np.eye(6), err)
+            q = pin.integrate(pin_model, q, dt * dq)
+            q = np.minimum(np.maximum(q, pin_model.lowerPositionLimit), pin_model.upperPositionLimit)
+
+        final_T = self._pin_target_world_T(model, pin_model, q, robot_name)
+        final_err = np.linalg.norm(final_T[:3, 3] - np.asarray(target_world, dtype=float)) if final_T is not None else float("inf")
+        if final_err < 0.01:
+            return q
+        self.__console.warning(f"inspection IK failed: position error={final_err:.4f} m")
+        return None
+
+    def _q_path_to_target_poses(self, model, pin_model, robot_name, q_path, sample_resolution=0.03):
+        poses = []
+        q_pts = [np.asarray(q, dtype=float) for q in q_path]
+        if not q_pts:
+            return poses
+        resolution = max(float(sample_resolution), 1e-6)
+        if len(q_pts) == 1:
+            samples = q_pts
+        else:
+            samples = []
+            for edge_idx, (qa, qb) in enumerate(zip(q_pts[:-1], q_pts[1:])):
+                steps = max(1, int(np.ceil(np.linalg.norm(qb - qa) / resolution)))
+                for step in range(steps + 1):
+                    if edge_idx > 0 and step == 0:
+                        continue
+                    ratio = step / steps
+                    samples.append(qa * (1.0 - ratio) + qb * ratio)
+        for q in samples:
+            T = self._pin_target_world_T(model, pin_model, q, robot_name)
+            if T is not None:
+                pose = np.zeros(6, dtype=float)
+                pose[:3] = T[:3, 3]
+                poses.append(pose)
+        return poses
+
+    def _q_path_to_tcp_poses(self, model, pin_model, robot_name, q_path, sample_resolution=0.03):
+        return self._q_path_to_target_poses(model, pin_model, robot_name, q_path, sample_resolution)
+
+    def _verify_planned_path(self, planner, path):
+        colliding_edges = 0
+        collision_pairs = []
+        edge_collisions = []
+        seen_pairs = set()
+        poses = [np.asarray(p, dtype=float) for p in path]
+        for edge_idx, (a_pose, b_pose) in enumerate(zip(poses[:-1], poses[1:])):
+            pairs = (planner.collision_pairs_along_edge(a_pose, b_pose)
+                     if hasattr(planner, "collision_pairs_along_edge") else [])
+            if pairs or planner._check_collision(a_pose, b_pose):
+                colliding_edges += 1
+                edge_collisions.append({
+                    "edge": edge_idx,
+                    "from_waypoint": edge_idx,
+                    "to_waypoint": edge_idx + 1,
+                    "pairs": [list(pair) for pair in pairs],
+                })
+            for pair in pairs:
+                key = tuple(pair)
+                if key in seen_pairs:
+                    continue
+                seen_pairs.add(key)
+                collision_pairs.append(list(pair))
+        return {
+            "colliding_edges": colliding_edges,
+            "collision_pairs": collision_pairs,
+            "edge_collisions": edge_collisions,
+            "end_link_colliding": any(
+                "link_end" in name
+                for pair in collision_pairs
+                for name in pair),
+            "backend": "pinocchio" if getattr(planner, "pin_model", None) is not None else "none",
+        }
+
+    def _show_inspection_path(self, path):
+        self._clear_inspection_visuals(clear_point=False)
+        pts = np.asarray([np.asarray(p, dtype=float)[:3] for p in path], dtype=float)
+        if len(pts) < 2:
+            return
+        actor = vedo.Line(pts).c("limegreen").lw(5)
+        actor.pickable(False)
+        self._inspection_path_actor = actor
+        self.plotter.add(actor)
+        self.plotter.render()
+
+    def _plan_inspection_path(self, request_data):
+        identity = request_data.get("_identity")
+        result = {"status": "failed"}
+        try:
+            target = getattr(self, '_inspection_point', None)
+            if target is None:
+                raise RuntimeError("inspection point is not selected")
+            obstacle_mesh = self._current_spool_collision_mesh()
+            if obstacle_mesh is None:
+                raise RuntimeError("loaded pipe is not available")
+            robot_name = request_data.get("robot", "rb20_1900es")
+            start = self._get_robot_tcp_pose(robot_name)
+            if start is None:
+                raise RuntimeError(f"robot TCP not found: {robot_name}")
+            goal = np.zeros(6, dtype=float)
+            goal[:3] = np.asarray(target, dtype=float)
+            robot_model = self._find_robot(robot_name)
+            if robot_model is None:
+                raise RuntimeError(f"robot model not found: {robot_name}")
+
+            planner_name = self._inspection_q_space_planner_name(request_data.get("planner", "rrt_connect"))
+            planner = self._load_path_planner(planner_name)
+            self._configure_inspection_planner(
+                planner,
+                obstacle_mesh,
+                start,
+                goal,
+                float(request_data.get("step_size", 0.08)),
+                int(request_data.get("max_iter", 3000)),
+                robot_name=robot_name)
+            if getattr(planner, "pin_model", None) is None:
+                raise RuntimeError("Pinocchio collision model is not configured")
+
+            start_q = self._current_robot_q(robot_model, planner.pin_model)
+            goal_q = self._solve_inspection_ik(robot_model, planner, robot_name, target, start_q)
+            if goal_q is None:
+                raise RuntimeError("failed to solve robot IK for inspection point")
+
+            t0 = time.time()
+            q_path = planner.generate(start_q, goal_q)
+            elapsed = time.time() - t0
+            forced_collision_preview = False
+            if not q_path:
+                q_path = [start_q, goal_q]
+                forced_collision_preview = True
+                self.__console.warning(
+                    f"inspection path: no collision-free path found ({elapsed:.2f}s); "
+                    "using direct q path for collision preview")
+            verification = self._verify_planned_path(planner, q_path)
+            if verification["colliding_edges"] != 0:
+                forced_collision_preview = True
+                self.__console.warning(
+                    f"inspection path collision detected; keeping path for preview: {verification}")
+            display_resolution = float(request_data.get("display_step_size", request_data.get("step_size", 0.08)))
+            path = self._q_path_to_tcp_poses(
+                robot_model,
+                planner.pin_model,
+                robot_name,
+                q_path,
+                sample_resolution=display_resolution)
+            if len(path) < 2:
+                raise RuntimeError("planned q path could not be converted to TCP path")
+            self._last_inspection_q_path = [np.asarray(q, dtype=float) for q in q_path]
+            self._last_inspection_edge_collisions = verification.get("edge_collisions", [])
+            self._last_inspection_robot = robot_name
+            self._last_inspection_path = [np.asarray(p, dtype=float) for p in path]
+            self._show_inspection_path(path)
+            result = {
+                "status": "success",
+                "planner": planner_name,
+                "robot": robot_name,
+                "waypoints": len(q_path),
+                "elapsed": elapsed,
+                "start": start.tolist(),
+                "goal": goal.tolist(),
+                "verification": verification,
+                "robot_links_considered": True,
+                "collision_preview": forced_collision_preview,
+            }
+            if forced_collision_preview:
+                self.__console.warning(
+                    f"inspection q path kept for collision preview: {planner_name}, "
+                    f"{len(q_path)} waypoints, {elapsed:.2f}s")
+            else:
+                self.__console.info(
+                    f"inspection q path OK: {planner_name}, {len(q_path)} waypoints, {elapsed:.2f}s")
+        except Exception as e:
+            result = {"status": "failed", "message": str(e)}
+            self.__console.error(f"inspection path failed: {e}")
+        if hasattr(self, 'zapi') and self.zapi and identity:
+            self.zapi.reply_inspection_path(result, identity=identity)
+
     def run(self, frequency_hz: int):
         self.target_frequency_hz = frequency_hz
         self.__console.debug(f"Starting Vedo GUI loop (target: {frequency_hz} Hz)")
@@ -246,6 +765,9 @@ class Visualizer:
         self._last_anim_time = now
         if self._joint_animations and dt > 0:
             self._step_joint_animations(min(dt, 0.1))   # 큰 dt는 클램프
+        if (getattr(self, '_path_playback', None) is not None
+                or getattr(self, '_robot_path_playback', None) is not None) and dt > 0:
+            self._step_path_playback(min(dt, 0.1))
 
         return True
 
@@ -333,6 +855,239 @@ class Visualizer:
         ]
         self.__console.info(f"stop_manipulator: {robot_name} {joint_name or '(all)'}")
 
+    def _start_path_playback(self, speed=0.2):
+        """Replay the last planned inspection q path by moving the robot model."""
+        q_path = getattr(self, '_last_inspection_q_path', None)
+        robot_name = getattr(self, '_last_inspection_robot', None)
+        model = self._find_robot(robot_name) if robot_name else None
+        if q_path is None or len(q_path) < 2 or model is None:
+            self.__console.warning("execute_inspection_path: planned path가 없습니다")
+            return False
+
+        q_pts = np.asarray([np.asarray(q, dtype=float) for q in q_path], dtype=float)
+        seg_lengths = np.linalg.norm(np.diff(q_pts, axis=0), axis=1)
+        if not np.any(seg_lengths > 1e-9):
+            self.__console.warning("execute_inspection_path: path 길이가 0입니다")
+            return False
+
+        pin_model = self._build_pin_model_for_robot(model)
+        if pin_model is None:
+            self.__console.warning("execute_inspection_path: Pinocchio model 생성 실패")
+            return False
+
+        self._clear_collision_highlights()
+        path = getattr(self, '_last_inspection_path', None)
+        pts = np.asarray([np.asarray(p, dtype=float)[:3] for p in path], dtype=float) if path else None
+        old = getattr(self, '_path_playback_marker', None)
+        if old is not None:
+            self.plotter.remove(old)
+        if pts is not None and len(pts) > 0:
+            marker = vedo.Sphere(pos=pts[0], r=0.055, c="dodgerblue")
+            marker.pickable(False)
+            self._path_playback_marker = marker
+            self.plotter.add(marker)
+        else:
+            self._path_playback_marker = None
+
+        self._robot_path_playback = {
+            "model": model,
+            "pin_model": pin_model,
+            "robot_name": robot_name,
+            "q_points": q_pts,
+            "seg_lengths": seg_lengths,
+            "seg_idx": 0,
+            "seg_s": 0.0,
+            "speed": max(float(speed), 1e-6),
+            "edge_collisions": {
+                int(item.get("edge", -1)): item.get("pairs", [])
+                for item in getattr(self, '_last_inspection_edge_collisions', [])
+            },
+            "logged_collision_edges": set(),
+        }
+        if self._robot_path_playback["edge_collisions"]:
+            edges = sorted(self._robot_path_playback["edge_collisions"].keys())
+            self.__console.warning(
+                f"execute_inspection_path: collision detected between waypoints {edges}")
+            self._log_path_playback_collision(self._robot_path_playback, 0)
+        self._path_playback = None
+        self._apply_robot_q(model, pin_model, q_pts[0])
+        self.plotter.render()
+        self.__console.info(f"execute_inspection_path: robot playback started ({len(q_pts)} waypoints)")
+        return True
+
+    def _log_path_playback_collision(self, playback, edge_idx):
+        edge_collisions = playback.get("edge_collisions", {})
+        logged = playback.get("logged_collision_edges", set())
+        if edge_idx not in edge_collisions or edge_idx in logged:
+            return
+        pairs = edge_collisions.get(edge_idx) or []
+        self._highlight_collision_pairs(pairs)
+        pair_text = ", ".join(f"{a} <-> {b}" for a, b in pairs) if pairs else "unknown pair"
+        self.__console.warning(
+            "execute_inspection_path: collision between "
+            f"waypoint {edge_idx} -> {edge_idx + 1} ({pair_text})")
+        logged.add(edge_idx)
+        playback["logged_collision_edges"] = logged
+        self.plotter.render()
+
+    def _remember_actor_color(self, actor):
+        key = id(actor)
+        if key not in self._collision_highlight_original_colors:
+            try:
+                self._collision_highlight_original_colors[key] = (actor, tuple(actor.color()))
+            except Exception:
+                self._collision_highlight_original_colors[key] = (actor, None)
+
+    def _highlight_actor_collision(self, actor):
+        if actor is None:
+            return
+        self._remember_actor_color(actor)
+        try:
+            actor.c("red")
+        except Exception:
+            pass
+
+    def _clear_collision_highlights(self):
+        for actor, color in list(getattr(self, '_collision_highlight_original_colors', {}).values()):
+            try:
+                if color is not None:
+                    actor.c(color)
+            except Exception:
+                pass
+        self._collision_highlight_original_colors = {}
+
+    def _highlight_spool_collision_object(self):
+        spool = getattr(self, '_loaded_spool_mesh', None)
+        actors = spool if isinstance(spool, (list, tuple)) else [spool]
+        for actor in actors:
+            self._highlight_actor_collision(actor)
+
+    def _link_name_from_collision_geom(self, model, geom_name):
+        link_actors = getattr(model, '_link_actors', {}) or {}
+        candidates = sorted(link_actors.keys(), key=len, reverse=True)
+        for link_name in candidates:
+            if geom_name == link_name or geom_name.startswith(f"{link_name}_"):
+                return link_name
+        return None
+
+    def _highlight_collision_geometry_name(self, geom_name):
+        if not geom_name:
+            return
+        if str(geom_name).startswith("collision_object_"):
+            self._highlight_spool_collision_object()
+            return
+        for model in getattr(self, '_robot_models', []):
+            link_name = self._link_name_from_collision_geom(model, str(geom_name))
+            if not link_name:
+                continue
+            for actor in getattr(model, '_link_actors', {}).get(link_name, []):
+                self._highlight_actor_collision(actor)
+            return
+
+    def _highlight_collision_pairs(self, pairs):
+        for pair in pairs or []:
+            for geom_name in pair:
+                self._highlight_collision_geometry_name(geom_name)
+
+    def _step_path_playback(self, dt):
+        if getattr(self, '_robot_path_playback', None) is not None:
+            self._step_robot_path_playback(dt)
+            return
+
+        pb = getattr(self, '_path_playback', None)
+        marker = getattr(self, '_path_playback_marker', None)
+        if pb is None or marker is None:
+            self._path_playback = None
+            return
+
+        pts = pb["points"]
+        seg_lengths = pb["seg_lengths"]
+        remaining = pb["speed"] * dt
+        idx = int(pb["seg_idx"])
+        seg_s = float(pb["seg_s"])
+
+        while remaining > 0.0 and idx < len(seg_lengths):
+            length = float(seg_lengths[idx])
+            if length <= 1e-9:
+                idx += 1
+                seg_s = 0.0
+                continue
+            advance = min(remaining, length - seg_s)
+            seg_s += advance
+            remaining -= advance
+            if seg_s >= length - 1e-9:
+                idx += 1
+                seg_s = 0.0
+
+        if idx >= len(seg_lengths):
+            marker.pos(pts[-1])
+            self._path_playback = None
+            self.__console.info("execute_inspection_path: playback finished")
+        else:
+            length = float(seg_lengths[idx])
+            ratio = 0.0 if length <= 1e-9 else seg_s / length
+            pos = pts[idx] * (1.0 - ratio) + pts[idx + 1] * ratio
+            marker.pos(pos)
+            pb["seg_idx"] = idx
+            pb["seg_s"] = seg_s
+        self.plotter.render()
+
+    def _build_pin_model_for_robot(self, model):
+        if pin is None:
+            return None
+        try:
+            return pin.buildModelFromUrdf(model.urdf_path)
+        except Exception:
+            return None
+
+    def _step_robot_path_playback(self, dt):
+        rb = getattr(self, '_robot_path_playback', None)
+        if rb is None:
+            return
+        model = rb["model"]
+        pin_model = rb["pin_model"]
+        q_pts = rb["q_points"]
+        seg_lengths = rb["seg_lengths"]
+        remaining = rb["speed"] * dt
+        idx = int(rb["seg_idx"])
+        seg_s = float(rb["seg_s"])
+        self._log_path_playback_collision(rb, idx)
+
+        while remaining > 0.0 and idx < len(seg_lengths):
+            length = float(seg_lengths[idx])
+            if length <= 1e-9:
+                idx += 1
+                seg_s = 0.0
+                self._log_path_playback_collision(rb, idx)
+                continue
+            advance = min(remaining, length - seg_s)
+            seg_s += advance
+            remaining -= advance
+            if seg_s >= length - 1e-9:
+                idx += 1
+                seg_s = 0.0
+                self._log_path_playback_collision(rb, idx)
+
+        if idx >= len(seg_lengths):
+            q = q_pts[-1]
+            self._apply_robot_q(model, pin_model, q)
+            self._robot_path_playback = None
+            self.__console.info("execute_inspection_path: robot playback finished")
+        else:
+            length = float(seg_lengths[idx])
+            ratio = 0.0 if length <= 1e-9 else seg_s / length
+            q = q_pts[idx] * (1.0 - ratio) + q_pts[idx + 1] * ratio
+            self._apply_robot_q(model, pin_model, q)
+            rb["seg_idx"] = idx
+            rb["seg_s"] = seg_s
+
+        marker = getattr(self, '_path_playback_marker', None)
+        if marker is not None:
+            tcp_T = self._pin_tcp_world_T(model, pin_model, q, rb["robot_name"])
+            if tcp_T is not None:
+                marker.pos(tcp_T[:3, 3])
+        self.plotter.render()
+
     def _rotate_point_about_x(self, point, angle_deg, center):
         """Rotate a point around the global X axis."""
         point = np.array(point, dtype=float)
@@ -386,7 +1141,6 @@ class Visualizer:
         if recon is not None:
             self.plotter.remove(recon)
             self._spool_recon_mesh = None
-            self._spool_recon_mesh_o3d = None
         new_pts = np.asarray(new_pts, dtype=np.float64)
         new_actor = vedo.Points(new_pts)
         self.plotter.add(new_actor)
@@ -471,16 +1225,18 @@ class Visualizer:
             # 재건 메시를 새 스풀로 삼아 오프셋 모델에 연결 → 포지셔너 추종(같이 이동)
             self._loaded_spool_mesh = vmesh
             self._spool_recon_mesh = vmesh
-            self._spool_recon_mesh_o3d = mesh_o3d  # 저장용 (면 정보)
-            T = self._spool_world_T if getattr(self, '_spool_world_T', None) is not None else np.eye(4)
+            Tc = self._chuck_world_T()
+            T = (getattr(self, '_spool_world_T', None)
+                 if getattr(self, '_spool_world_T', None) is not None
+                 else ((Tc @ self._spool_offset_T()) if Tc is not None else np.eye(4)))
             Tinv = np.linalg.inv(T)
             # verts(월드) → local 로 환산해 world = T @ local 유지 (현재 위치 보존 + 추종 가능)
             self._spool_local_verts = (Tinv[:3, :3] @ verts.T).T + Tinv[:3, 3]
             self._spool_world_T = T
-            Tc = self._chuck_world_T()
             if Tc is not None:
                 self._chuck_prev_T = Tc
             self.plotter.render()
+            self._probe_current_spool_pinocchio_collision("reconstruct_mesh")
             self.__console.info(f"reconstruct_mesh: 정점 {len(verts)}, 면 {len(faces)} (pcd 제거, 메시가 스풀로 전환)")
         except Exception as e:
             self.__console.error(f"reconstruct_mesh 실패: {e}")
@@ -491,16 +1247,19 @@ class Visualizer:
         if not path:
             return
         try:
-            recon_o3d = getattr(self, '_spool_recon_mesh_o3d', None)
             recon = getattr(self, '_spool_recon_mesh', None)
-            if recon is not None and recon_o3d is not None:
-                # 현재(추종 반영된) 메시 정점으로 갱신해 저장 (면 정보는 유지)
+            if recon is not None and hasattr(recon, "vertices") and hasattr(recon, "cells"):
+                # 저장 mesh는 spool local frame으로 기록한다. 옆 JSON의 chuck 기준 offset을
+                # 다시 적용하면 load 후 동일한 pose로 돌아갈 수 있다.
+                verts = getattr(self, '_spool_local_verts', None)
+                if verts is None:
+                    verts = np.asarray(recon.vertices)
                 m = _o3d.geometry.TriangleMesh()
-                m.vertices = _o3d.utility.Vector3dVector(np.asarray(recon.vertices))
-                m.triangles = recon_o3d.triangles
+                m.vertices = _o3d.utility.Vector3dVector(np.asarray(verts, dtype=float))
+                m.triangles = _o3d.utility.Vector3iVector(np.asarray(recon.cells, dtype=np.int32))
                 m.compute_vertex_normals()
                 _o3d.io.write_triangle_mesh(path, m)
-                self.__console.info(f"save_spool: 메시 저장 {path}")
+                self.__console.info(f"save_spool: local-frame 메시 저장 {path}")
             else:
                 pts = self._get_spool_points()
                 if pts is None:
@@ -581,6 +1340,26 @@ class Visualizer:
             return True
         return False
 
+    def _ensure_spool_frame_from_actor(self):
+        """
+        Mesh로 로드된 스풀처럼 local frame이 없는 경우, 현재 화면 좌표를
+        현재 chuck@offset 기준 local frame으로 환산해 이후 fixation 이동을 가능하게 한다.
+        """
+        if getattr(self, '_spool_local_verts', None) is not None and getattr(self, '_spool_world_T', None) is not None:
+            return True
+        pts = self._get_spool_points()
+        if pts is None or len(pts) == 0:
+            return False
+        Tc = self._chuck_world_T()
+        T = (Tc @ self._spool_offset_T()) if Tc is not None else np.eye(4)
+        Tinv = np.linalg.inv(T)
+        self._spool_local_verts = (Tinv[:3, :3] @ np.asarray(pts, dtype=float).T).T + Tinv[:3, 3]
+        self._spool_world_T = T
+        if Tc is not None:
+            self._chuck_prev_T = Tc
+        self.__console.info("spool fixation frame initialized from current actor using chuck offset")
+        return True
+
     def _render_spool_offset(self):
         """수동 배치: 현재 chuck 기준으로 스풀을 절대 배치 (spool_world = T_chuck @ T_offset)."""
         local = getattr(self, '_spool_local_verts', None)
@@ -605,6 +1384,7 @@ class Visualizer:
                     if path:
                         self.__console.info(f"Loading Spool: {path}")
                         try:
+                            self._clear_collision_highlights()
                             import pathlib as _pl
                             if _pl.Path(path).suffix.lower() == ".pcd":
                                 
@@ -632,7 +1412,6 @@ class Visualizer:
                                     if _old_rc is not _old_sp:
                                         self.plotter.remove(_old_rc)
                                     self._spool_recon_mesh = None
-                                    self._spool_recon_mesh_o3d = None
 
                                 self._spool_offset_xyz = [0.0, 0.0, 0.0]
                                 self._spool_offset_xrot = 0.0
@@ -654,12 +1433,20 @@ class Visualizer:
                                     self._loaded_spool_mesh = mesh
                                     self._render_spool_offset()
                                 else:
-                                    # PLY 등(저장된 메시/점군): 이미 월드(미터) 좌표이므로 스케일 없이 그대로 표시
-                                    self._spool_local_verts = None
+                                    # 저장된 PLY/mesh는 spool local frame(m)으로 간주한다.
+                                    # 옆 JSON의 chuck 기준 offset을 적용하면 저장 시 pose로 복원된다.
+                                    if hasattr(mesh, "vertices"):
+                                        self._spool_local_verts = np.asarray(mesh.vertices, dtype=float).copy()
+                                    else:
+                                        self._spool_local_verts = None
                                     self.plotter.add(mesh)
                                     self._loaded_spool_mesh = mesh
+                                    if hasattr(mesh, "cells"):
+                                        self._spool_recon_mesh = mesh
+                                    self._render_spool_offset()
 
                                 self.plotter.render()
+                                self._probe_current_spool_pinocchio_collision("load_spool")
                                 self.__console.info(f"Successfully loaded {path}")
                                 
                                 # Send reply
@@ -700,6 +1487,12 @@ class Visualizer:
                     for actor in actors:
                         if hasattr(actor, "mirror"):
                             actor.mirror(axis="x", origin=center)
+                    if self._ensure_spool_frame_from_actor():
+                        T = getattr(self, '_spool_world_T', None)
+                        pts = self._get_spool_points()
+                        if T is not None and pts is not None:
+                            Tinv = np.linalg.inv(T)
+                            self._spool_local_verts = (Tinv[:3, :3] @ pts.T).T + Tinv[:3, 3]
 
                     self._loaded_spool_x_flipped = not getattr(self, '_loaded_spool_x_flipped', False)
                     self.plotter.render()
@@ -708,21 +1501,60 @@ class Visualizer:
                 elif command == "move_spool":
                     # 스풀 위치/회전을 chuck 기준 오프셋으로 설정 (x,y,z,x_rot,z_rot)
                     spool = getattr(self, '_loaded_spool_mesh', None)
-                    if spool is None or getattr(self, '_spool_local_verts', None) is None:
+                    if spool is None:
                         self.__console.warning("move_spool: 로드된 스풀(PCD)이 없습니다")
                         return True
-                    self._spool_offset_xyz = [
+                    new_xyz = [
                         float(request_data.get("x", 0.0)),
                         float(request_data.get("y", 0.0)),
                         float(request_data.get("z", 0.0)),
                     ]
-                    self._spool_offset_xrot = float(request_data.get("x_rotation", 0.0))
-                    self._spool_offset_zrot = float(request_data.get("z_rotation", 0.0))
+                    new_xrot = float(request_data.get("x_rotation", 0.0))
+                    new_zrot = float(request_data.get("z_rotation", 0.0))
+
+                    # 저장된 mesh/ply처럼 world 좌표로 로드되어 local frame이 없는 경우:
+                    # 요청된 offset 기준으로 local을 역산해 현재 화면 위치를 보존한 채
+                    # 이후 offset/positioner 추종 모델에 편입한다.
+                    if getattr(self, '_spool_local_verts', None) is None:
+                        pts = self._get_spool_points()
+                        Tc = self._chuck_world_T()
+                        if pts is None or Tc is None:
+                            self.__console.warning("move_spool: 스풀 local frame 초기화 실패")
+                            return True
+                        old_xyz = getattr(self, '_spool_offset_xyz', [0.0, 0.0, 0.0])
+                        old_xrot = getattr(self, '_spool_offset_xrot', 0.0)
+                        old_zrot = getattr(self, '_spool_offset_zrot', 0.0)
+                        self._spool_offset_xyz = new_xyz
+                        self._spool_offset_xrot = new_xrot
+                        self._spool_offset_zrot = new_zrot
+                        Tnew = Tc @ self._spool_offset_T()
+                        Tinv = np.linalg.inv(Tnew)
+                        self._spool_local_verts = (Tinv[:3, :3] @ pts.T).T + Tinv[:3, 3]
+                        self._spool_world_T = Tnew
+                        self._spool_offset_xyz = old_xyz
+                        self._spool_offset_xrot = old_xrot
+                        self._spool_offset_zrot = old_zrot
+
+                    self._spool_offset_xyz = new_xyz
+                    self._spool_offset_xrot = new_xrot
+                    self._spool_offset_zrot = new_zrot
                     self._render_spool_offset()
                     self.plotter.render()
+                    self._probe_current_spool_pinocchio_collision("move_spool")
                     self.__console.info(
                         f"Spool offset set to xyz={self._spool_offset_xyz}, "
                         f"x_rot={self._spool_offset_xrot}, z_rot={self._spool_offset_zrot}")
+                elif command == "set_spool_fixation":
+                    fix_m_column_z = bool(request_data.get("fix_m_column_z", False))
+                    fix_f_column_r = bool(request_data.get("fix_f_column_r", False))
+                    self._spool_fix_r = fix_f_column_r
+                    if fix_m_column_z or fix_f_column_r:
+                        self._ensure_spool_frame_from_actor()
+                    Tc_now = self._chuck_world_T()
+                    if Tc_now is not None:
+                        self._chuck_prev_T = Tc_now
+                    self.__console.info(
+                        f"Spool fixation set: fix_f={fix_f_column_r}, fix_z={fix_m_column_z}")
                 elif command == "move_positioner":
                     import math
                     axis = request_data.get("axis")
@@ -731,6 +1563,8 @@ class Visualizer:
                     fix_m_column_z = bool(request_data.get("fix_m_column_z", False))
                     fix_f_column_r = bool(request_data.get("fix_f_column_r", False))
                     self._spool_fix_r = fix_f_column_r
+                    if fix_m_column_z or fix_f_column_r:
+                        self._ensure_spool_frame_from_actor()
 
                     for model in getattr(self, '_robot_models', []):
                         joint_map = model._urdf._joint_map if model._urdf else {}
@@ -792,6 +1626,29 @@ class Visualizer:
                     self._reconstruct_loaded_spool_mesh(request_data)
                 elif command == "save_spool":
                     self._save_loaded_spool(request_data)
+                elif command == "pick_inspection_point":
+                    self._inspection_pick_enabled = bool(request_data.get("enabled", True))
+                    self._inspection_pick_identity = request_data.get("_identity")
+                    self.__console.info(
+                        "inspection pick mode enabled" if self._inspection_pick_enabled
+                        else "inspection pick mode disabled")
+                elif command == "plan_inspection_path":
+                    self._plan_inspection_path(request_data)
+                elif command == "clear_inspection_path":
+                    self._inspection_pick_enabled = False
+                    self._path_playback = None
+                    self._robot_path_playback = None
+                    self._clear_collision_highlights()
+                    self._clear_inspection_visuals(clear_point=True)
+                    if getattr(self, '_path_playback_marker', None) is not None:
+                        self.plotter.remove(self._path_playback_marker)
+                        self._path_playback_marker = None
+                    self._last_inspection_path = None
+                    self._last_inspection_q_path = None
+                    self._last_inspection_edge_collisions = []
+                    self._last_inspection_robot = None
+                elif command == "execute_inspection_path":
+                    self._start_path_playback(request_data.get("speed", 0.2))
                 elif command == "load_test_weld_point":
                     path = request_data.get("path")
                     if path:

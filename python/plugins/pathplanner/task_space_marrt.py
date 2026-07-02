@@ -3,7 +3,6 @@ import os
 import json
 from plugins.pluginbase.plannerbase import PlannerBase
 from task_space_rrt import TaskSpaceRRT
-import open3d as o3d
 
 class TaskSpaceMARRT(TaskSpaceRRT):
     def __init__(self):
@@ -23,38 +22,7 @@ class TaskSpaceMARRT(TaskSpaceRRT):
         """
         Calculate distance to nearest obstacle and estimated gradient to move away.
         """
-        if self.scene is None:
-            return 1000.0, np.zeros(3)
-            
-        # We need a gradient. Open3D RaycastingScene compute_distance doesn't give gradient directly?
-        # compute_signed_distance might if implicit layer?
-        # Alternatively, sample nearby points to estimate gradient.
-        
-        query = o3d.core.Tensor(np.array([pos], dtype=np.float32), dtype=o3d.core.Dtype.Float32)
-        dist = self.scene.compute_distance(query).item()
-        
-        # Estimate Gradient numerically
-        epsilon = 0.1
-        grad = np.zeros(3)
-        for i in range(3):
-            p_plus = pos.copy()
-            p_plus[i] += epsilon
-            q_plus = o3d.core.Tensor(np.array([p_plus], dtype=np.float32), dtype=o3d.core.Dtype.Float32)
-            d_plus = self.scene.compute_distance(q_plus).item()
-            
-            p_minus = pos.copy()
-            p_minus[i] -= epsilon
-            q_minus = o3d.core.Tensor(np.array([p_minus], dtype=np.float32), dtype=o3d.core.Dtype.Float32)
-            d_minus = self.scene.compute_distance(q_minus).item()
-            
-            grad[i] = (d_plus - d_minus) / (2 * epsilon)
-            
-        # Normalize gradient
-        norm = np.linalg.norm(grad)
-        if norm > 1e-6:
-            grad /= norm
-            
-        return dist, grad
+        return 1000.0, np.zeros(3)
 
     def _retract_to_medial_axis(self, q_rand):
         """

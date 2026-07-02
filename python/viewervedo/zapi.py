@@ -249,6 +249,30 @@ class ZAPI(ZAPIBase):
             self.__router_socket.dispatch(reply_parts)
             self.__console.info(f"[ZAPI_VIEWERVEDO] Sent spool pose update: {pose}")
 
+    def update_inspection_point(self, point: dict, identity=None):
+        """Send picked pipe inspection point to SimTool."""
+        if self.__router_socket and self.__router_socket.is_joined and identity:
+            reply_parts = [
+                identity,
+                self.__router_socket.socket_id.encode('utf-8'),
+                "update_inspection_point".encode('utf-8'),
+                json.dumps(point).encode('utf-8')
+            ]
+            self.__router_socket.dispatch(reply_parts)
+            self.__console.info(f"[ZAPI_VIEWERVEDO] Sent inspection point update: {point}")
+
+    def reply_inspection_path(self, result: dict, identity=None):
+        """Send path planning result to SimTool."""
+        if self.__router_socket and self.__router_socket.is_joined and identity:
+            reply_parts = [
+                identity,
+                self.__router_socket.socket_id.encode('utf-8'),
+                "reply_inspection_path".encode('utf-8'),
+                json.dumps(result).encode('utf-8')
+            ]
+            self.__router_socket.dispatch(reply_parts)
+            self.__console.info(f"[ZAPI_VIEWERVEDO] Sent inspection path result: {result}")
+
     def zapi_flip_spool_x(self, kwargs=None):
         """Handle request to flip the currently loaded spool in X direction."""
         self.__console.info(f"Received zapi_flip_spool_x with kwargs: {kwargs}")
@@ -360,6 +384,21 @@ class ZAPI(ZAPIBase):
         else:
             self.push_to_queue(request_payload)
 
+    def zapi_set_spool_fixation(self, kwargs=None):
+        """Handle spool fixation flag changes without moving positioner joints."""
+        kwargs = kwargs or {}
+        self.__console.info(f"Received zapi_set_spool_fixation with kwargs: {kwargs}")
+        request_payload = {
+            "command": "set_spool_fixation",
+            "fix_f_column_r": bool(kwargs.get("fix_f_column_r", False)),
+            "fix_m_column_z": bool(kwargs.get("fix_m_column_z", False)),
+            "_identity": kwargs.get("_identity"),
+        }
+        if self._visualizer:
+            self._visualizer.push_request(request_payload)
+        else:
+            self.push_to_queue(request_payload)
+
     def zapi_save_spool(self, kwargs=None):
         """Handle save_spool request (현재 로드된 스풀/메시 저장)."""
         self.__console.info(f"Received zapi_save_spool with kwargs: {kwargs}")
@@ -370,6 +409,60 @@ class ZAPI(ZAPIBase):
             "command": "save_spool",
             "path": kwargs.get("path"),
             "_identity": kwargs.get("_identity"),
+        }
+        if self._visualizer:
+            self._visualizer.push_request(request_payload)
+        else:
+            self.push_to_queue(request_payload)
+
+    def zapi_pick_inspection_point(self, kwargs=None):
+        """Handle pipe inspection point pick mode request."""
+        self.__console.info(f"Received zapi_pick_inspection_point with kwargs: {kwargs}")
+        request_payload = {
+            "command": "pick_inspection_point",
+            "enabled": (kwargs or {}).get("enabled", True),
+            "_identity": (kwargs or {}).get("_identity"),
+        }
+        if self._visualizer:
+            self._visualizer.push_request(request_payload)
+        else:
+            self.push_to_queue(request_payload)
+
+    def zapi_plan_inspection_path(self, kwargs=None):
+        """Handle EF-only path planning request to the picked inspection point."""
+        self.__console.info(f"Received zapi_plan_inspection_path with kwargs: {kwargs}")
+        request_payload = {
+            "command": "plan_inspection_path",
+            "planner": (kwargs or {}).get("planner", "rrt_connect"),
+            "robot": (kwargs or {}).get("robot", "rb20_1900es"),
+            "step_size": (kwargs or {}).get("step_size", 0.08),
+            "max_iter": (kwargs or {}).get("max_iter", 3000),
+            "_identity": (kwargs or {}).get("_identity"),
+        }
+        if self._visualizer:
+            self._visualizer.push_request(request_payload)
+        else:
+            self.push_to_queue(request_payload)
+
+    def zapi_clear_inspection_path(self, kwargs=None):
+        """Handle clearing picked point/path visualization."""
+        self.__console.info(f"Received zapi_clear_inspection_path with kwargs: {kwargs}")
+        request_payload = {
+            "command": "clear_inspection_path",
+            "_identity": (kwargs or {}).get("_identity") if kwargs else None,
+        }
+        if self._visualizer:
+            self._visualizer.push_request(request_payload)
+        else:
+            self.push_to_queue(request_payload)
+
+    def zapi_execute_inspection_path(self, kwargs=None):
+        """Handle simulation playback request for the last planned EF path."""
+        self.__console.info(f"Received zapi_execute_inspection_path with kwargs: {kwargs}")
+        request_payload = {
+            "command": "execute_inspection_path",
+            "speed": (kwargs or {}).get("speed", 0.2),
+            "_identity": (kwargs or {}).get("_identity") if kwargs else None,
         }
         if self._visualizer:
             self._visualizer.push_request(request_payload)

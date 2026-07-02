@@ -1,7 +1,6 @@
 import numpy as np
 import json
 import os
-import open3d as o3d
 from typing import List, Union
 import sys
 
@@ -27,25 +26,28 @@ class RRTStar(PlannerBase):
             "y_min": -10.0, "y_max": 10.0,
             "z_min": -10.0, "z_max": 10.0
         })
-        
-        self.scene = None
 
-    def add_static_object(self, object_model):
-        self.static_objects.append(object_model)
-        if self.scene is None:
-             self.scene = o3d.t.geometry.RaycastingScene()
-        try:
-            t_mesh = o3d.t.geometry.TriangleMesh.from_legacy(object_model)
-            self.scene.add_triangles(t_mesh)
-        except Exception as e:
-            print(f"Error adding object to scene: {e}")
+        self.configure_collision(self.config, default_sample_resolution=self.step_size)
 
-    def generate(self, current_pose: Union[List[float], np.ndarray], target_pose: Union[List[float], np.ndarray]) -> List[np.ndarray]:
+    def generate(self, current_pose: Union[List[float], np.ndarray], target_pose: Union[List[float], np.ndarray], step_callback=None) -> List[np.ndarray]:
         current_pose = np.array(current_pose, dtype=float)
         target_pose = np.array(target_pose, dtype=float)
+
+        if (
+            self.pin_model is not None
+            and current_pose.shape[0] == self.pin_model.nq
+            and target_pose.shape[0] == self.pin_model.nq
+        ):
+            return self._generate_joint_space(current_pose, target_pose, step_callback=step_callback)
+        if self.pin_model is not None:
+            raise ValueError(
+                "RRTStar is configured for Pinocchio collision, so generate() "
+                f"must receive q-space states with nq={self.pin_model.nq}; "
+                f"got {current_pose.shape[0]}->{target_pose.shape[0]}"
+            )
         
-        start_pos = current_pose[:3]
-        goal_pos = target_pose[:3]
+        start_pos = current_pose
+        goal_pos = target_pose
         
         # Nodes list containing coordinates
         nodes = [start_pos]
@@ -164,17 +166,86 @@ class RRTStar(PlannerBase):
         print("RRT* failed to find path")
         return []
 
-    def _check_collision(self, p1, p2):
-        if self.scene is None:
-            return False
-        direction = p2 - p1
-        length = np.linalg.norm(direction)
-        if length < 1e-6:
-            return False
-        direction /= length
-        rays = o3d.core.Tensor([[p1[0], p1[1], p1[2], direction[0], direction[1], direction[2]]], dtype=o3d.core.Dtype.Float32)
-        ans = self.scene.cast_rays(rays)
-        t_hit = ans['t_hit'][0].item()
-        if np.isfinite(t_hit) and t_hit < length:
-            return True
-        return False
+    def _generate_joint_space(self, start_q, goal_q, step_callback=None):
+        if self.check_pinocchio_collision(start_q):
+            print("RRT* failed: start configuration is in collision")
+            return []
+        if self.check_pinocchio_collision(goal_q):
+            print("RRT* failed: goal configuration is in collision")
+            return []
+
+        nodes = [start_q]
+        parents = {0: None}
+        costs = {0: 0.0}
+
+        for i in range(self.max_iter):
+            if np.random.random() < self.goal_bias:
+                rnd_point = goal_q
+            else:
+                rnd_point = self._sample_pinocchio_configuration()
+
+            dists = np.linalg.norm(np.array(nodes) - rnd_point, axis=1)
+            nearest_idx = int(np.argmin(dists))
+            nearest_node = nodes[nearest_idx]
+            new_point = self._steer_state(nearest_node, rnd_point, self.step_size)
+
+            
+
+            if self._check_collision(nearest_node, new_point):
+                continue
+
+            new_idx = len(nodes)
+            dists_all = np.linalg.norm(np.array(nodes) - new_point, axis=1)
+            neighbor_indices = np.where(dists_all < self.search_radius)[0]
+
+            min_cost = costs[nearest_idx] + np.linalg.norm(new_point - nearest_node)
+            best_parent_idx = nearest_idx
+
+            for nb_idx in neighbor_indices:
+                if nb_idx == nearest_idx:
+                    continue
+                if not self._check_collision(nodes[nb_idx], new_point):
+                    cost = costs[nb_idx] + np.linalg.norm(new_point - nodes[nb_idx])
+                    if cost < min_cost:
+                        min_cost = cost
+                        best_parent_idx = int(nb_idx)
+
+            nodes.append(new_point)
+            parents[new_idx] = best_parent_idx
+            costs[new_idx] = min_cost
+
+            for nb_idx in neighbor_indices:
+                if nb_idx == best_parent_idx:
+                    continue
+                dist_to_nb = np.linalg.norm(nodes[nb_idx] - new_point)
+                new_cost_to_nb = min_cost + dist_to_nb
+                if new_cost_to_nb < costs[nb_idx]:
+                    if not self._check_collision(new_point, nodes[nb_idx]):
+                        parents[int(nb_idx)] = new_idx
+                        costs[int(nb_idx)] = new_cost_to_nb
+
+            if step_callback is not None:
+                step_callback(np.asarray(nodes), parents)
+
+        dists_to_goal = np.linalg.norm(np.array(nodes) - goal_q, axis=1)
+        close_indices = np.where(dists_to_goal < self.step_size)[0]
+
+        goal_idx = -1
+        min_total_cost = float("inf")
+        for idx in close_indices:
+            if not self._check_collision(nodes[idx], goal_q):
+                cost = costs[idx] + np.linalg.norm(goal_q - nodes[idx])
+                if cost < min_total_cost:
+                    min_total_cost = cost
+                    goal_idx = int(idx)
+
+        if goal_idx == -1:
+            print("RRT* failed to find joint-space path")
+            return []
+
+        path = [goal_q.copy()]
+        curr_idx = goal_idx
+        while curr_idx is not None:
+            path.append(nodes[curr_idx].copy())
+            curr_idx = parents[curr_idx]
+        return path[::-1]

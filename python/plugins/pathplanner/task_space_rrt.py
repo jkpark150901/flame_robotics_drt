@@ -1,7 +1,6 @@
 import numpy as np
 import json
 import os
-import open3d as o3d
 from typing import List, Union, Optional
 import sys
 import logging
@@ -31,21 +30,7 @@ class TaskSpaceRRT(PlannerBase):
             "pitch_min": -np.pi, "pitch_max": np.pi,
             "yaw_min": -np.pi, "yaw_max": np.pi
         })
-        
-        self.scene = None
-        self.tool_mesh = None
-        self.static_legacy_meshes = [] # Keep legacy meshes for direct O3D intersection check
-
-    def add_static_object(self, object_model):
-        self.static_objects.append(object_model)
-        self.static_legacy_meshes.append(object_model) # Store copy for direct mesh check
-        if self.scene is None:
-             self.scene = o3d.t.geometry.RaycastingScene()
-        try:
-            t_mesh = o3d.t.geometry.TriangleMesh.from_legacy(object_model)
-            self.scene.add_triangles(t_mesh)
-        except Exception as e:
-            print(f"Error adding object to scene: {e}")
+        self.configure_collision(self.config, default_sample_resolution=self.step_size)
 
     def generate(self, current_pose: Union[List[float], np.ndarray], target_pose: Union[List[float], np.ndarray], step_callback: Optional[callable] = None) -> List[np.ndarray]:
         current_pose = np.array(current_pose)
@@ -133,57 +118,3 @@ class TaskSpaceRRT(PlannerBase):
         logging.error(f"Task Space RRT failed to find path. Max iterations ({self.max_iter}) reached.")
         logging.error(f"Closest distance to goal achieved: {min_dist_to_goal:.4f}")
         return [] 
-
-    def _check_collision(self, p1, p2):
-        # 1. Point Robot Check (Raycast) - Always fast first pass
-        if self.scene is None:
-            return False
-            
-        pos1 = p1[:3]
-        pos2 = p2[:3]
-        direction = pos2 - pos1
-        length = np.linalg.norm(direction)
-        
-        # Ray Check
-        if length > 1e-6:
-            dir_norm = direction / length
-            rays = o3d.core.Tensor([[pos1[0], pos1[1], pos1[2], dir_norm[0], dir_norm[1], dir_norm[2]]], dtype=o3d.core.Dtype.Float32)
-            ans = self.scene.cast_rays(rays)
-            t_hit = ans['t_hit'][0].item()
-            if np.isfinite(t_hit) and t_hit < length:
-                return True
-                
-        # 2. Tool Mesh Check (if tool exists)
-        if self.tool_mesh is not None:
-             # Lazy init point cloud
-             if not hasattr(self, '_tool_pcd'):
-                 self._tool_pcd = self.tool_mesh.sample_points_poisson_disk(number_of_points=100)
-                 self._tool_pcd_pts = np.asarray(self._tool_pcd.points) # Nx3
-
-             check_poses = [p2]
-             
-             # Denser check for swept volume
-             # Check every 0.5 units (high resolution)
-             if length > 0.5:
-                 num_inter = int(length / 0.5)
-                 for i in range(1, num_inter + 1):
-                     ratio = i / (num_inter + 1)
-                     # Interpolate 6D
-                     inter_pose = p1 + (p2 - p1) * ratio
-                     check_poses.append(inter_pose)
-             
-             for pose in check_poses:
-                 # Transform points: R * P + T
-                 R = o3d.geometry.get_rotation_matrix_from_xyz(pose[3:])
-                 transformed_pts = (R @ self._tool_pcd_pts.T).T + pose[:3]
-                 
-                 # Check these points against Scene
-                 query = o3d.core.Tensor(transformed_pts, dtype=o3d.core.Dtype.Float32)
-                 dist = self.scene.compute_distance(query) # Unsigned distance
-                 min_dist = dist.min().item()
-                 
-                 if min_dist < 1.0: # 1mm tolerance
-                     return True
-                     
-        return False
-

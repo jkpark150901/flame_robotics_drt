@@ -1,7 +1,6 @@
 import numpy as np
 import json
 import os
-import open3d as o3d
 from typing import List, Union
 import sys
 

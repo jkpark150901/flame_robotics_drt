@@ -148,6 +148,19 @@ class ZAPI(QObject, ZAPIBase):
         else:
             self.__console.warning("[ZAPI] Cannot send move_positioner: Socket not connected")
 
+    def _ZAPI_request_set_spool_fixation(self, fix_f_column_r: bool = False, fix_m_column_z: bool = False):
+        """Notify viewer that spool fixation flags changed without moving the positioner."""
+        if self.__dealer_socket and self.__dealer_socket.is_joined:
+            kwargs = {
+                "fix_f_column_r": bool(fix_f_column_r),
+                "fix_m_column_z": bool(fix_m_column_z),
+            }
+            self.call(self.__dealer_socket, "zapi_set_spool_fixation", kwargs)
+            self.__console.info(
+                f"[ZAPI] Sent set_spool_fixation: fix_f={fix_f_column_r} fix_z={fix_m_column_z}")
+        else:
+            self.__console.warning("[ZAPI] Cannot send set_spool_fixation: Socket not connected")
+
     def _ZAPI_request_filter_spool(self, method: str, params: dict = None):
         """현재 로드된 스풀에 직접 노이즈 필터를 적용. method: 'sor'|'ccl'"""
         if self.__dealer_socket and self.__dealer_socket.is_joined:
@@ -191,6 +204,46 @@ class ZAPI(QObject, ZAPIBase):
             self.__console.info(f"[ZAPI] Sent stop_manipulator: {robot} {joint}")
         else:
             self.__console.warning("[ZAPI] Cannot send stop_manipulator: Socket not connected")
+
+    def _ZAPI_request_pick_inspection_point(self, enabled: bool = True):
+        """Enable/disable one-click pipe inspection point picking in the viewer."""
+        if self.__dealer_socket and self.__dealer_socket.is_joined:
+            self.call(self.__dealer_socket, "zapi_pick_inspection_point", {"enabled": bool(enabled)})
+            self.__console.info(f"[ZAPI] Sent pick_inspection_point: enabled={enabled}")
+        else:
+            self.__console.warning("[ZAPI] Cannot send pick_inspection_point: Socket not connected")
+
+    def _ZAPI_request_plan_inspection_path(self, planner: str, robot: str = "rb20_1900es",
+                                           step_size: float = 0.08, max_iter: int = 3000):
+        """Request EF-only path planning to the currently picked pipe inspection point."""
+        if self.__dealer_socket and self.__dealer_socket.is_joined:
+            kwargs = {
+                "planner": planner,
+                "robot": robot,
+                "step_size": step_size,
+                "max_iter": max_iter,
+            }
+            self.call(self.__dealer_socket, "zapi_plan_inspection_path", kwargs)
+            self.__console.info(f"[ZAPI] Sent plan_inspection_path: {kwargs}")
+        else:
+            self.__console.warning("[ZAPI] Cannot send plan_inspection_path: Socket not connected")
+
+    def _ZAPI_request_clear_inspection_path(self):
+        """Clear picked inspection point and planned path visuals."""
+        if self.__dealer_socket and self.__dealer_socket.is_joined:
+            self.call(self.__dealer_socket, "zapi_clear_inspection_path", {})
+            self.__console.info("[ZAPI] Sent clear_inspection_path")
+        else:
+            self.__console.warning("[ZAPI] Cannot send clear_inspection_path: Socket not connected")
+
+    def _ZAPI_request_execute_inspection_path(self, speed: float = 0.2):
+        """Start viewer-side simulation playback for the last planned EF path."""
+        if self.__dealer_socket and self.__dealer_socket.is_joined:
+            kwargs = {"speed": float(speed)}
+            self.call(self.__dealer_socket, "zapi_execute_inspection_path", kwargs)
+            self.__console.info(f"[ZAPI] Sent execute_inspection_path: {kwargs}")
+        else:
+            self.__console.warning("[ZAPI] Cannot send execute_inspection_path: Socket not connected")
 
     def _ZAPI_request_set_mode(self, mode: str):
         """Sends command to set execution mode (simulation or real)."""

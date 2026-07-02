@@ -293,6 +293,104 @@ QProgressBar::chunk {
       <string>Test Weld Point :</string>
      </property>
     </widget>
+    <widget class="QLabel" name="label_path_robot">
+     <property name="geometry">
+      <rect>
+       <x>15</x>
+       <y>315</y>
+       <width>75</width>
+       <height>20</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Robot :</string>
+     </property>
+    </widget>
+    <widget class="QComboBox" name="cbx_path_robot">
+     <property name="geometry">
+      <rect>
+       <x>80</x>
+       <y>312</y>
+       <width>241</width>
+       <height>26</height>
+      </rect>
+     </property>
+     <item>
+      <property name="text">
+       <string>Source Robot</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>DDA Robot</string>
+      </property>
+     </item>
+    </widget>
+    <widget class="QPushButton" name="btn_pick_inspection_point">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>348</y>
+       <width>101</width>
+       <height>32</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Pick Point</string>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="btn_plan_inspection_path">
+     <property name="geometry">
+      <rect>
+       <x>116</x>
+       <y>348</y>
+       <width>101</width>
+       <height>32</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Plan Path</string>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="btn_clear_inspection_path">
+     <property name="geometry">
+      <rect>
+       <x>222</x>
+       <y>348</y>
+       <width>99</width>
+       <height>32</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Clear</string>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="edit_inspection_point">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>386</y>
+       <width>171</width>
+       <height>22</height>
+      </rect>
+     </property>
+     <property name="readOnly">
+      <bool>true</bool>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_path_plan_status">
+     <property name="geometry">
+      <rect>
+       <x>188</x>
+       <y>386</y>
+       <width>133</width>
+       <height>22</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Ready</string>
+     </property>
+    </widget>
    </widget>
    <widget class="QGroupBox" name="groupBox_3">
     <property name="geometry">

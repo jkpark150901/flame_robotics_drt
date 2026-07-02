@@ -150,7 +150,7 @@ class AppWindow(QMainWindow):
                                     if inspect.isclass(obj) and issubclass(obj, category["base_class"]): 
                                         if obj is not category["base_class"]:
                                             self.__console.debug(f"Found plugin class: {obj.__name__}")
-                                            combobox.addItem(obj.__name__)
+                                            combobox.addItem(obj.__name__, file_path.stem)
                             except Exception as e:
                                 self.__console.error(f"Failed to load {category['name']} plugin {module_name}: {e}")
                     else:
@@ -206,6 +206,14 @@ class AppWindow(QMainWindow):
             self.btn_load_sim_parameters.clicked.connect(self.__on_btn_load_sim_parameters_clicked)
         if hasattr(self, 'btn_test_async_zapi_request'):
             self.btn_test_async_zapi_request.clicked.connect(self.on_btn_test_async_zapi_request_clicked)
+        if hasattr(self, 'btn_start_simulation'):
+            self.btn_start_simulation.clicked.connect(self.__on_btn_start_simulation_clicked)
+        if hasattr(self, 'btn_pick_inspection_point'):
+            self.btn_pick_inspection_point.clicked.connect(self.__on_btn_pick_inspection_point_clicked)
+        if hasattr(self, 'btn_plan_inspection_path'):
+            self.btn_plan_inspection_path.clicked.connect(self.__on_btn_plan_inspection_path_clicked)
+        if hasattr(self, 'btn_clear_inspection_path'):
+            self.btn_clear_inspection_path.clicked.connect(self.__on_btn_clear_inspection_path_clicked)
             
         if hasattr(self, 'radio_mode_simulation'):
             self.radio_mode_simulation.toggled.connect(self.__on_radio_mode_toggled)
@@ -239,8 +247,10 @@ class AppWindow(QMainWindow):
         # 스풀 고정 체크박스 → 수동 컨트롤(슬라이더/이동) 잠금 토글
         if hasattr(self, 'chk_spool_fix_f_column_r'):
             self.chk_spool_fix_f_column_r.toggled.connect(self.__update_spool_controls_enabled)
+            self.chk_spool_fix_f_column_r.toggled.connect(self.__on_spool_fixation_toggled)
         if hasattr(self, 'chk_spool_fix_m_column_z'):
             self.chk_spool_fix_m_column_z.toggled.connect(self.__update_spool_controls_enabled)
+            self.chk_spool_fix_m_column_z.toggled.connect(self.__on_spool_fixation_toggled)
         self.__update_spool_controls_enabled()  # 초기 상태 반영
 
     def __get_spool_fix_flags(self):
@@ -275,6 +285,11 @@ class AppWindow(QMainWindow):
             w = getattr(self, name, None)
             if w is not None:
                 w.setEnabled(enabled)
+
+    def __on_spool_fixation_toggled(self, *args):
+        fix_f, fix_z = self.__get_spool_fix_flags()
+        if self.zapi:
+            self.zapi._ZAPI_request_set_spool_fixation(fix_f, fix_z)
 
     def __on_btn_positioner_x_move_clicked(self):
         try:
@@ -480,7 +495,12 @@ class AppWindow(QMainWindow):
         with open(pose_path, "r", encoding="utf-8") as f:
             payload = json.load(f)
         positioner_pose = self.__set_positioner_pose_to_ui(payload.get("positioner"))
-        pose = self.__set_spool_pose_to_ui(payload.get("spool", payload))
+        has_spool_pose = (
+            "spool" in payload
+            or "position" in payload
+            or any(k in payload for k in ("x", "y", "z", "x_rotation", "z_rotation"))
+        )
+        pose = self.__set_spool_pose_to_ui(payload.get("spool", payload)) if has_spool_pose else None
         self.__console.info(f"Loaded spool pose: {pose_path}")
 
         # 고정 체크박스 상태 먼저 복원 → 포지셔너 이동 시 r-fix 동기화가 반영되도록
@@ -492,7 +512,8 @@ class AppWindow(QMainWindow):
             if positioner_pose:
                 self.__request_positioner_pose_move(positioner_pose)
             # 2) 스풀 오프셋(chuck 기준) 적용 (고정 가드 무시하고 강제 적용)
-            self.__request_spool_pose_move(pose, force=True)
+            if pose is not None:
+                self.__request_spool_pose_move(pose, force=True)
         return True
 
     def __set_spool_fix_checks(self, fix_f, fix_z):
@@ -533,6 +554,89 @@ class AppWindow(QMainWindow):
     def on_btn_test_async_zapi_request_clicked(self):
         """Handle async ZAPI test request button click"""
         pass
+
+    def __current_planner_module_name(self):
+        if not hasattr(self, 'cbx_plugin_pathplanner'):
+            return "rrt_connect"
+        module_name = self.cbx_plugin_pathplanner.currentData()
+        if module_name:
+            planner_name = str(module_name)
+        else:
+            text = self.cbx_plugin_pathplanner.currentText()
+            planner_name = text.strip().lower() if text else "rrt_connect"
+        q_space_planners = {"rrt_connect", "rrt_star"}
+        if planner_name not in q_space_planners:
+            self.__console.warning(
+                f"Inspection path planning requires q-space planner; "
+                f"'{planner_name}' is not supported, using rrt_connect")
+            return "rrt_connect"
+        return planner_name
+
+    def __current_path_robot_name(self):
+        if hasattr(self, 'cbx_path_robot'):
+            data = self.cbx_path_robot.currentData()
+            if data:
+                return str(data)
+            text = self.cbx_path_robot.currentText()
+            if "DDA" in text.upper():
+                return self._DDA_ROBOT
+        return self._SOURCE_ROBOT
+
+    def __set_path_plan_status(self, msg):
+        if hasattr(self, 'label_path_plan_status'):
+            self.label_path_plan_status.setText(str(msg))
+        self.__console.info(str(msg))
+
+    def __on_btn_pick_inspection_point_clicked(self):
+        try:
+            if not self.zapi:
+                self.__set_path_plan_status("[!] ZAPI not available")
+                return
+            self.zapi._ZAPI_request_pick_inspection_point(True)
+            self.__set_path_plan_status("Pick mode: click pipe surface in viewer")
+        except Exception as e:
+            self.__console.error(f"Error requesting inspection point pick: {e}")
+            self.__set_path_plan_status(f"[!] {e}")
+
+    def __on_btn_plan_inspection_path_clicked(self):
+        try:
+            if not self.zapi:
+                self.__set_path_plan_status("[!] ZAPI not available")
+                return
+            planner = self.__current_planner_module_name()
+            robot = self.__current_path_robot_name()
+            self.zapi._ZAPI_request_plan_inspection_path(
+                planner=planner,
+                robot=robot,
+                step_size=0.08,
+                max_iter=3000)
+            self.__set_path_plan_status(f"Planning requested: {planner}, {robot}")
+        except Exception as e:
+            self.__console.error(f"Error requesting inspection path plan: {e}")
+            self.__set_path_plan_status(f"[!] {e}")
+
+    def __on_btn_clear_inspection_path_clicked(self):
+        try:
+            if self.zapi:
+                self.zapi._ZAPI_request_clear_inspection_path()
+            if hasattr(self, 'edit_inspection_point'):
+                self.edit_inspection_point.clear()
+            self.__set_path_plan_status("Inspection path cleared")
+        except Exception as e:
+            self.__console.error(f"Error clearing inspection path: {e}")
+            self.__set_path_plan_status(f"[!] {e}")
+
+    def __on_btn_start_simulation_clicked(self):
+        """Start simulation playback for the last planned inspection path."""
+        try:
+            if not self.zapi:
+                self.__set_path_plan_status("[!] ZAPI not available")
+                return
+            self.zapi._ZAPI_request_execute_inspection_path(speed=0.2)
+            self.__set_path_plan_status("Simulation playback requested")
+        except Exception as e:
+            self.__console.error(f"Error starting simulation: {e}")
+            self.__set_path_plan_status(f"[!] {e}")
 
     def __on_btn_load_spool_clicked(self):
         """Handle Load Spool button click"""
@@ -632,6 +736,30 @@ class AppWindow(QMainWindow):
                     self.__set_spool_pose_to_ui(pose)
                     self.__console.info(f"Updated spool pose from viewer: {pose}")
                 except json.JSONDecodeError:
+                    pass
+
+            if topic == "update_inspection_point":
+                try:
+                    point = json.loads(msg)
+                    xyz = point.get("point", point)
+                    if hasattr(self, 'edit_inspection_point'):
+                        self.edit_inspection_point.setText(
+                            f"{float(xyz[0]):.4f}, {float(xyz[1]):.4f}, {float(xyz[2]):.4f}")
+                    self.__set_path_plan_status("Inspection point selected")
+                except Exception:
+                    pass
+
+            if topic == "reply_inspection_path":
+                try:
+                    result = json.loads(msg)
+                    status = result.get("status", "unknown")
+                    if status == "success":
+                        self.__set_path_plan_status(
+                            f"Path OK: {result.get('waypoints', 0)} wp, "
+                            f"{float(result.get('elapsed', 0.0)):.2f}s")
+                    else:
+                        self.__set_path_plan_status(f"Path failed: {result.get('message', status)}")
+                except Exception:
                     pass
 
             if topic == "call":
@@ -806,9 +934,11 @@ class AppWindow(QMainWindow):
             self.zapi._ZAPI_request_stop_manipulator(robot, None)   # 해당 로봇 전체 정지
 
     def __save_positioner_json(self, geom_path):
-        """저장한 지오메트리 옆에 포지셔너 자세를 <name>.json 으로 기록."""
+        """저장한 지오메트리 옆에 포지셔너/스풀 자세를 <name>.json 으로 기록."""
         try:
             pos = self.__get_positioner_pose_from_ui()
+            spool = self.__get_spool_pose_from_ui()
+            fix_f, fix_z = self.__get_spool_fix_flags()
         except (ValueError, AttributeError):
             return
         if pos is None:
@@ -822,10 +952,19 @@ class AppWindow(QMainWindow):
                 "r": pos["r"],
                 "clamp": pos["clamp"],
             },
+            "spool": {
+                "x": spool["x"],
+                "y": spool["y"],
+                "z": spool["z"],
+                "x_rotation": spool["x_rotation"],
+                "z_rotation": spool["z_rotation"],
+            },
+            "fix_f_column_r": bool(fix_f),
+            "fix_m_column_z": bool(fix_z),
         }
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=4)
-        self.__console.info(f"Saved positioner pose: {json_path}")
+        self.__console.info(f"Saved positioner/spool pose: {json_path}")
 
     def closeEvent(self, event:QCloseEvent) -> None:
         """ Handle close event """
