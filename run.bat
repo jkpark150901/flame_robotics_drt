@@ -1,12 +1,18 @@
 @echo off
 setlocal
 
-rem Define Python path assuming standard Windows venv structure
-set "VENV_DIR=%~dp0venv"
-set "PYTHON=%VENV_DIR%\Scripts\python.exe"
+rem Set this to a specific interpreter when using conda or a custom venv.
+rem Example: set "PYTHON_CONFIG=C:\Users\admin\miniforge3\envs\drt\python.exe"
+set "PYTHON_CONFIG="
 
-rem Check if python exists, if not fall back to system python or error?
-rem For now, we assume venv exists as per Makefile.
+set "VENV_DIR=%~dp0venv"
+if defined PYTHON_CONFIG (
+    set "PYTHON=%PYTHON_CONFIG%"
+) else if exist "%VENV_DIR%\Scripts\python.exe" (
+    set "PYTHON=%VENV_DIR%\Scripts\python.exe"
+) else (
+    set "PYTHON=python"
+)
 
 if "%1"=="" goto help
 

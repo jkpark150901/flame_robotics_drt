@@ -21,9 +21,10 @@ _PYTHON_PATH = pathlib.Path(__file__).parent
 ROOT_PATH = _PYTHON_PATH.parent
 APP_NAME = pathlib.Path(__file__).stem
 
-# python/ 와 루트를 경로에 추가 (simtool.py 동일 패턴)
 sys.path.append(ROOT_PATH.as_posix())
 sys.path.append(_PYTHON_PATH.as_posix())
+
+from common.config_loader import load_config
 
 logging.basicConfig(
     format='%(asctime)s.%(msecs)03d %(levelname)s %(name)s  %(message)s',
@@ -41,8 +42,7 @@ def main():
     args = parser.parse_args()
 
     try:
-        with open(args.config, 'r') as f:
-            config = json.load(f)
+        config = load_config(args.config)
     except FileNotFoundError:
         log.critical("Config file not found: %s", args.config)
         sys.exit(1)

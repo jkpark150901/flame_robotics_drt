@@ -8,6 +8,7 @@ import pathlib
 import json
 import argparse
 
+from common.config_loader import load_config
 from util.logger.console import ConsoleLogger
 from viewervedo.visualizer import Visualizer
 from viewervedo.zapi import ZAPI
@@ -30,38 +31,37 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     try:
-        with open(args.config, "r") as cfile:
-            configure = json.load(cfile)
+        configure = load_config(args.config)
 
-            configure["root_path"] = ROOT_PATH
-            configure["app_path"] = (pathlib.Path(__file__).parent / APP_NAME)
-            configure["verbose_level"] = args.verbose_level.upper()
+        configure["root_path"] = ROOT_PATH
+        configure["app_path"] = (pathlib.Path(__file__).parent / APP_NAME)
+        configure["verbose_level"] = args.verbose_level.upper()
 
-            if configure["verbose_level"] == "DEBUG":
-                console.debug(f"Root Path : {configure['root_path']}")
-                console.debug(f"Application Path : {configure['app_path']}")
-                console.debug(f"Verbose Level : {configure['verbose_level']}")
+        if configure["verbose_level"] == "DEBUG":
+            console.debug(f"Root Path : {configure['root_path']}")
+            console.debug(f"Application Path : {configure['app_path']}")
+            console.debug(f"Verbose Level : {configure['verbose_level']}")
 
-            # create zpipe context
-            n_ctx_value = configure.get("n_io_context", 10)
-            zpipe_instance = zpipe_create_pipe(io_threads=n_ctx_value)
+        # create zpipe context
+        n_ctx_value = configure.get("n_io_context", 10)
+        zpipe_instance = zpipe_create_pipe(io_threads=n_ctx_value)
 
-            # create zapi (communication layer)
-            zapi_config = configure.get("zapi", {})
-            viewer = Visualizer(config=configure)
-            zapi = ZAPI(config=zapi_config, zpipe=zpipe_instance, visualizer=viewer)
-            viewer.set_zapi(zapi)
-            zapi.run()
+        # create zapi (communication layer)
+        zapi_config = configure.get("zapi", {})
+        viewer = Visualizer(config=configure)
+        zapi = ZAPI(config=zapi_config, zpipe=zpipe_instance, visualizer=viewer)
+        viewer.set_zapi(zapi)
+        zapi.run()
 
-            # run render loop (blocks until close)
-            viewer.run(60)
+        # run render loop (blocks until close)
+        viewer.run(60)
 
-            # cleanup communication
-            zapi.stop()
+        # cleanup communication
+        zapi.stop()
 
-            # terminate pipeline
-            zpipe_destroy_pipe()
-            console.info(f"Successfully terminated")
+        # terminate pipeline
+        zpipe_destroy_pipe()
+        console.info(f"Successfully terminated")
 
     except json.JSONDecodeError as e:
         console.critical(f"Configuration File Parse Exception : {e}")

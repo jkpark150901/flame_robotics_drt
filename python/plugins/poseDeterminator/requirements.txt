@@ -1,0 +1,15 @@
+open3d
+numpy
+# urdfdom_py
+urdf_parser_py
+scikit-learn
+# 노트북에서 점군 가시화-----------------------------------------------------------
+pyvista[all,trame]
+ipympl
+ipywidgets
+pandas
+# tools/viewer 데스크톱 GUI -------------------------------------------------------
+PyQt6
+pyvistaqt
+# tools/viewer 자동 테스트 (dev) --------------------------------------------------
+pytest-qt

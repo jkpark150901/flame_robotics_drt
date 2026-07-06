@@ -18,6 +18,7 @@ import time
 import argparse
 import pathlib
 
+from common.config_loader import load_config
 from common.zpipe import ZPipe, AsyncZSocket, zpipe_create_pipe, zpipe_destroy_pipe
 from util.logger.console import ConsoleLogger
 from common import zapi
@@ -37,32 +38,31 @@ if __name__ == "__main__":
     console = ConsoleLogger.get_logger(level="DEBUG")
 
     try:
-        with open(args.config, "r") as cfile:
-            configure = json.load(cfile)
+        configure = load_config(args.config)
 
-            # add path
-            configure["root_path"] = ROOT_PATH
-            configure["app_path"] = (pathlib.Path(__file__).parent / APP_NAME)
-            configure["verbose_level"] = args.verbose_level.upper()
+        # add path
+        configure["root_path"] = ROOT_PATH
+        configure["app_path"] = (pathlib.Path(__file__).parent / APP_NAME)
+        configure["verbose_level"] = args.verbose_level.upper()
 
-            # create zpipe context
-            n_ctx_value = configure.get("n_io_context", 10)
-            zpipe_instance = zpipe_create_pipe(io_threads=n_ctx_value)
+        # create zpipe context
+        n_ctx_value = configure.get("n_io_context", 10)
+        zpipe_instance = zpipe_create_pipe(io_threads=n_ctx_value)
 
-            # run app
-            app = QApplication(sys.argv)
-            font_id = QFontDatabase.addApplicationFont((ROOT_PATH / configure['font_path']).as_posix())
-            font_family = QFontDatabase.applicationFontFamilies(font_id)[0]
-            app.setFont(QFont(font_family, 12))
-            appwindow = AppWindow(config=configure, zpipe=zpipe_instance)
-            appwindow.show()
+        # run app
+        app = QApplication(sys.argv)
+        font_id = QFontDatabase.addApplicationFont((ROOT_PATH / configure['font_path']).as_posix())
+        font_family = QFontDatabase.applicationFontFamilies(font_id)[0]
+        app.setFont(QFont(font_family, 12))
+        appwindow = AppWindow(config=configure, zpipe=zpipe_instance)
+        appwindow.show()
 
-            exit_cdoe = app.exec()
+        exit_cdoe = app.exec()
 
-            # terminate pipeline
-            zpipe_destroy_pipe()
-            console.info(f"Successfully terminated")
-            sys.exit(exit_cdoe)
+        # terminate pipeline
+        zpipe_destroy_pipe()
+        console.info(f"Successfully terminated")
+        sys.exit(exit_cdoe)
 
     except json.JSONDecodeError as e:
         console.critical(f"Configuration File Parse Exception : {e}")

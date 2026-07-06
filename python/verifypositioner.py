@@ -27,6 +27,8 @@ ROOT_PATH    = _PYTHON_PATH.parent
 sys.path.append(str(ROOT_PATH))
 sys.path.append(str(_PYTHON_PATH))
 
+from common.config_loader import load_config
+
 logging.basicConfig(
     format='%(asctime)s.%(msecs)03d %(levelname)s %(name)s  %(message)s',
     datefmt='%H:%M:%S',
@@ -42,8 +44,7 @@ def main():
     args = parser.parse_args()
 
     try:
-        with open(args.config) as f:
-            config = json.load(f)
+        config = load_config(args.config)
     except FileNotFoundError:
         log.warning("Config not found: %s — using empty config.", args.config)
         config = {}

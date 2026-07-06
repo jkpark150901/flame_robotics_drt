@@ -19,12 +19,12 @@ import logging
 
 import matplotlib.pyplot as plt
 
-from verifytool.workers.robot_worker import RobotWorker
+from verify_cobot.robot_worker import RobotWorker
 from verifytool.workers.natnet_worker import NatNetWorker
 from verifytool.calib_runner import CalibRunner, NatNetStateProxy
 from verifytool.verify_runner import VerifyRunner
 from verifytool.sync_runner import SyncRunner
-from verifytool.blend_test_runner import (
+from verify_cobot.blend_test_runner import (
     BlendTestRunner, DEFAULT_JB2_DELTAS, DEFAULT_PB_DELTAS,
     parse_trajectory_csv, compute_plan_deviation,
 )

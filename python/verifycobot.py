@@ -25,6 +25,8 @@ APP_NAME = pathlib.Path(__file__).stem
 sys.path.append(ROOT_PATH.as_posix())
 sys.path.append(_PYTHON_PATH.as_posix())
 
+from common.config_loader import load_config
+
 logging.basicConfig(
     format='%(asctime)s.%(msecs)03d %(levelname)s %(name)s  %(message)s',
     datefmt='%H:%M:%S',
@@ -41,8 +43,7 @@ def main():
     args = parser.parse_args()
 
     try:
-        with open(args.config, 'r') as f:
-            config = json.load(f)
+        config = load_config(args.config)
     except FileNotFoundError:
         log.critical("Config file not found: %s", args.config)
         sys.exit(1)
@@ -51,7 +52,7 @@ def main():
         sys.exit(1)
 
     config['root_path'] = ROOT_PATH
-    config['app_path'] = _PYTHON_PATH / 'verifytool'
+    config['app_path'] = _PYTHON_PATH / 'verify_cobot'
 
     app = QApplication(sys.argv)
 
@@ -64,7 +65,7 @@ def main():
     else:
         log.warning("Font not found: %s", font_path)
 
-    from verifytool.verifycobotwindow import VerifyCobotWindow
+    from verify_cobot.verifycobotwindow import VerifyCobotWindow
     window = VerifyCobotWindow(config=config)
     window.show()
 

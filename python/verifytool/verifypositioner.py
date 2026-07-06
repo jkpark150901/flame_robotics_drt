@@ -34,7 +34,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from verifytool.workers.natnet_worker import NatNetWorker
-from verifytool.calib_runner import NatNetStateProxy
+# from python.verify_cobot.calib_runner import NatNetStateProxy
 
 log = logging.getLogger(__name__)
 
@@ -52,11 +52,11 @@ _GRP_STYLE = (
 
 
 class CsvMocapVerifyWindow(QMainWindow):
-
+#region 
     def __init__(self, config: dict):
         super().__init__()
-        self._config = config
-        self._state = 'IDLE'
+        self._config    = config
+        self._state     = 'IDLE'
         self._natnet_worker: NatNetWorker | None = None
 
         # RB별 데이터 (index 0~3)
@@ -111,9 +111,9 @@ class CsvMocapVerifyWindow(QMainWindow):
         hl.addWidget(scroll)
 
         # 우측 플롯
-        self._fig = Figure(tight_layout=True)
+        self._fig       = Figure(tight_layout=True)
         self._fig.patch.set_facecolor(_DARK_BG)
-        self._canvas = FigureCanvasQTAgg(self._fig)
+        self._canvas    = FigureCanvasQTAgg(self._fig)
         hl.addWidget(self._canvas, 1)
 
         self.btn_connect.clicked.connect(self._on_connect)
