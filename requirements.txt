@@ -13,3 +13,5 @@ trimesh
 networkx
 lxml
 pycollada
+# Robotics Pinocchio. Import name is `pinocchio`; PyPI package name is `pin`.
+pin

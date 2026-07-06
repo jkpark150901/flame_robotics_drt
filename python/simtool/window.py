@@ -149,6 +149,8 @@ class AppWindow(QMainWindow):
                                 for name, obj in inspect.getmembers(module):
                                     if inspect.isclass(obj) and issubclass(obj, category["base_class"]): 
                                         if obj is not category["base_class"]:
+                                            if obj.__module__ != module.__name__:
+                                                continue
                                             self.__console.debug(f"Found plugin class: {obj.__name__}")
                                             combobox.addItem(obj.__name__, file_path.stem)
                             except Exception as e:
@@ -160,6 +162,13 @@ class AppWindow(QMainWindow):
                     import traceback
                     self.__console.error(f"Error processing category {category['name']}: {e}")
                     self.__console.error(traceback.format_exc())
+
+        if hasattr(self, 'cbx_plugin_posefinder'):
+            self.cbx_plugin_posefinder.clear()
+            self.cbx_plugin_posefinder.addItem("Built-in X-ray pose")
+            self.cbx_plugin_posefinder.setEnabled(False)
+        if hasattr(self, 'label_4'):
+            self.label_4.setText("Pose Finder : automatic")
 
         # 3. Load Pipe Spool Samples and Test Weld Points
         sample_path = pathlib.Path(self.__config.get("root_path", "")) / "sample"
@@ -559,17 +568,34 @@ class AppWindow(QMainWindow):
         if not hasattr(self, 'cbx_plugin_pathplanner'):
             return "rrt_connect"
         module_name = self.cbx_plugin_pathplanner.currentData()
+        text = self.cbx_plugin_pathplanner.currentText()
         if module_name:
             planner_name = str(module_name)
         else:
-            text = self.cbx_plugin_pathplanner.currentText()
             planner_name = text.strip().lower() if text else "rrt_connect"
+        normalized = (
+            planner_name.strip()
+            .replace("-", "_")
+            .replace(" ", "_")
+            .lower()
+        )
+        class_name_aliases = {
+            "rrtconnect": "rrt_connect",
+            "rrt_connect": "rrt_connect",
+            "rrtstar": "rrt_star",
+            "rrt_star": "rrt_star",
+        }
+        planner_name = class_name_aliases.get(normalized, normalized)
         q_space_planners = {"rrt_connect", "rrt_star"}
         if planner_name not in q_space_planners:
             self.__console.warning(
                 f"Inspection path planning requires q-space planner; "
-                f"'{planner_name}' is not supported, using rrt_connect")
+                f"selected text='{text}', data='{module_name}' resolves to "
+                f"'{planner_name}', using rrt_connect")
             return "rrt_connect"
+        self.__console.info(
+            f"Inspection path planner selected: text='{text}', data='{module_name}', "
+            f"module='{planner_name}'")
         return planner_name
 
     def __current_path_robot_name(self):
@@ -610,7 +636,7 @@ class AppWindow(QMainWindow):
                 robot=robot,
                 step_size=0.08,
                 max_iter=3000)
-            self.__set_path_plan_status(f"Planning requested: {planner}, {robot}")
+            self.__set_path_plan_status(f"Planning requested: {planner}, {robot}, xray pose")
         except Exception as e:
             self.__console.error(f"Error requesting inspection path plan: {e}")
             self.__set_path_plan_status(f"[!] {e}")
@@ -745,7 +771,11 @@ class AppWindow(QMainWindow):
                     if hasattr(self, 'edit_inspection_point'):
                         self.edit_inspection_point.setText(
                             f"{float(xyz[0]):.4f}, {float(xyz[1]):.4f}, {float(xyz[2]):.4f}")
-                    self.__set_path_plan_status("Inspection point selected")
+                    target_poses = point.get("target_poses", {}) if isinstance(point, dict) else {}
+                    if target_poses:
+                        self.__set_path_plan_status("Inspection point selected; RT/DDA poses ready")
+                    else:
+                        self.__set_path_plan_status("Inspection point selected")
                 except Exception:
                     pass
 

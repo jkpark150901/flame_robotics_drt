@@ -1,4 +1,4 @@
-import open3d as o3d
+﻿import open3d as o3d
 from open3d.cpu.pybind.geometry import PointCloud  # type: ignore
 import numpy as np
 from numpy.typing import NDArray
@@ -680,6 +680,9 @@ class EndEffectorPoseOptimizer:
         target_point: tuple[float, float, float] | np.ndarray,  # x,y,z
         sampling_size_for_calculating_normal: float = 0.01,
         radius_offset_for_sampling_points_in_sphere: float = 0.003,
+        cylinder_roi_radius: float = 0.005,
+        cylinder_height_range: tuple[float, float] = (-0.1, 0.3),
+        cluster_distance: float = 0.005,
     ):
         """직배관의 프로파일(방향벡터, 중심점, 반지름) 계산하여 멤버변수에 저장.
 
@@ -712,6 +715,7 @@ class EndEffectorPoseOptimizer:
             )
 
         if self.__is_debug_mode:
+            self.debuging_info["selected_points_count"] = len(selected_points.points)
             self.debuging_info["selected_points"] = selected_points
 
         # 중앙 벡터 계산----------------------------------------------------------
@@ -730,11 +734,12 @@ class EndEffectorPoseOptimizer:
             np.asarray(self._scan_data.points),
             target_point,
             normal_m * -1,  # 법선 벡터의 반대 방향
-            0.005,  # 배관 지름에 따라 조절 필요
-            (-0.1, 0.3),  # 배관 직경 및 브랜치 간 거리에 따라 조절 필요
+            cylinder_roi_radius,  # 배관 지름에 따라 조절 필요
+            cylinder_height_range,  # 배관 직경 및 브랜치 간 거리에 따라 조절 필요
         )
 
         if self.__is_debug_mode:
+            self.debuging_info["points_in_cylinder_count"] = len(points_in_cylinder)
             self.debuging_info["points_in_cylinder"] = points_in_cylinder
 
         # 중앙 벡터에 투영 후 군집화
@@ -742,15 +747,50 @@ class EndEffectorPoseOptimizer:
             points_in_cylinder,
             target_point,
             normal_m * -1,
-            0.005,  # 점군 밀도에 따라 조절 필요
+            cluster_distance,  # 점군 밀도에 따라 조절 필요
         )
-        self.debuging_info["pipe_profile_clusters"] = clusters
-        self.debuging_info["pipe_profile_points_in_cylinder"] = points_in_cylinder
-        self.debuging_info["pipe_profile_target_point"] = target_point
-        self.debuging_info["pipe_profile_normal_axis"] = normal_m * -1
+        if self.__is_debug_mode:
+            self.debuging_info["pipe_profile_clusters"] = clusters
+            self.debuging_info["pipe_profile_cluster_sizes"] = [len(cluster) for cluster in clusters]
+            self.debuging_info["pipe_profile_points_in_cylinder"] = points_in_cylinder
+            self.debuging_info["pipe_profile_target_point"] = target_point
+            self.debuging_info["pipe_profile_normal_axis"] = normal_m * -1
 
         # 가장 먼 군집에서 가장 먼 점의 거리
-        estimated_opposite_point = clusters[1][-1]
+        if len(clusters) >= 2 and len(clusters[1]) > 0:
+            estimated_opposite_point = clusters[1][-1]
+            if self.__is_debug_mode:
+                self.debuging_info["pipe_profile_opposite_point_source"] = "cluster"
+        elif len(points_in_cylinder) > 0:
+            profile_axis = normal_m * -1
+            profile_axis = profile_axis / np.linalg.norm(profile_axis)
+            projections = np.dot(points_in_cylinder - target_point, profile_axis)
+            farthest_idx = int(np.argmax(projections))
+            if projections[farthest_idx] <= cluster_distance:
+                cluster_sizes = [len(cluster) for cluster in clusters]
+                raise RuntimeError(
+                    "pipe profile clustering failed: expected at least two clusters "
+                    f"across pipe diameter, got cluster_count={len(clusters)}, "
+                    f"cluster_sizes={cluster_sizes}, "
+                    f"points_in_cylinder={len(points_in_cylinder)}, "
+                    f"max_projection={float(projections[farthest_idx]):.6f}, "
+                    f"target_point={target_point.tolist()}. "
+                    "The ROI may not reach the opposite pipe wall."
+                )
+            estimated_opposite_point = points_in_cylinder[farthest_idx]
+            if self.__is_debug_mode:
+                self.debuging_info["pipe_profile_opposite_point_source"] = "farthest_projection"
+                self.debuging_info["pipe_profile_farthest_projection"] = float(projections[farthest_idx])
+        else:
+            cluster_sizes = [len(cluster) for cluster in clusters]
+            raise RuntimeError(
+                "pipe profile clustering failed: expected at least two clusters "
+                f"across pipe diameter, got cluster_count={len(clusters)}, "
+                f"cluster_sizes={cluster_sizes}, "
+                f"points_in_cylinder={len(points_in_cylinder)}, "
+                f"target_point={target_point.tolist()}. "
+                "The ROI may be too small/sparse for the current meter-scale mesh."
+            )
         estimated_center = (target_point + estimated_opposite_point) / 2
         estimated_radius = float(np.linalg.norm(estimated_opposite_point - estimated_center))
 
@@ -773,6 +813,10 @@ class EndEffectorPoseOptimizer:
         self.__pipe_direction = direction
         self.__pipe_center = center
         self.__pipe_radius = radius
+        if self.__is_debug_mode:
+            self.debuging_info["pipe_profile_direction"] = direction
+            self.debuging_info["pipe_profile_center"] = center
+            self.debuging_info["pipe_profile_radius"] = radius
 
     def __calculate_dda_pose_candidate(
         self,

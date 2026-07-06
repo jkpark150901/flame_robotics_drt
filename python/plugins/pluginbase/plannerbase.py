@@ -6,6 +6,9 @@ try:
     import pinocchio as pin
 except ImportError:
     pin = None
+else:
+    if not hasattr(pin, "buildModelFromUrdf"):
+        pin = None
 try:
     import hppfcl
 except ImportError:
@@ -89,7 +92,7 @@ class PlannerBase(ABC):
     def setup_pinocchio_collision(self, urdf_path, package_dirs=None, ignore_adjacent_pairs=True):
         """Enable Pinocchio/hpp-fcl collision checking for q-space planners."""
         if pin is None:
-            raise RuntimeError("pinocchio is not installed")
+            raise RuntimeError("robotics Pinocchio is not installed")
         if hppfcl is None:
             raise RuntimeError("hppfcl/coal is not installed")
         if not urdf_path:

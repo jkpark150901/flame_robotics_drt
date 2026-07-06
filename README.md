@@ -9,6 +9,16 @@
 $ pip install -r requirements.txt
 ```
 
+For q-space path planning with robot collision checking, the robotics Pinocchio
+package is required. In `requirements.txt`, use the PyPI package name `pin`
+instead of the unrelated PyPI package named `pinocchio`.
+
+Conda-forge is recommended on Windows:
+
+```
+conda install -c conda-forge pinocchio hpp-fcl
+```
+
 If you use conda or a custom Python environment, set the interpreter path at the
 top of `Makefile` or `run.bat`.
 

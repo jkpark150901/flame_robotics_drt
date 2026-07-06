@@ -16,6 +16,7 @@ import types
 import os
 import numpy as np
 import vedo
+from scipy.spatial.transform import Rotation as _R
 try:
     import pinocchio as pin
 except ImportError:
@@ -77,6 +78,8 @@ class Visualizer:
         self._inspection_pick_identity = None
         self._inspection_point = None
         self._inspection_marker = None
+        self._inspection_target_poses = {}
+        self._inspection_target_actors = []
         self._inspection_path_actor = None
         self._last_inspection_path = None
         self._last_inspection_q_path = None
@@ -225,15 +228,29 @@ class Visualizer:
         idx = int(np.argmin(np.linalg.norm(pts - picked, axis=1)))
         point = np.asarray(pts[idx], dtype=float)
         self._set_inspection_point(point)
+        pose_payload = {}
+        try:
+            pose_payload = self._update_xray_target_poses_for_point(point)
+        except Exception as exc:
+            self.__console.error(f"xray target pose calculation failed: {exc}")
         self._inspection_pick_enabled = False
 
         identity = getattr(self, '_inspection_pick_identity', None)
         if hasattr(self, 'zapi') and self.zapi and identity:
-            self.zapi.update_inspection_point({"point": point.tolist()}, identity=identity)
+            payload = {"point": point.tolist()}
+            if pose_payload:
+                payload["target_poses"] = pose_payload
+            self.zapi.update_inspection_point(payload, identity=identity)
         self.__console.info(f"inspection point picked: {np.round(point, 4)}")
 
     def _set_inspection_point(self, point):
         self._inspection_point = np.asarray(point, dtype=float)
+        self._clear_inspection_target_visuals()
+        if getattr(self, '_inspection_path_actor', None) is not None:
+            self.plotter.remove(self._inspection_path_actor)
+            self._inspection_path_actor = None
+            self._last_inspection_path = None
+            self._last_inspection_q_path = None
         old = getattr(self, '_inspection_marker', None)
         if old is not None:
             self.plotter.remove(old)
@@ -251,6 +268,7 @@ class Visualizer:
             self.plotter.remove(self._inspection_marker)
             self._inspection_marker = None
             self._inspection_point = None
+            self._clear_inspection_target_visuals()
         self.plotter.render()
 
     def _robot_target_link_name(self, robot_name):
@@ -292,6 +310,7 @@ class Visualizer:
             return None
         pose = np.zeros(6, dtype=float)
         pose[:3] = T[:3, 3]
+        pose[3:6] = _R.from_matrix(T[:3, :3]).as_euler("xyz")
         return pose
 
     def _get_robot_tcp_pose(self, robot_name):
@@ -307,11 +326,19 @@ class Visualizer:
 
     def _inspection_q_space_planner_name(self, planner_name):
         q_space_planners = {"rrt_connect", "rrt_star"}
-        planner_name = str(planner_name or "rrt_connect")
+        raw_name = str(planner_name or "rrt_connect")
+        normalized = raw_name.strip().replace("-", "_").replace(" ", "_").lower()
+        planner_name = {
+            "rrtconnect": "rrt_connect",
+            "rrt_connect": "rrt_connect",
+            "rrtstar": "rrt_star",
+            "rrt_star": "rrt_star",
+        }.get(normalized, normalized)
         if planner_name in q_space_planners:
             return planner_name
         self.__console.warning(
-            f"inspection path: planner '{planner_name}' is task-space or does not support "
+            f"inspection path: planner '{raw_name}' resolves to '{planner_name}', "
+            "which is task-space or does not support "
             "q-space Pinocchio collision; using rrt_connect")
         return "rrt_connect"
 
@@ -388,14 +415,25 @@ class Visualizer:
         if robot_name is not None and hasattr(planner, "setup_pinocchio_collision"):
             model = self._find_robot(robot_name)
             urdf_path = getattr(model, "urdf_path", None) if model is not None else None
-            if urdf_path:
-                try:
-                    planner.setup_pinocchio_collision(
-                        urdf_path,
-                        package_dirs=[os.path.dirname(urdf_path)],
-                    )
-                except Exception as exc:
-                    self.__console.warning(f"inspection path: Pinocchio collision setup failed ({exc})")
+            if not urdf_path:
+                raise RuntimeError(f"Pinocchio collision setup failed: URDF path not found for robot '{robot_name}'")
+            if not os.path.isfile(urdf_path):
+                raise RuntimeError(f"Pinocchio collision setup failed: URDF file not found: {urdf_path}")
+            try:
+                self.__console.info(
+                    f"inspection path: configuring Pinocchio collision "
+                    f"planner={planner.__class__.__name__}, robot={robot_name}, urdf={urdf_path}")
+                planner.setup_pinocchio_collision(
+                    urdf_path,
+                    package_dirs=[os.path.dirname(urdf_path)],
+                )
+                self.__console.info(
+                    f"inspection path: Pinocchio collision configured "
+                    f"nq={planner.pin_model.nq}, "
+                    f"geometries={len(planner.pin_geom_model.geometryObjects)}, "
+                    f"pairs={len(planner.pin_geom_model.collisionPairs)}")
+            except Exception as exc:
+                raise RuntimeError(f"Pinocchio collision setup failed: {exc}") from exc
         planner.add_collision_object(obstacle_mesh)
         return bounds
 
@@ -502,8 +540,11 @@ class Visualizer:
         if current_world_T is None:
             return None
 
+        target_world = np.asarray(target_world, dtype=float)
         target_world_T = current_world_T.copy()
-        target_world_T[:3, 3] = np.asarray(target_world, dtype=float)
+        target_world_T[:3, 3] = target_world[:3]
+        if target_world.shape[0] >= 6 and np.all(np.isfinite(target_world[3:6])):
+            target_world_T[:3, :3] = _R.from_euler("xyz", target_world[3:6]).as_matrix()
         target_local_T = np.linalg.inv(model._base_T) @ target_world_T
         target_se3 = pin.SE3(target_local_T[:3, :3], target_local_T[:3, 3])
 
@@ -526,11 +567,213 @@ class Visualizer:
             q = np.minimum(np.maximum(q, pin_model.lowerPositionLimit), pin_model.upperPositionLimit)
 
         final_T = self._pin_target_world_T(model, pin_model, q, robot_name)
-        final_err = np.linalg.norm(final_T[:3, 3] - np.asarray(target_world, dtype=float)) if final_T is not None else float("inf")
+        final_err = np.linalg.norm(final_T[:3, 3] - target_world[:3]) if final_T is not None else float("inf")
         if final_err < 0.01:
             return q
         self.__console.warning(f"inspection IK failed: position error={final_err:.4f} m")
         return None
+
+    def _build_pose_determinator_point_cloud(self, surface_mesh=None):
+        if surface_mesh is not None and surface_mesh.has_triangles():
+            params = self._config.get("xray_pose", {})
+            sample_count = int(params.get("point_cloud_sample_count", 100000))
+            pcd = surface_mesh.sample_points_uniformly(number_of_points=sample_count)
+        else:
+            pts = self._get_spool_points()
+            if pts is None or len(pts) < 10:
+                raise RuntimeError("loaded pipe point cloud is not available for xray pose calculation")
+            pcd = _o3d.geometry.PointCloud()
+            pcd.points = _o3d.utility.Vector3dVector(np.asarray(pts, dtype=np.float64))
+        pcd.estimate_normals(
+            search_param=_o3d.geometry.KDTreeSearchParamHybrid(radius=0.03, max_nn=30)
+        )
+        return pcd
+
+    def _pose_to_world_T(self, pose):
+        pose = np.asarray(pose, dtype=float)
+        T = np.eye(4)
+        T[:3, 3] = pose[:3]
+        if pose.shape[0] >= 6 and np.all(np.isfinite(pose[3:6])):
+            T[:3, :3] = _R.from_euler("xyz", pose[3:6]).as_matrix()
+        return T
+
+    def _clear_inspection_target_visuals(self, clear_poses=True):
+        for actor in getattr(self, '_inspection_target_actors', []) or []:
+            try:
+                self.plotter.remove(actor)
+            except Exception:
+                pass
+        self._inspection_target_actors = []
+        if clear_poses:
+            self._inspection_target_poses = {}
+
+    def _make_pose_frame_actors(self, pose, scale=0.18):
+        T = self._pose_to_world_T(pose)
+        origin = T[:3, 3]
+        axes = [
+            (T[:3, 0], "red"),
+            (T[:3, 1], "green"),
+            (T[:3, 2], "blue"),
+        ]
+        actors = []
+        for axis, color in axes:
+            actor = vedo.Arrow(origin, origin + axis * scale, s=0.008, c=color)
+            actor.alpha(0.45)
+            actor.pickable(False)
+            actors.append(actor)
+        marker = vedo.Sphere(pos=origin, r=scale * 0.12, c="yellow")
+        marker.alpha(0.35)
+        marker.pickable(False)
+        actors.append(marker)
+        return actors
+
+    def _show_xray_target_poses(self, target_poses):
+        self._clear_inspection_target_visuals(clear_poses=False)
+        actors = []
+        for robot_name, pose in target_poses.items():
+            scale = 0.22 if robot_name == "rb20_1900es" else 0.18
+            actors.extend(self._make_pose_frame_actors(pose, scale=scale))
+        self._inspection_target_actors = actors
+        if actors:
+            self.plotter.add(*actors)
+            self.plotter.render()
+
+    def _extract_xray_target_poses(self, pose_groups):
+        if not pose_groups:
+            raise RuntimeError("xray pose calculation produced no collision-free DDA/RT pose group")
+
+        group = pose_groups[0]
+        orientation_group = group.get("0") or group.get("90")
+        if not orientation_group:
+            raise RuntimeError("xray pose group does not contain 0/90 orientation data")
+
+        dda_pose = orientation_group.get("DDA")
+        rt_pose = orientation_group.get("RT1") or orientation_group.get("RT2")
+        if dda_pose is None:
+            raise RuntimeError("xray pose group does not contain DDA target pose")
+        if rt_pose is None:
+            raise RuntimeError("xray pose group does not contain RT target pose")
+
+        return {
+            "dda_rb10_1300e": np.asarray(dda_pose, dtype=float),
+            "rb20_1900es": np.asarray(rt_pose, dtype=float),
+        }
+
+    def _calculate_xray_target_poses(self, target_point, surface_mesh=None):
+        pose_dir = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "plugins", "poseDeterminator")
+        )
+        if pose_dir not in sys.path:
+            sys.path.insert(0, pose_dir)
+        from EndEffectorPoseOptimizer import EndEffectorPoseOptimizer
+
+        root_path = os.path.abspath(str(self._config.get("root_path", os.getcwd())))
+        dda_urdf = os.path.join(root_path, "urdf", "rb10_1300e_DDA.urdf")
+        rt_urdf = os.path.join(root_path, "urdf", "rb10_1300e_RT.urdf")
+        if not os.path.isfile(dda_urdf):
+            raise RuntimeError(f"DDA URDF not found for xray pose calculation: {dda_urdf}")
+        if not os.path.isfile(rt_urdf):
+            raise RuntimeError(f"RT URDF not found for xray pose calculation: {rt_urdf}")
+
+        optimizer = EndEffectorPoseOptimizer(debug_mode=True)
+        optimizer._scan_data = self._build_pose_determinator_point_cloud(surface_mesh)
+        optimizer.load_DDA_from_urdf(dda_urdf)
+        optimizer.load_RT_from_urdf(rt_urdf)
+
+        target_point = np.asarray(target_point, dtype=float)
+        params = self._config.get("xray_pose", {})
+        profile_params = params.get("pipe_profile", {})
+        try:
+            optimizer.calculate_pipe_profile(
+                target_point,
+                sampling_size_for_calculating_normal=float(
+                    profile_params.get("sampling_size_for_calculating_normal", 0.01)),
+                radius_offset_for_sampling_points_in_sphere=float(
+                    profile_params.get("radius_offset_for_sampling_points_in_sphere", 0.003)),
+                cylinder_roi_radius=float(profile_params.get("cylinder_roi_radius", 0.005)),
+                cylinder_height_range=tuple(profile_params.get("cylinder_height_range", [-0.1, 0.3])),
+                cluster_distance=float(profile_params.get("cluster_distance", 0.005)),
+            )
+        except Exception as exc:
+            profile_info = getattr(optimizer, "debuging_info", {}) or {}
+            cluster_sizes = profile_info.get("pipe_profile_cluster_sizes")
+            if cluster_sizes is None or len(cluster_sizes) < 2:
+                self.__console.error(
+                    "xray pipe profile clustering failed: "
+                    "could not find two pipe-wall clusters across the diameter. "
+                    f"cluster_sizes={cluster_sizes}, "
+                    f"cylinder_points={profile_info.get('points_in_cylinder_count')}, "
+                    f"selected_points={profile_info.get('selected_points_count')}")
+            self.__console.error(
+                "xray pipe profile failed: "
+                f"scan_points={len(optimizer._scan_data.points)}, "
+                f"selected_points={profile_info.get('selected_points_count')}, "
+                f"cylinder_points={profile_info.get('points_in_cylinder_count')}, "
+                f"cluster_sizes={profile_info.get('pipe_profile_cluster_sizes')}, "
+                f"target={target_point.tolist()}, error={exc}")
+            raise
+        profile_info = getattr(optimizer, "debuging_info", {}) or {}
+        if profile_info:
+            self.__console.info(
+                "xray pipe profile: "
+                f"scan_points={len(optimizer._scan_data.points)}, "
+                f"selected_points={profile_info.get('selected_points_count')}, "
+                f"cylinder_points={profile_info.get('points_in_cylinder_count')}, "
+                f"cluster_sizes={profile_info.get('pipe_profile_cluster_sizes')}, "
+                f"opposite_source={profile_info.get('pipe_profile_opposite_point_source')}, "
+                f"center={np.asarray(profile_info.get('pipe_profile_center')).tolist()}, "
+                f"radius={float(profile_info.get('pipe_profile_radius')):.5f}, "
+                f"direction={np.asarray(profile_info.get('pipe_profile_direction')).tolist()}")
+
+        _, pose_groups = optimizer.calculate_DDA_RT_pose_for_taking_xray(
+            target_point,
+            num_candidates=int(params.get("num_candidates", 8)),
+            distance_from_dda_to_surface=float(params.get("distance_from_dda_to_surface", 0.01)),
+            distance_from_dda_to_rt=float(params.get("distance_from_dda_to_rt", 0.3)),
+            angle_of_rt=float(params.get("angle_of_rt", 10.0)),
+        )
+        if not pose_groups:
+            debug_info = getattr(optimizer, "debuging_info", {}) or {}
+            partial_groups = debug_info.get("collision_pose_groups", []) or []
+            if partial_groups:
+                self.__console.warning(
+                    "xray pose: no full 0/90 group found; using first partial "
+                    f"DDA/RT pose group ({len(partial_groups)} partial groups)")
+                pose_groups = partial_groups
+            else:
+                self.__console.warning(
+                    "xray pose: no valid DDA/RT pose group. "
+                    f"dda_candidates={len(debug_info.get('dda_base_candidates', []) or [])}, "
+                    f"valid_dda={len(debug_info.get('valid_base_dda_poses', []) or [])}, "
+                    f"partial_groups={len(partial_groups)}")
+        target_poses = self._extract_xray_target_poses(pose_groups)
+        for robot_name, pose in target_poses.items():
+            self.__console.info(
+                f"xray pose target selected: robot={robot_name}, "
+                f"position={pose[:3].tolist()}, rpy={pose[3:6].tolist()}")
+        return target_poses
+
+    def _update_xray_target_poses_for_point(self, target_point, surface_mesh=None):
+        if surface_mesh is None:
+            surface_mesh = self._current_spool_collision_mesh()
+        if surface_mesh is None:
+            raise RuntimeError("loaded pipe is not available")
+        target_poses = self._calculate_xray_target_poses(target_point, surface_mesh)
+        self._inspection_target_poses = target_poses
+        self._show_xray_target_poses(target_poses)
+        return {name: pose.tolist() for name, pose in target_poses.items()}
+
+    def _xray_target_pose_for_robot(self, robot_name, target_point=None, surface_mesh=None):
+        target_poses = getattr(self, '_inspection_target_poses', {}) or {}
+        if robot_name not in target_poses:
+            if target_point is None:
+                raise RuntimeError("xray target pose is not calculated")
+            self._update_xray_target_poses_for_point(target_point, surface_mesh)
+            target_poses = getattr(self, '_inspection_target_poses', {}) or {}
+        pose = target_poses.get(robot_name)
+        if pose is None:
+            raise RuntimeError(f"xray target pose is not available for {robot_name}")
+        return np.asarray(pose, dtype=float)
 
     def _q_path_to_target_poses(self, model, pin_model, robot_name, q_path, sample_resolution=0.03):
         poses = []
@@ -554,6 +797,7 @@ class Visualizer:
             if T is not None:
                 pose = np.zeros(6, dtype=float)
                 pose[:3] = T[:3, 3]
+                pose[3:6] = _R.from_matrix(T[:3, :3]).as_euler("xyz")
                 poses.append(pose)
         return poses
 
@@ -619,8 +863,7 @@ class Visualizer:
             start = self._get_robot_tcp_pose(robot_name)
             if start is None:
                 raise RuntimeError(f"robot TCP not found: {robot_name}")
-            goal = np.zeros(6, dtype=float)
-            goal[:3] = np.asarray(target, dtype=float)
+            goal = self._xray_target_pose_for_robot(robot_name, target, obstacle_mesh)
             robot_model = self._find_robot(robot_name)
             if robot_model is None:
                 raise RuntimeError(f"robot model not found: {robot_name}")
@@ -636,12 +879,15 @@ class Visualizer:
                 int(request_data.get("max_iter", 3000)),
                 robot_name=robot_name)
             if getattr(planner, "pin_model", None) is None:
-                raise RuntimeError("Pinocchio collision model is not configured")
+                raise RuntimeError(
+                    "Pinocchio collision model is not configured "
+                    f"(planner={planner.__class__.__name__}, "
+                    f"has_setup={hasattr(planner, 'setup_pinocchio_collision')})")
 
             start_q = self._current_robot_q(robot_model, planner.pin_model)
-            goal_q = self._solve_inspection_ik(robot_model, planner, robot_name, target, start_q)
+            goal_q = self._solve_inspection_ik(robot_model, planner, robot_name, goal, start_q)
             if goal_q is None:
-                raise RuntimeError("failed to solve robot IK for inspection point")
+                raise RuntimeError("failed to solve robot IK for calculated xray pose")
 
             t0 = time.time()
             q_path = planner.generate(start_q, goal_q)
@@ -676,10 +922,12 @@ class Visualizer:
                 "status": "success",
                 "planner": planner_name,
                 "robot": robot_name,
+                "pose_type": "xyz_rpy",
                 "waypoints": len(q_path),
                 "elapsed": elapsed,
                 "start": start.tolist(),
                 "goal": goal.tolist(),
+                "path_poses": [p.tolist() for p in self._last_inspection_path],
                 "verification": verification,
                 "robot_links_considered": True,
                 "collision_preview": forced_collision_preview,
