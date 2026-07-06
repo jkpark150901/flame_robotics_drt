@@ -1,4 +1,5 @@
 pyqt6
+pyqtdarktheme
 numpy
 scipy
 scikit-image

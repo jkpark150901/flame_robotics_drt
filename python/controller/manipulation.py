@@ -242,10 +242,12 @@ class Kinematics:
                 q = np.zeros(pin_model.nq)  # Configuration vector
                 joint_names = robot_info['joint_names']
                 
+                # joint_names = 액추에이트 관절(universe 제외)이고 nq도 그 수와 같으므로
+                # q[i] = joint_names[i] (오프셋 없음)
                 for i, joint_name in enumerate(joint_names):
-                    if i + 1 < len(q):  # Skip universe joint (index 0)
-                        q[i + 1] = joint_config.get(joint_name, 0.0)
-                
+                    if i < len(q):
+                        q[i] = joint_config.get(joint_name, 0.0)
+
                 # Compute forward kinematics
                 pin.forwardKinematics(pin_model, pin_data, q)
                 pin.updateFramePlacements(pin_model, pin_data)
@@ -358,10 +360,10 @@ class Kinematics:
             # Create initial configuration vector
             q_init = np.zeros(pin_model.nq)
             joint_names = robot_info['joint_names']
-            
+
             for i, joint_name in enumerate(joint_names):
-                if i + 1 < len(q_init):
-                    q_init[i + 1] = initial_joint_config.get(joint_name, 0.0)
+                if i < len(q_init):
+                    q_init[i] = initial_joint_config.get(joint_name, 0.0)
             
             # Get end-effector frame ID
             end_effector_frame_id = pin_model.nframes - 1

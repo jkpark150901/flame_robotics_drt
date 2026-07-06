@@ -290,7 +290,7 @@ class PathPlannerApp:
             self.planner_class = self.plugins[self.args.algorithm]
             self.planner = self.planner_class()
             print(f"Loaded planner: {self.planner_class.__name__}")
-            self.planner.add_static_object(self.mesh)
+            self.planner.add_collision_object(self.mesh)
             if self.tool_mesh:
                 self.planner.set_tool_geometry(self.tool_mesh)
             self._configure_planner()

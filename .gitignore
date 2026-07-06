@@ -9,6 +9,9 @@ positioner_traj/
 # C extensions
 *.so
 
+# resources
+sample/
+
 # Distribution / packaging
 .Python
 develop-eggs/

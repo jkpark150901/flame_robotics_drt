@@ -1,7 +1,6 @@
 import numpy as np
 import json
 import os
-import open3d as o3d
 from typing import List, Union
 import sys
 
@@ -27,30 +26,7 @@ class RRT(PlannerBase):
             "y_min": -10.0, "y_max": 10.0,
             "z_min": -10.0, "z_max": 10.0
         })
-        
-        self.scene = None # Open3D RaycastingScene
-
-    def add_static_object(self, object_model):
-        """
-        Add object to collision scene.
-        Assumes object_model is an open3d.geometry.TriangleMesh or similar.
-        """
-        self.static_objects.append(object_model)
-        # Re-build scene for collision checking
-        # For simple collision checking with Open3D, we can use RaycastingScene
-        # We need to convert legacy Mesh to Tensor Mesh if needed, or use legacy collision
-        
-        # Here we will init the raycasting scene if we have objects
-        if self.scene is None:
-             self.scene = o3d.t.geometry.RaycastingScene()
-        
-        # Add mesh to scene
-        # Note: Open3D RaycastingScene expects Tensor-based TriangleMesh
-        try:
-            t_mesh = o3d.t.geometry.TriangleMesh.from_legacy(object_model)
-            self.scene.add_triangles(t_mesh)
-        except Exception as e:
-            print(f"Error adding object to scene: {e}")
+        self.configure_collision(self.config, default_sample_resolution=self.step_size)
 
     def generate(self, current_pose: Union[List[float], np.ndarray], target_pose: Union[List[float], np.ndarray]) -> List[np.ndarray]:
         current_pose = np.array(current_pose, dtype=float)
@@ -143,35 +119,3 @@ class RRT(PlannerBase):
         else:
             print("Path not found within max_iter")
             return []
-
-    def _check_collision(self, p1, p2):
-        """
-        Check collision between p1 and p2.
-        Returns True if collision.
-        """
-        if self.scene is None:
-            return False
-            
-        # Create a query ray
-        # Ray casting from p1 to p2
-        direction = p2 - p1
-        length = np.linalg.norm(direction)
-        if length < 1e-6:
-            return False
-            
-        direction /= length
-        
-        # Cast ray
-        # Open3D ray format: [ox, oy, oz, dx, dy, dz]
-        # output is a dictionary
-        rays = o3d.core.Tensor([[p1[0], p1[1], p1[2], direction[0], direction[1], direction[2]]], dtype=o3d.core.Dtype.Float32)
-        ans = self.scene.cast_rays(rays)
-        
-        # t_hit is the distance to the hit.
-        t_hit = ans['t_hit'][0].item()
-        
-        # If t_hit is finite and < length, we hit something before p2
-        if np.isfinite(t_hit) and t_hit < length:
-            return True
-        
-        return False
