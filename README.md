@@ -9,6 +9,17 @@
 $ pip install -r requirements.txt
 ```
 
+If you use conda or a custom Python environment, set the interpreter path at the
+top of `Makefile` or `run.bat`.
+
+```
+PYTHON_CONFIG := C:/Users/admin/miniforge3/envs/drt/python.exe
+```
+
+```
+set "PYTHON_CONFIG=C:\Users\admin\miniforge3\envs\drt\python.exe"
+```
+
 2. Launch 3D Viewer on python virtual environment
 * Unbuntu
 ```

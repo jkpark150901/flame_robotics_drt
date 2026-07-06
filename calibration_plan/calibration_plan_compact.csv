@@ -1,0 +1,13 @@
+pose_label,J1,J2,J3,J4,J5,J6,Speed,Acceleration
+near_front_roll_m45,0,45,-60,0,45,-45,400,200
+near_front_roll_p45,0,45,-60,0,45,45,400,200
+near_left_roll_m45,90,45,-60,0,45,-45,400,200
+near_left_roll_p45,90,45,-60,0,45,45,400,200
+near_back_roll_m45,180,45,-60,0,45,-45,400,200
+near_back_roll_p45,180,45,-60,0,45,45,400,200
+near_right_roll_m45,270,45,-60,0,45,-45,400,200
+near_right_roll_p45,270,45,-60,0,45,45,400,200
+high_front_roll_0,0,70,-20,0,20,0,400,200
+high_left_roll_0,90,70,-20,0,20,0,400,200
+low_back_roll_0,180,25,-90,0,65,0,400,200
+low_right_roll_0,270,25,-90,0,65,0,400,200

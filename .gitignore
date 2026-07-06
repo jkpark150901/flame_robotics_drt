@@ -3,8 +3,14 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+
+positioner_traj/
+
 # C extensions
 *.so
+
+# resources
+sample/
 
 # Distribution / packaging
 .Python

@@ -1,7 +1,6 @@
 import numpy as np
 import json
 import os
-import open3d as o3d
 from typing import List, Union
 import sys
 
@@ -25,22 +24,25 @@ class RRTConnect(PlannerBase):
             "y_min": -10.0, "y_max": 10.0,
             "z_min": -10.0, "z_max": 10.0
         })
-        
-        self.scene = None
 
-    def add_static_object(self, object_model):
-        self.static_objects.append(object_model)
-        if self.scene is None:
-             self.scene = o3d.t.geometry.RaycastingScene()
-        try:
-            t_mesh = o3d.t.geometry.TriangleMesh.from_legacy(object_model)
-            self.scene.add_triangles(t_mesh)
-        except Exception as e:
-            print(f"Error adding object to scene: {e}")
+        self.configure_collision(self.config, default_sample_resolution=self.step_size)
 
     def generate(self, current_pose: Union[List[float], np.ndarray], target_pose: Union[List[float], np.ndarray]) -> List[np.ndarray]:
         current_pose = np.array(current_pose, dtype=float)
         target_pose = np.array(target_pose, dtype=float)
+
+        if (
+            self.pin_model is not None
+            and current_pose.shape[0] == self.pin_model.nq
+            and target_pose.shape[0] == self.pin_model.nq
+        ):
+            return self._generate_joint_space(current_pose, target_pose)
+        if self.pin_model is not None:
+            raise ValueError(
+                "RRTConnect is configured for Pinocchio collision, so generate() "
+                f"must receive q-space states with nq={self.pin_model.nq}; "
+                f"got {current_pose.shape[0]}->{target_pose.shape[0]}"
+            )
         
         start_pos = current_pose[:3]
         goal_pos = target_pose[:3]
@@ -236,17 +238,77 @@ class RRTConnect(PlannerBase):
             idx = parents[idx]
         return path
 
-    def _check_collision(self, p1, p2):
-        if self.scene is None:
-            return False
-        direction = p2 - p1
-        length = np.linalg.norm(direction)
-        if length < 1e-6:
-            return False
-        direction /= length
-        rays = o3d.core.Tensor([[p1[0], p1[1], p1[2], direction[0], direction[1], direction[2]]], dtype=o3d.core.Dtype.Float32)
-        ans = self.scene.cast_rays(rays)
-        t_hit = ans['t_hit'][0].item()
-        if np.isfinite(t_hit) and t_hit < length:
-            return True
-        return False
+    def _generate_joint_space(self, start_q, goal_q):
+        if self.check_pinocchio_collision(start_q):
+            print("RRT-Connect failed: start configuration is in collision")
+            return []
+        if self.check_pinocchio_collision(goal_q):
+            print("RRT-Connect failed: goal configuration is in collision")
+            return []
+
+        tree_a = [start_q]
+        parents_a = {0: None}
+        tree_b = [goal_q]
+        parents_b = {0: None}
+        path_found = False
+        connect_node_a_idx = -1
+        connect_node_b_idx = -1
+
+        for _ in range(self.max_iter):
+            rnd_point = goal_q if np.random.random() < 0.1 else self._sample_pinocchio_configuration()
+            new_idx_a = self._extend_q(tree_a, parents_a, rnd_point)
+            if new_idx_a is not None:
+                new_idx_b = self._connect_q(tree_b, parents_b, tree_a[new_idx_a])
+                if new_idx_b is not None:
+                    connect_node_a_idx = new_idx_a
+                    connect_node_b_idx = new_idx_b
+                    path_found = True
+                    break
+            tree_a, tree_b = tree_b, tree_a
+            parents_a, parents_b = parents_b, parents_a
+
+        if not path_found:
+            return []
+
+        is_tree_a_start = np.allclose(tree_a[0], start_q)
+        path_a = self._trace_path(tree_a, parents_a, connect_node_a_idx)
+        path_b = self._trace_path(tree_b, parents_b, connect_node_b_idx)
+        if is_tree_a_start:
+            return path_a[::-1] + path_b
+        return path_b[::-1] + path_a
+
+    def _extend_q(self, nodes, parents, target):
+        dists = np.linalg.norm(np.array(nodes) - target, axis=1)
+        nearest_idx = int(np.argmin(dists))
+        nearest_node = nodes[nearest_idx]
+        new_point = self._steer_state(nearest_node, target, self.step_size)
+        if not self._check_collision(nearest_node, new_point):
+            nodes.append(new_point)
+            new_idx = len(nodes) - 1
+            parents[new_idx] = nearest_idx
+            return new_idx
+        return None
+
+    def _connect_q(self, nodes, parents, target):
+        dists = np.linalg.norm(np.array(nodes) - target, axis=1)
+        curr_idx = int(np.argmin(dists))
+        curr_node = nodes[curr_idx]
+
+        while True:
+            dist = float(np.linalg.norm(target - curr_node))
+            if dist < self.step_size:
+                if not self._check_collision(curr_node, target):
+                    nodes.append(target)
+                    new_idx = len(nodes) - 1
+                    parents[new_idx] = curr_idx
+                    return new_idx
+                return None
+
+            new_point = self._steer_state(curr_node, target, self.step_size)
+            if self._check_collision(curr_node, new_point):
+                return None
+            nodes.append(new_point)
+            new_idx = len(nodes) - 1
+            parents[new_idx] = curr_idx
+            curr_idx = new_idx
+            curr_node = new_point

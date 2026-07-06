@@ -2,7 +2,6 @@ import numpy as np
 import json
 import os
 import sys
-import open3d as o3d
 from typing import List, Union, Tuple
 import heapq
 
@@ -27,9 +26,6 @@ class BITStar(PlannerBase):
             "y_min": -50.0, "y_max": 50.0,
             "z_min": -50.0, "z_max": 50.0
         })
-        
-        self.scene = None
-        
         # BIT* State
         self.samples = [] # Implicit RGG vertices
         self.V = set() # Tree vertices (indices in samples)
@@ -42,33 +38,8 @@ class BITStar(PlannerBase):
         self.c_best = float('inf')
         self.goal_idx = -1
         self.start_idx = -1
-
-    def add_static_object(self, object_model):
-        self.static_objects.append(object_model)
-        if self.scene is None:
-             self.scene = o3d.t.geometry.RaycastingScene()
-        
-        try:
-            t_mesh = o3d.t.geometry.TriangleMesh.from_legacy(object_model)
-            self.scene.add_triangles(t_mesh)
-        except Exception as e:
-            print(f"Error adding object to scene: {e}")
-
-    def _check_collision(self, p1, p2):
-        if self.scene is None: return False
-        
-        direction = p2 - p1
-        length = np.linalg.norm(direction)
-        if length < 1e-6: return False
-        
-        direction /= length
-        rays = o3d.core.Tensor([[p1[0], p1[1], p1[2], direction[0], direction[1], direction[2]]], dtype=o3d.core.Dtype.Float32)
-        ans = self.scene.cast_rays(rays)
-        t_hit = ans['t_hit'][0].item()
-        
-        if np.isfinite(t_hit) and t_hit < length:
-            return True
-        return False
+        self.step_size = self.config.get("step_size", 1.0)
+        self.configure_collision(self.config, default_sample_resolution=self.step_size)
 
     def _calc_heuristic(self, p1, p2):
         return np.linalg.norm(p1 - p2)
