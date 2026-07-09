@@ -14,6 +14,7 @@ import inspect
 import sys
 import types
 import os
+from pathlib import Path
 import numpy as np
 import vedo
 try:
@@ -77,6 +78,13 @@ class Visualizer:
         self._inspection_pick_identity = None
         self._inspection_point = None
         self._inspection_marker = None
+        self._chuck_mount_pick_enabled = False
+        self._chuck_mount_pick_identity = None
+        self._chuck_mount_points = []
+        self._chuck_mount_local_points = []
+        self._chuck_mount_markers = []
+        self._ef_pose_actors = []
+        self._ef_target_poses = {}
         self._inspection_path_actor = None
         self._last_inspection_path = None
         self._last_inspection_q_path = None
@@ -207,7 +215,11 @@ class Visualizer:
             self.__console.info(f"Camera set to {label}")
 
     def _on_mouse_click(self, event):
-        """Pick an inspection point on the currently loaded pipe when pick mode is armed."""
+        """Pick points on the currently loaded pipe when a viewer pick mode is armed."""
+        if getattr(self, '_chuck_mount_pick_enabled', False):
+            self._handle_chuck_mount_pick(event)
+            return
+
         if not getattr(self, '_inspection_pick_enabled', False):
             return
         pts = self._get_spool_points()
@@ -234,6 +246,7 @@ class Visualizer:
 
     def _set_inspection_point(self, point):
         self._inspection_point = np.asarray(point, dtype=float)
+        self._clear_ef_pose_visuals()
         old = getattr(self, '_inspection_marker', None)
         if old is not None:
             self.plotter.remove(old)
@@ -243,15 +256,108 @@ class Visualizer:
         self.plotter.add(marker)
         self.plotter.render()
 
+    def _handle_chuck_mount_pick(self, event):
+        pts = self._get_spool_points()
+        if pts is None or len(pts) == 0:
+            self.__console.warning("chuck mount pick: no loaded spool points")
+            return
+
+        picked = getattr(event, "picked3d", None)
+        if picked is None:
+            self.__console.warning("chuck mount pick: click a pipe surface point")
+            return
+
+        picked = np.asarray(picked, dtype=float)
+        idx = int(np.argmin(np.linalg.norm(pts - picked, axis=1)))
+        point = np.asarray(pts[idx], dtype=float)
+        local_point = self._spool_world_to_local(point)
+        self._add_chuck_mount_point(point, local_point)
+
+        count = len(self._chuck_mount_points)
+        if count < 2:
+            self.__console.info("chuck mount point 1 picked; click the opposite chuck mount point")
+            return
+
+        self._chuck_mount_pick_enabled = False
+        identity = getattr(self, '_chuck_mount_pick_identity', None)
+        payload = self._get_chuck_mount_points_payload()
+        if hasattr(self, 'zapi') and self.zapi and identity:
+            self.zapi.update_chuck_mount_points(payload, identity=identity)
+        self.__console.info(f"chuck mount points picked: {np.round(payload['points'], 4)}")
+
+    def _spool_world_to_local(self, point):
+        world_T = getattr(self, '_spool_world_T', None)
+        if world_T is None:
+            return None
+        point_h = np.ones(4, dtype=float)
+        point_h[:3] = np.asarray(point, dtype=float)
+        local = np.linalg.inv(world_T) @ point_h
+        return local[:3]
+
+    def _get_chuck_mount_points_payload(self):
+        payload = {"points": [np.asarray(p, dtype=float).tolist() for p in self._chuck_mount_points]}
+        if len(self._chuck_mount_local_points) == len(self._chuck_mount_points):
+            payload["local_points"] = [
+                None if p is None else np.asarray(p, dtype=float).tolist()
+                for p in self._chuck_mount_local_points
+            ]
+        return payload
+
+    def _clear_chuck_mount_points(self):
+        for marker in getattr(self, '_chuck_mount_markers', []):
+            if marker is not None:
+                self.plotter.remove(marker)
+        self._chuck_mount_points = []
+        self._chuck_mount_local_points = []
+        self._chuck_mount_markers = []
+        self.plotter.render()
+
+    def _add_chuck_mount_point(self, point, local_point=None):
+        point = np.asarray(point, dtype=float)
+        colors = ("dodgerblue", "orange")
+        marker = vedo.Sphere(
+            pos=point,
+            r=0.055,
+            c=colors[len(self._chuck_mount_points) % len(colors)],
+        )
+        marker.pickable(False)
+        self._chuck_mount_points.append(point)
+        self._chuck_mount_local_points.append(None if local_point is None else np.asarray(local_point, dtype=float))
+        self._chuck_mount_markers.append(marker)
+        self.plotter.add(marker)
+        self.plotter.render()
+
+    def _set_chuck_mount_points(self, points, local_points=None):
+        self._clear_chuck_mount_points()
+        if not points:
+            return
+        for i, point in enumerate(points[:2]):
+            local_point = None
+            if local_points and i < len(local_points):
+                local_point = local_points[i]
+            self._add_chuck_mount_point(point, local_point)
+
     def _clear_inspection_visuals(self, clear_point=True):
         if getattr(self, '_inspection_path_actor', None) is not None:
             self.plotter.remove(self._inspection_path_actor)
             self._inspection_path_actor = None
+        if clear_point:
+            self._clear_ef_pose_visuals()
         if clear_point and getattr(self, '_inspection_marker', None) is not None:
             self.plotter.remove(self._inspection_marker)
             self._inspection_marker = None
             self._inspection_point = None
         self.plotter.render()
+
+    def _clear_ef_pose_visuals(self, clear_poses=True):
+        for actor in getattr(self, '_ef_pose_actors', []) or []:
+            try:
+                self.plotter.remove(actor)
+            except Exception:
+                pass
+        self._ef_pose_actors = []
+        if clear_poses:
+            self._ef_target_poses = {}
 
     def _robot_target_link_name(self, robot_name):
         if robot_name == "rb20_1900es":
@@ -297,6 +403,203 @@ class Visualizer:
     def _get_robot_tcp_pose(self, robot_name):
         return self._get_robot_target_pose(robot_name)
 
+    def _rpy_matrix(self, rpy):
+        roll, pitch, yaw = [float(v) for v in rpy]
+        cr, sr = np.cos(roll), np.sin(roll)
+        cp, sp = np.cos(pitch), np.sin(pitch)
+        cy, sy = np.cos(yaw), np.sin(yaw)
+        rx = np.array([[1, 0, 0], [0, cr, -sr], [0, sr, cr]], dtype=float)
+        ry = np.array([[cp, 0, sp], [0, 1, 0], [-sp, 0, cp]], dtype=float)
+        rz = np.array([[cy, -sy, 0], [sy, cy, 0], [0, 0, 1]], dtype=float)
+        return rz @ ry @ rx
+
+    def _pose_to_T(self, pose):
+        pose = np.asarray(pose, dtype=float)
+        T = np.eye(4)
+        T[:3, 3] = pose[:3]
+        if pose.shape[0] >= 6:
+            T[:3, :3] = self._rpy_matrix(pose[3:6])
+        return T
+
+    def _pose_frame_actors(self, pose, scale=0.18, axes=(0, 1, 2), show_origin=True):
+        T = self._pose_to_T(pose)
+        origin = T[:3, 3]
+        actors = []
+        for axis, color in ((0, "red"), (1, "green"), (2, "blue")):
+            if axis not in axes:
+                continue
+            actor = vedo.Arrow(origin, origin + T[:3, axis] * scale, s=0.0008, c=color)
+            actor.alpha(0.35)
+            actor.pickable(False)
+            actors.append(actor)
+        if show_origin:
+            marker = vedo.Sphere(pos=origin, r=scale * 0.055, c="yellow")
+            marker.alpha(0.35)
+            marker.pickable(False)
+            actors.append(marker)
+        return actors
+
+    def _ef_pose_robot_name(self, pose_name):
+        return "dda_rb10_1300e" if pose_name == "DDA" else "rb20_1900es"
+
+    def _ef_pose_tcp_to_link_T(self, robot_name):
+        model = self._find_robot(robot_name)
+        if model is None or getattr(model, "_urdf", None) is None:
+            return np.eye(4)
+        joint_name = "dda_joint_tcp" if robot_name == "dda_rb10_1300e" else "rt_joint_tcp"
+        joint = getattr(model._urdf, "joint_map", {}).get(joint_name)
+        if joint is None or getattr(joint, "origin", None) is None:
+            return np.eye(4)
+        origin = joint.origin
+        if isinstance(origin, np.ndarray):
+            T = np.asarray(origin, dtype=float)
+            if T.shape == (4, 4):
+                return np.linalg.inv(T)
+        T = np.eye(4)
+        T[:3, :3] = self._rpy_matrix(origin.rpy)
+        T[:3, 3] = origin.xyz
+        return np.linalg.inv(T)
+
+    def _ef_pose_mesh_actors(self, pose_name, pose):
+        robot_name = self._ef_pose_robot_name(pose_name)
+        model = self._find_robot(robot_name)
+        if model is None:
+            return []
+        link_name = self._robot_target_link_name(robot_name)
+        mesh_list = getattr(model, "_link_mesh_data", {}).get(link_name, [])
+        if not mesh_list:
+            self.__console.warning(f"EF pose mesh unavailable: robot={robot_name}, link={link_name}")
+            return []
+        T = self._pose_to_T(pose) @ self._ef_pose_tcp_to_link_T(robot_name)
+        color = "gold" if pose_name == "DDA" else "deepskyblue"
+        actors = []
+        for local_verts, faces in mesh_list:
+            verts = (T[:3, :3] @ np.asarray(local_verts, dtype=float).T).T + T[:3, 3]
+            actor = vedo.Mesh([verts, np.asarray(faces, dtype=np.int32)])
+            actor.c(color).alpha(0.28)
+            actor.pickable(False)
+            actors.append(actor)
+        return actors
+
+    def _show_ef_target_poses(self, poses):
+        self._clear_ef_pose_visuals(clear_poses=False)
+        actors = []
+        for name, pose in poses.items():
+            scale = 0.22 if name.startswith("RT") else 0.18
+            actors.extend(self._ef_pose_mesh_actors(name, pose))
+            actors.extend(self._pose_frame_actors(pose, scale=scale, axes=(0, 1, 2), show_origin=False))
+        self._ef_pose_actors = actors
+        if actors:
+            self.plotter.add(*actors)
+            self.plotter.render()
+
+    def _candidate_x_axis_actors(self, candidate_poses, scale=0.12):
+        actors = []
+        if candidate_poses is None:
+            return actors
+        for pose in list(candidate_poses):
+            T = self._pose_to_T(pose)
+            origin = T[:3, 3]
+            actor = vedo.Arrow(origin, origin + T[:3, 0] * scale, s=0.0005, c="red")
+            actor.alpha(0.18)
+            actor.pickable(False)
+            actors.append(actor)
+        return actors
+
+    def _show_ef_pose_candidates(self, candidate_poses):
+        actors = self._candidate_x_axis_actors(candidate_poses)
+        self._ef_pose_actors.extend(actors)
+        if actors:
+            self.plotter.add(*actors)
+            self.plotter.render()
+
+    def _pose_determinator_point_cloud(self):
+        pts = self._get_spool_points()
+        if pts is None or len(pts) < 10:
+            raise RuntimeError("loaded spool point cloud is not available")
+        pcd = _o3d.geometry.PointCloud()
+        pcd.points = _o3d.utility.Vector3dVector(np.asarray(pts, dtype=np.float64))
+        pcd.estimate_normals(
+            search_param=_o3d.geometry.KDTreeSearchParamHybrid(radius=0.03, max_nn=30)
+        )
+        pcd.normalize_normals()
+        return pcd
+
+    def _extract_ef_poses(self, pose_groups):
+        if not pose_groups:
+            raise RuntimeError("poseDeterminator returned no valid pose group")
+        group = pose_groups[0]
+        orientation_group = group.get("0") or group.get("90") or next(iter(group.values()), None)
+        if not orientation_group:
+            raise RuntimeError("pose group does not contain DDA/RT poses")
+        poses = {}
+        if orientation_group.get("DDA") is not None:
+            poses["DDA"] = np.asarray(orientation_group["DDA"], dtype=float)
+        if orientation_group.get("RT1") is not None:
+            poses["RT1"] = np.asarray(orientation_group["RT1"], dtype=float)
+        elif orientation_group.get("RT2") is not None:
+            poses["RT2"] = np.asarray(orientation_group["RT2"], dtype=float)
+        if not poses:
+            raise RuntimeError("pose group is empty")
+        return poses
+
+    def _determine_ef_pose(self, request_data):
+        identity = request_data.get("_identity")
+        result = {"status": "failed"}
+        try:
+            target = getattr(self, '_inspection_point', None)
+            if target is None:
+                raise RuntimeError("inspection point is not selected")
+
+            pose_dir = os.path.abspath(
+                os.path.join(os.path.dirname(__file__), "..", "plugins", "poseDeterminator")
+            )
+            if pose_dir not in sys.path:
+                sys.path.insert(0, pose_dir)
+            from EndEffectorPoseOptimizer import EndEffectorPoseOptimizer
+
+            root_path = os.path.abspath(str(self._config.get("root_path", os.getcwd())))
+            optimizer = EndEffectorPoseOptimizer(debug_mode=True)
+            optimizer._scan_data = self._pose_determinator_point_cloud()
+            optimizer.load_DDA_from_urdf(os.path.join(root_path, "urdf", "rb10_1300e_DDA.urdf"))
+            optimizer.load_RT_from_urdf(os.path.join(root_path, "urdf", "rb10_1300e_RT.urdf"))
+
+            params = self._config.get("ef_pose", {}) or {}
+            target = np.asarray(target, dtype=float)
+            optimizer.calculate_pipe_profile(
+                target,
+                sampling_size_for_calculating_normal=float(
+                    params.get("sampling_size_for_calculating_normal", 0.01)),
+                radius_offset_for_sampling_points_in_sphere=float(
+                    params.get("radius_offset_for_sampling_points_in_sphere", 0.003)),
+            )
+            _, pose_groups = optimizer.calculate_DDA_RT_pose_for_taking_xray(
+                target,
+                num_candidates=int(params.get("num_candidates", 8)),
+                distance_from_dda_to_surface=float(params.get("distance_from_dda_to_surface", 0.01)),
+                distance_from_dda_to_rt=float(params.get("distance_from_dda_to_rt", 0.3)),
+                angle_of_rt=float(params.get("angle_of_rt", 10.0)),
+            )
+            poses = self._extract_ef_poses(pose_groups)
+            self._ef_target_poses = poses
+            self._show_ef_target_poses(poses)
+            debug_info = getattr(optimizer, "debuging_info", {}) or {}
+            candidate_poses = debug_info.get("valid_base_dda_poses")
+            if candidate_poses is None or len(candidate_poses) == 0:
+                candidate_poses = debug_info.get("dda_base_candidates", [])
+            self._show_ef_pose_candidates(candidate_poses)
+            result = {
+                "status": "success",
+                "poses": {name: pose.tolist() for name, pose in poses.items()},
+                "candidate_count": len(candidate_poses),
+            }
+            self.__console.info(f"EF pose determined: {list(poses.keys())}")
+        except Exception as exc:
+            result = {"status": "failed", "message": str(exc)}
+            self.__console.error(f"EF pose determination failed: {exc}")
+        if hasattr(self, 'zapi') and self.zapi:
+            self.zapi.reply_ef_pose(result, identity=identity)
+
     def _load_path_planner(self, module_name):
         from plugins.pluginbase.plannerbase import PlannerBase
         module = importlib.import_module(f"plugins.pathplanner.{module_name}")
@@ -336,6 +639,7 @@ class Visualizer:
         pts = self._get_spool_points()
         if pts is None or len(pts) < 4:
             return None
+        pts = self._spool_collision_points(pts)
         pcd = _o3d.geometry.PointCloud()
         pcd.points = _o3d.utility.Vector3dVector(np.asarray(pts, dtype=float))
         try:
@@ -357,10 +661,47 @@ class Visualizer:
                 mesh.compute_vertex_normals()
                 return mesh
         except Exception as exc:
-            self.__console.warning(f"inspection path: alpha mesh failed, convex hull fallback ({exc})")
-        mesh, _ = pcd.compute_convex_hull()
+            self.__console.warning(
+                "inspection path: alpha mesh failed; using AABB collision fallback "
+                f"({self._short_exception(exc)})")
+        mesh = self._aabb_collision_mesh(pcd)
         mesh.compute_vertex_normals()
         return mesh
+
+    def _spool_collision_points(self, pts):
+        pts = np.asarray(pts, dtype=float)
+        load_cfg = self._config.get("spool_load", {}) or {}
+        max_points = int(load_cfg.get("collision_max_points", 100000))
+        if max_points <= 0 or len(pts) <= max_points:
+            return pts
+        step = int(np.ceil(len(pts) / max_points))
+        reduced = pts[::step]
+        self.__console.info(
+            f"inspection path: collision point cloud downsampled "
+            f"{len(pts)} -> {len(reduced)} points")
+        return reduced
+
+    def _aabb_collision_mesh(self, pcd):
+        bbox = pcd.get_axis_aligned_bounding_box()
+        mn = np.asarray(bbox.get_min_bound(), dtype=float)
+        mx = np.asarray(bbox.get_max_bound(), dtype=float)
+        ext = np.maximum(mx - mn, 0.01)
+        pad = np.maximum(ext * 0.01, 0.005)
+        mn = mn - pad
+        ext = ext + 2.0 * pad
+        mesh = _o3d.geometry.TriangleMesh.create_box(
+            width=float(ext[0]),
+            height=float(ext[1]),
+            depth=float(ext[2]),
+        )
+        mesh.translate(mn)
+        return mesh
+
+    def _short_exception(self, exc, limit=220):
+        msg = str(exc).replace("\r", " ").replace("\n", " ")
+        if len(msg) > limit:
+            return msg[:limit] + "..."
+        return msg
 
     def _configure_inspection_planner(self, planner, obstacle_mesh, start, goal, step_size, max_iter, robot_name=None):
         mn = np.minimum(obstacle_mesh.get_min_bound(), np.minimum(start[:3], goal[:3]))
@@ -401,6 +742,14 @@ class Visualizer:
 
     def _probe_current_spool_pinocchio_collision(self, reason="spool"):
         """Add the currently loaded spool mesh to Pinocchio and check current robot q."""
+        probe_enabled = bool(
+            self._config.get("probe_collision_on_spool_update", False)
+            or (self._config.get("spool_load", {}) or {}).get("probe_collision_on_update", False)
+        )
+        if not probe_enabled:
+            self.__console.debug(f"{reason}: spool collision probe skipped")
+            return []
+
         obstacle_mesh = self._current_spool_collision_mesh()
         if obstacle_mesh is None or not obstacle_mesh.has_triangles():
             self.__console.warning(f"{reason}: spool collision mesh is not available")
@@ -1117,7 +1466,13 @@ class Visualizer:
             self.zapi.update_spool_pose(self._get_spool_pose_payload(), identity=identity)
 
     def _get_spool_points(self):
-        """현재 로드된 스풀 actor(들)의 월드 좌표 점을 (N,3)로 반환. 없으면 None."""
+        """Return full-resolution spool points in world coordinates when available."""
+        full_local = getattr(self, '_spool_full_local_points', None)
+        world_T = getattr(self, '_spool_world_T', None)
+        if full_local is not None and world_T is not None:
+            full_local = np.asarray(full_local, dtype=float)
+            return (world_T[:3, :3] @ full_local.T).T + world_T[:3, 3]
+
         spool = getattr(self, '_loaded_spool_mesh', None)
         if spool is None:
             return None
@@ -1373,6 +1728,108 @@ class Visualizer:
         self._chuck_prev_T = Tc
         return self._apply_spool_world_T()
 
+    def _ensure_point_cloud_normals(self, pcd, source_path):
+        """Ensure an Open3D point cloud has normals for pose determination."""
+        if pcd is None or not pcd.has_points():
+            raise RuntimeError(f"point cloud has no points: {source_path}")
+        try:
+            pcd.remove_non_finite_points()
+            pcd.remove_duplicated_points()
+        except Exception:
+            pass
+        if pcd.has_normals():
+            self.__console.info(f"load_spool: normals included in point cloud: {source_path}")
+        else:
+            pcd.estimate_normals(
+                search_param=_o3d.geometry.KDTreeSearchParamHybrid(radius=0.03, max_nn=30)
+            )
+            pcd.normalize_normals()
+            self.__console.info(f"load_spool: normals missing; estimated point cloud normals: {source_path}")
+            self._save_estimated_normal_point_cloud(pcd, source_path)
+        return pcd
+
+    def _save_estimated_normal_point_cloud(self, pcd, source_path):
+        source = Path(source_path)
+        normal_path = source.with_name(f"{source.stem}_normal{source.suffix}")
+        ok = _o3d.io.write_point_cloud(str(normal_path), pcd)
+        if ok:
+            self.__console.info(f"load_spool: saved estimated-normal point cloud: {normal_path}")
+        else:
+            self.__console.warning(f"load_spool: failed to save estimated-normal point cloud: {normal_path}")
+
+    def _spool_load_scale(self, suffix):
+        load_cfg = self._config.get("spool_load", {}) or {}
+        scale_by_ext = load_cfg.get("scale_by_extension", {}) or {}
+        if suffix in scale_by_ext:
+            return float(scale_by_ext[suffix])
+        if suffix == ".pcd":
+            return float(load_cfg.get("pcd_scale", self._config.get("spool_pcd_scale", 1e-3)))
+        if suffix == ".ply":
+            return float(load_cfg.get("ply_scale", self._config.get("spool_ply_scale", 1.0)))
+        return float(load_cfg.get("scale", self._config.get("spool_load_scale", 1.0)))
+
+    def _apply_point_cloud_scale(self, pcd, scale, source_path):
+        if scale == 1.0:
+            return pcd
+        pts = np.asarray(pcd.points, dtype=np.float64) * float(scale)
+        pcd.points = _o3d.utility.Vector3dVector(pts)
+        self.__console.info(f"load_spool: applied point cloud scale={scale:g}: {source_path}")
+        return pcd
+
+    def _apply_triangle_mesh_scale(self, mesh_o3d, scale, source_path):
+        if scale == 1.0:
+            return mesh_o3d
+        verts = np.asarray(mesh_o3d.vertices, dtype=np.float64) * float(scale)
+        mesh_o3d.vertices = _o3d.utility.Vector3dVector(verts)
+        self.__console.info(f"load_spool: applied mesh scale={scale:g}: {source_path}")
+        return mesh_o3d
+
+    def _point_cloud_visual_points(self, pcd, source_path):
+        pts = np.asarray(pcd.points, dtype=np.float64)
+        load_cfg = self._config.get("spool_load", {}) or {}
+        max_points = int(load_cfg.get("visual_max_points", 50000))
+        if max_points <= 0 or len(pts) <= max_points:
+            return pts
+        step = int(np.ceil(len(pts) / max_points))
+        visual_pts = pts[::step]
+        self.__console.info(
+            f"load_spool: visual point cloud downsampled {len(pts)} -> "
+            f"{len(visual_pts)} points: {source_path}")
+        return visual_pts
+
+    def _load_spool_geometry_with_normals(self, path):
+        """Load spool geometry and estimate normals when a point-cloud PLY/PCD has none."""
+        suffix = os.path.splitext(path)[1].lower()
+        scale = self._spool_load_scale(suffix)
+        if Path(path).stem.endswith("_normal"):
+            load_cfg = self._config.get("spool_load", {}) or {}
+            scale = float(load_cfg.get("normal_scale", 1.0))
+        if suffix in (".pcd", ".ply"):
+            mesh_o3d = None
+            if suffix == ".ply":
+                try:
+                    mesh_o3d = _o3d.io.read_triangle_mesh(path)
+                except Exception:
+                    mesh_o3d = None
+                if mesh_o3d is not None and mesh_o3d.has_triangles():
+                    mesh_o3d = self._apply_triangle_mesh_scale(mesh_o3d, scale, path)
+                    if mesh_o3d.has_vertex_normals():
+                        self.__console.info(f"load_spool: vertex normals included in mesh: {path}")
+                    else:
+                        mesh_o3d.compute_vertex_normals()
+                        self.__console.info(f"load_spool: vertex normals missing; computed mesh normals: {path}")
+                    verts = np.asarray(mesh_o3d.vertices, dtype=np.float64)
+                    faces = np.asarray(mesh_o3d.triangles, dtype=np.int32)
+                    return vedo.Mesh([verts, faces]), "mesh", mesh_o3d, None
+
+            pcd = _o3d.io.read_point_cloud(path)
+            pcd = self._apply_point_cloud_scale(pcd, scale, path)
+            pcd = self._ensure_point_cloud_normals(pcd, path)
+            pts = self._point_cloud_visual_points(pcd, path)
+            return vedo.Points(pts), "point_cloud", None, pcd
+
+        return vedo.load(path), "mesh", None, None
+
     def _process_request(self, request_data):
         """Process a request from the ZApi queue."""
         try:
@@ -1386,13 +1843,7 @@ class Visualizer:
                         try:
                             self._clear_collision_highlights()
                             import pathlib as _pl
-                            if _pl.Path(path).suffix.lower() == ".pcd":
-                                
-                                _pcd = _o3d.io.read_point_cloud(path)
-                                _pts = np.asarray(_pcd.points, dtype=np.float64)
-                                mesh = vedo.Points(_pts)
-                            else:
-                                mesh = vedo.load(path)
+                            mesh, _geom_kind, _mesh_o3d, _pcd = self._load_spool_geometry_with_normals(path)
                             if mesh is not None:
                                 # 스풀 위치는 chuck 조인트(m_column_passive_r)를 원점으로 본다.
                                 # spool_world = T_chuck @ T_offset @ local
@@ -1400,6 +1851,7 @@ class Visualizer:
                                 #    → 포지셔너 위치와 무관하게 reload 시 항상 현재 chuck 기준으로 배치
                                 #  - T_offset: UI(chuck 기준) 위치/회전, 처음엔 0
                                 _is_pcd = _pl.Path(path).suffix.lower() == ".pcd"
+                                _is_point_cloud = _geom_kind == "point_cloud"
                                 _default_x = -0.442  # 척 길이만큼 x로 (chuck 기준)
 
                                 # 기존에 로드된 스풀/재건 메시 모두 제거 (새 파이프로 교체)
@@ -1421,14 +1873,28 @@ class Visualizer:
                                 self._spool_world_T = None
                                 self._chuck_prev_T = None
                                 self._loaded_spool_x_flipped = False
+                                self._loaded_spool_point_cloud = _pcd
+                                self._loaded_spool_open3d_mesh = _mesh_o3d
+                                self._spool_full_local_points = None
 
                                 if _is_pcd:
-                                    scaled = _pts * 1e-3
+                                    _pts = np.asarray(_pcd.points, dtype=np.float64)
+                                    _visual_pts = np.asarray(mesh.vertices, dtype=np.float64)
+                                    scaled = _pts
+                                    visual_scaled = _visual_pts
                                     centroid = scaled.mean(axis=0)
                                     Rz = self._rotz(-90)[:3, :3]
                                     # centroid 중심화 → -90도 정렬 → chuck 기준 x 오프셋(상수)
-                                    self._spool_local_verts = (
+                                    self._spool_full_local_points = (
                                         (Rz @ (scaled - centroid).T).T + np.array([_default_x, 0.0, 0.0]))
+                                    self._spool_local_verts = (
+                                        (Rz @ (visual_scaled - centroid).T).T + np.array([_default_x, 0.0, 0.0]))
+                                    self.plotter.add(mesh)
+                                    self._loaded_spool_mesh = mesh
+                                    self._render_spool_offset()
+                                elif _is_point_cloud:
+                                    self._spool_full_local_points = np.asarray(_pcd.points, dtype=float).copy()
+                                    self._spool_local_verts = np.asarray(mesh.vertices, dtype=float).copy()
                                     self.plotter.add(mesh)
                                     self._loaded_spool_mesh = mesh
                                     self._render_spool_offset()
@@ -1437,8 +1903,10 @@ class Visualizer:
                                     # 옆 JSON의 chuck 기준 offset을 적용하면 저장 시 pose로 복원된다.
                                     if hasattr(mesh, "vertices"):
                                         self._spool_local_verts = np.asarray(mesh.vertices, dtype=float).copy()
+                                        self._spool_full_local_points = self._spool_local_verts.copy()
                                     else:
                                         self._spool_local_verts = None
+                                        self._spool_full_local_points = None
                                     self.plotter.add(mesh)
                                     self._loaded_spool_mesh = mesh
                                     if hasattr(mesh, "cells"):
@@ -1629,11 +2097,33 @@ class Visualizer:
                 elif command == "pick_inspection_point":
                     self._inspection_pick_enabled = bool(request_data.get("enabled", True))
                     self._inspection_pick_identity = request_data.get("_identity")
+                    if self._inspection_pick_enabled:
+                        self._chuck_mount_pick_enabled = False
                     self.__console.info(
                         "inspection pick mode enabled" if self._inspection_pick_enabled
                         else "inspection pick mode disabled")
+                elif command == "pick_chuck_mount_points":
+                    enabled = bool(request_data.get("enabled", True))
+                    self._chuck_mount_pick_enabled = enabled
+                    self._chuck_mount_pick_identity = request_data.get("_identity")
+                    if enabled:
+                        self._inspection_pick_enabled = False
+                        if bool(request_data.get("clear", True)):
+                            self._clear_chuck_mount_points()
+                    self.__console.info(
+                        "chuck mount pick mode enabled: click fixed-side point, then moving-side point"
+                        if enabled else "chuck mount pick mode disabled")
+                elif command == "set_chuck_mount_points":
+                    self._set_chuck_mount_points(
+                        request_data.get("points", []),
+                        request_data.get("local_points"))
+                elif command == "clear_chuck_mount_points":
+                    self._chuck_mount_pick_enabled = False
+                    self._clear_chuck_mount_points()
                 elif command == "plan_inspection_path":
                     self._plan_inspection_path(request_data)
+                elif command == "determine_ef_pose":
+                    self._determine_ef_pose(request_data)
                 elif command == "clear_inspection_path":
                     self._inspection_pick_enabled = False
                     self._path_playback = None

@@ -106,25 +106,25 @@ class _MockOptimizer:
         )
 
         rt_position = dda_tcp_pose[:3] + dda_to_rt_direction * distance_from_dda_to_rt
-        rt_x_axis = -dda_to_rt_direction
-        rt_x_axis = rt_x_axis / np.linalg.norm(rt_x_axis)
 
-        rt_z_axis = dda_z_axis_unit
-        rt_y_axis = np.cross(rt_z_axis, rt_x_axis)
+        rt_z_axis = dda_to_rt_direction
+        rt_z_axis = rt_z_axis / np.linalg.norm(rt_z_axis)
+        rt_y_axis = dda_z_axis_unit
         rt_y_axis = rt_y_axis / np.linalg.norm(rt_y_axis)
+        rt_x_axis = np.cross(rt_y_axis, rt_z_axis)
+        rt_x_axis = rt_x_axis / np.linalg.norm(rt_x_axis)
 
         rt_rot_matrix = np.column_stack([rt_x_axis, rt_y_axis, rt_z_axis])
         det = np.linalg.det(rt_rot_matrix)
         debug_info["det"] = det
+        debug_info["dda_to_rt_direction"] = dda_to_rt_direction
 
         if np.isnan(det):
             debug_info["error"] = "회전 행렬 det 가 NaN"
             return None, debug_info
 
         if det < 0:
-            rt_z_axis = -rt_z_axis
-            rt_y_axis = np.cross(rt_z_axis, rt_x_axis)
-            rt_y_axis = rt_y_axis / np.linalg.norm(rt_y_axis)
+            rt_x_axis = -rt_x_axis
             rt_rot_matrix = np.column_stack([rt_x_axis, rt_y_axis, rt_z_axis])
 
         try:
@@ -192,8 +192,14 @@ def test_rt_pose_calculation_handles_arbitrary_pipe_direction(pipe_direction: np
         rt_neg, dbg_neg = optimizer.calculate_rt_pose_for_angle(dda_pose, -angle_of_rt, distance_from_dda_to_rt)
         if rt_pos is None:
             failures.append((i, f"+α: {dbg_pos.get('error', 'unknown')}"))
+        else:
+            rt_pos_rot = R.from_euler("xyz", rt_pos[3:]).as_matrix()
+            assert np.dot(-rt_pos_rot[:, 2], -dbg_pos["dda_to_rt_direction"]) > 1.0 - 1e-9
         if rt_neg is None:
             failures.append((i, f"-α: {dbg_neg.get('error', 'unknown')}"))
+        else:
+            rt_neg_rot = R.from_euler("xyz", rt_neg[3:]).as_matrix()
+            assert np.dot(-rt_neg_rot[:, 2], -dbg_neg["dda_to_rt_direction"]) > 1.0 - 1e-9
 
     assert not failures, (
         f"pipe_direction={pipe_direction.tolist()} 에서 RT 자세 계산 실패: " + ", ".join(f"#{i} {msg}" for i, msg in failures)

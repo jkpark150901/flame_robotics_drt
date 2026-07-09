@@ -261,6 +261,18 @@ class ZAPI(ZAPIBase):
             self.__router_socket.dispatch(reply_parts)
             self.__console.info(f"[ZAPI_VIEWERVEDO] Sent inspection point update: {point}")
 
+    def update_chuck_mount_points(self, points: dict, identity=None):
+        """Send picked pipe chuck mount points to SimTool."""
+        if self.__router_socket and self.__router_socket.is_joined and identity:
+            reply_parts = [
+                identity,
+                self.__router_socket.socket_id.encode('utf-8'),
+                "update_chuck_mount_points".encode('utf-8'),
+                json.dumps(points).encode('utf-8')
+            ]
+            self.__router_socket.dispatch(reply_parts)
+            self.__console.info(f"[ZAPI_VIEWERVEDO] Sent chuck mount points update: {points}")
+
     def reply_inspection_path(self, result: dict, identity=None):
         """Send path planning result to SimTool."""
         if self.__router_socket and self.__router_socket.is_joined and identity:
@@ -272,6 +284,18 @@ class ZAPI(ZAPIBase):
             ]
             self.__router_socket.dispatch(reply_parts)
             self.__console.info(f"[ZAPI_VIEWERVEDO] Sent inspection path result: {result}")
+
+    def reply_ef_pose(self, result: dict, identity=None):
+        """Send EF pose determination result to SimTool."""
+        if self.__router_socket and self.__router_socket.is_joined and identity:
+            reply_parts = [
+                identity,
+                self.__router_socket.socket_id.encode('utf-8'),
+                "reply_ef_pose".encode('utf-8'),
+                json.dumps(result).encode('utf-8')
+            ]
+            self.__router_socket.dispatch(reply_parts)
+            self.__console.info(f"[ZAPI_VIEWERVEDO] Sent EF pose result: {result}")
 
     def zapi_flip_spool_x(self, kwargs=None):
         """Handle request to flip the currently loaded spool in X direction."""
@@ -369,6 +393,7 @@ class ZAPI(ZAPIBase):
         else:
             self.push_to_queue(request_payload)
 
+
     def zapi_reconstruct_mesh(self, kwargs=None):
         """Handle reconstruct_mesh request (현재 로드된 스풀로 메시 재건)."""
         self.__console.info(f"Received zapi_reconstruct_mesh with kwargs: {kwargs}")
@@ -437,6 +462,58 @@ class ZAPI(ZAPIBase):
             "robot": (kwargs or {}).get("robot", "rb20_1900es"),
             "step_size": (kwargs or {}).get("step_size", 0.08),
             "max_iter": (kwargs or {}).get("max_iter", 3000),
+            "_identity": (kwargs or {}).get("_identity"),
+        }
+        if self._visualizer:
+            self._visualizer.push_request(request_payload)
+        else:
+            self.push_to_queue(request_payload)
+
+    def zapi_pick_chuck_mount_points(self, kwargs=None):
+        """Handle two-point chuck mount pick mode request."""
+        self.__console.info(f"Received zapi_pick_chuck_mount_points with kwargs: {kwargs}")
+        request_payload = {
+            "command": "pick_chuck_mount_points",
+            "enabled": (kwargs or {}).get("enabled", True),
+            "clear": (kwargs or {}).get("clear", True),
+            "_identity": (kwargs or {}).get("_identity"),
+        }
+        if self._visualizer:
+            self._visualizer.push_request(request_payload)
+        else:
+            self.push_to_queue(request_payload)
+
+    def zapi_set_chuck_mount_points(self, kwargs=None):
+        """Render previously stored chuck mount points in the viewer."""
+        self.__console.info(f"Received zapi_set_chuck_mount_points with kwargs: {kwargs}")
+        request_payload = {
+            "command": "set_chuck_mount_points",
+            "points": (kwargs or {}).get("points", []),
+            "local_points": (kwargs or {}).get("local_points"),
+            "_identity": (kwargs or {}).get("_identity"),
+        }
+        if self._visualizer:
+            self._visualizer.push_request(request_payload)
+        else:
+            self.push_to_queue(request_payload)
+
+    def zapi_clear_chuck_mount_points(self, kwargs=None):
+        """Clear rendered chuck mount points in the viewer."""
+        self.__console.info(f"Received zapi_clear_chuck_mount_points with kwargs: {kwargs}")
+        request_payload = {
+            "command": "clear_chuck_mount_points",
+            "_identity": (kwargs or {}).get("_identity") if kwargs else None,
+        }
+        if self._visualizer:
+            self._visualizer.push_request(request_payload)
+        else:
+            self.push_to_queue(request_payload)
+
+    def zapi_determine_ef_pose(self, kwargs=None):
+        """Handle EF pose determination request for the picked inspection point."""
+        self.__console.info(f"Received zapi_determine_ef_pose with kwargs: {kwargs}")
+        request_payload = {
+            "command": "determine_ef_pose",
             "_identity": (kwargs or {}).get("_identity"),
         }
         if self._visualizer:

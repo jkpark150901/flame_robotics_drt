@@ -66,6 +66,8 @@ class AppWindow(QMainWindow):
         self.__config = config
         self.zpipe = zpipe
         self.zapi = None
+        self._chuck_mount_points = []
+        self._chuck_mount_local_points = []
 
         try:            
             if "gui" in config:
@@ -77,6 +79,7 @@ class AppWindow(QMainWindow):
 
                     # Initialize SimParameterMap for UI sync
                     self._sim_param_map = SimParameterMap(self, self.__config, self.__console)
+                    self.__hide_mesh_reconstruction_ui()
 
                     # Load plugins and samples
                     self.__load_plugins()
@@ -103,6 +106,34 @@ class AppWindow(QMainWindow):
                 
         except Exception as e:
             self.__console.error(f"{e}")
+
+    def __hide_mesh_reconstruction_ui(self):
+        """Hide experimental point-cloud processing controls from the main UI."""
+        for widget_name in (
+            'label_proc_sor',
+            'label_sor_neighbors',
+            'spin_pcd_sor_neighbors',
+            'label_sor_std',
+            'spin_pcd_sor_std_ratio',
+            'btn_pcd_sor_filter',
+            'label_proc_ccl',
+            'label_ccl_level',
+            'spin_pcd_ccl_level',
+            'label_ccl_min',
+            'spin_pcd_ccl_min_points',
+            'btn_pcd_ccl_filter',
+            'label_proc_mesh',
+            'label_mesh_res',
+            'spin_mesh_resolution',
+            'label_mesh_sigma',
+            'spin_mesh_sigma',
+            'label_mesh_level',
+            'spin_mesh_level',
+            'btn_mesh_convert',
+        ):
+            widget = getattr(self, widget_name, None)
+            if widget is not None:
+                widget.hide()
 
     def __load_plugins(self):
         """
@@ -210,6 +241,12 @@ class AppWindow(QMainWindow):
             self.btn_start_simulation.clicked.connect(self.__on_btn_start_simulation_clicked)
         if hasattr(self, 'btn_pick_inspection_point'):
             self.btn_pick_inspection_point.clicked.connect(self.__on_btn_pick_inspection_point_clicked)
+        self.__ensure_determine_ef_pose_button()
+        if hasattr(self, 'btn_determine_ef_pose'):
+            self.btn_determine_ef_pose.clicked.connect(self.__on_btn_determine_ef_pose_clicked)
+        self.__ensure_chuck_mount_pick_button()
+        if hasattr(self, 'btn_pick_chuck_mount_points'):
+            self.btn_pick_chuck_mount_points.clicked.connect(self.__on_btn_pick_chuck_mount_points_clicked)
         if hasattr(self, 'btn_plan_inspection_path'):
             self.btn_plan_inspection_path.clicked.connect(self.__on_btn_plan_inspection_path_clicked)
         if hasattr(self, 'btn_clear_inspection_path'):
@@ -474,6 +511,10 @@ class AppWindow(QMainWindow):
             # 고정(체크) 상태 — spool 포즈는 chuck 기준 오프셋이다
             "fix_f_column_r": bool(fix_f),
             "fix_m_column_z": bool(fix_z),
+            "chuck_mount_points": {
+                "points": getattr(self, '_chuck_mount_points', []),
+                "local_points": getattr(self, '_chuck_mount_local_points', []),
+            },
             "x": pose["x"],
             "y": pose["y"],
             "z": pose["z"],
@@ -501,6 +542,7 @@ class AppWindow(QMainWindow):
             or any(k in payload for k in ("x", "y", "z", "x_rotation", "z_rotation"))
         )
         pose = self.__set_spool_pose_to_ui(payload.get("spool", payload)) if has_spool_pose else None
+        self.__set_chuck_mount_points_from_payload(payload.get("chuck_mount_points"))
         self.__console.info(f"Loaded spool pose: {pose_path}")
 
         # 고정 체크박스 상태 먼저 복원 → 포지셔너 이동 시 r-fix 동기화가 반영되도록
@@ -514,7 +556,29 @@ class AppWindow(QMainWindow):
             # 2) 스풀 오프셋(chuck 기준) 적용 (고정 가드 무시하고 강제 적용)
             if pose is not None:
                 self.__request_spool_pose_move(pose, force=True)
+            self.__request_chuck_mount_points_render()
         return True
+
+    def __set_chuck_mount_points_from_payload(self, payload):
+        if not payload:
+            self._chuck_mount_points = []
+            self._chuck_mount_local_points = []
+            return
+        if isinstance(payload, dict):
+            points = payload.get("points", [])
+            local_points = payload.get("local_points", [])
+        else:
+            points = payload
+            local_points = []
+        self._chuck_mount_points = points or []
+        self._chuck_mount_local_points = local_points or []
+
+    def __request_chuck_mount_points_render(self):
+        if not self.zapi or not getattr(self, '_chuck_mount_points', None):
+            return
+        self.zapi._ZAPI_request_set_chuck_mount_points(
+            self._chuck_mount_points,
+            getattr(self, '_chuck_mount_local_points', None))
 
     def __set_spool_fix_checks(self, fix_f, fix_z):
         """고정 체크박스 상태를 시그널 없이 설정하고 컨트롤 잠금만 갱신."""
@@ -587,6 +651,37 @@ class AppWindow(QMainWindow):
             self.label_path_plan_status.setText(str(msg))
         self.__console.info(str(msg))
 
+    def __ensure_determine_ef_pose_button(self):
+        if hasattr(self, 'btn_determine_ef_pose'):
+            return
+        if not hasattr(self, 'btn_pick_inspection_point') or not hasattr(self, 'btn_clear_inspection_path'):
+            return
+        parent = self.btn_clear_inspection_path.parent()
+        self.btn_pick_inspection_point.setGeometry(10, 348, 74, 32)
+        self.btn_determine_ef_pose = QPushButton("EF Pose", parent)
+        self.btn_determine_ef_pose.setObjectName("btn_determine_ef_pose")
+        self.btn_determine_ef_pose.setGeometry(88, 348, 74, 32)
+        if hasattr(self, 'btn_plan_inspection_path'):
+            self.btn_plan_inspection_path.setGeometry(166, 348, 74, 32)
+        self.btn_clear_inspection_path.setGeometry(244, 348, 77, 32)
+        self.btn_determine_ef_pose.show()
+
+    def __ensure_chuck_mount_pick_button(self):
+        if hasattr(self, 'btn_pick_chuck_mount_points'):
+            return
+        if not hasattr(self, 'btn_spool_pose_load'):
+            return
+        parent = self.btn_spool_pose_load.parent()
+        geo = self.btn_spool_pose_load.geometry()
+        self.btn_pick_chuck_mount_points = QPushButton("Pick Chucks", parent)
+        self.btn_pick_chuck_mount_points.setObjectName("btn_pick_chuck_mount_points")
+        self.btn_pick_chuck_mount_points.setGeometry(
+            max(10, geo.x() + geo.width() - 96),
+            geo.y() + geo.height() + 4,
+            96,
+            geo.height())
+        self.btn_pick_chuck_mount_points.show()
+
     def __on_btn_pick_inspection_point_clicked(self):
         try:
             if not self.zapi:
@@ -596,6 +691,28 @@ class AppWindow(QMainWindow):
             self.__set_path_plan_status("Pick mode: click pipe surface in viewer")
         except Exception as e:
             self.__console.error(f"Error requesting inspection point pick: {e}")
+            self.__set_path_plan_status(f"[!] {e}")
+
+    def __on_btn_pick_chuck_mount_points_clicked(self):
+        try:
+            if not self.zapi:
+                self.__set_path_plan_status("[!] ZAPI not available")
+                return
+            self.zapi._ZAPI_request_pick_chuck_mount_points(True, clear=True)
+            self.__set_path_plan_status("Chuck pick mode: click fixed-side, then moving-side")
+        except Exception as e:
+            self.__console.error(f"Error requesting chuck mount point pick: {e}")
+            self.__set_path_plan_status(f"[!] {e}")
+
+    def __on_btn_determine_ef_pose_clicked(self):
+        try:
+            if not self.zapi:
+                self.__set_path_plan_status("[!] ZAPI not available")
+                return
+            self.zapi._ZAPI_request_determine_ef_pose()
+            self.__set_path_plan_status("EF pose requested")
+        except Exception as e:
+            self.__console.error(f"Error requesting EF pose determination: {e}")
             self.__set_path_plan_status(f"[!] {e}")
 
     def __on_btn_plan_inspection_path_clicked(self):
@@ -762,6 +879,37 @@ class AppWindow(QMainWindow):
                 except Exception:
                     pass
 
+            if topic == "update_chuck_mount_points":
+                try:
+                    payload = json.loads(msg)
+                    points = payload.get("points", [])
+                    local_points = payload.get("local_points", [])
+                    self._chuck_mount_points = points
+                    self._chuck_mount_local_points = local_points
+                    if len(points) >= 2:
+                        p0 = points[0]
+                        p1 = points[1]
+                        self.__set_path_plan_status(
+                            "Chuck points selected: "
+                            f"F({float(p0[0]):.3f},{float(p0[1]):.3f},{float(p0[2]):.3f}) "
+                            f"M({float(p1[0]):.3f},{float(p1[1]):.3f},{float(p1[2]):.3f})")
+                    else:
+                        self.__set_path_plan_status("Chuck point selection incomplete")
+                except Exception:
+                    pass
+
+            if topic == "reply_ef_pose":
+                try:
+                    result = json.loads(msg)
+                    status = result.get("status", "unknown")
+                    if status == "success":
+                        count = len(result.get("poses", {}))
+                        self.__set_path_plan_status(f"EF pose ready: {count} pose(s)")
+                    else:
+                        self.__set_path_plan_status(f"EF pose failed: {result.get('message', status)}")
+                except Exception:
+                    pass
+
             if topic == "call":
                 try:
                     payload = json.loads(msg)
@@ -825,6 +973,9 @@ class AppWindow(QMainWindow):
             self.__console.error(f"Error applying CCL: {e}")
             self.__set_proc_status(f"[!] {e}")
 
+## 메쉬 재건은 현재 미사용(Marching Cubes) - 2026-07-06
+## normal 이 포함된 ply 기준으로 개발 후 추후 필요시 다시 활용
+#region mesh reconstruction
     def __on_btn_mesh_convert_clicked(self):
         """현재 로드된 스풀로 메시 재건(Marching Cubes)을 요청."""
         try:
@@ -840,6 +991,7 @@ class AppWindow(QMainWindow):
         except Exception as e:
             self.__console.error(f"Error requesting mesh reconstruct: {e}")
             self.__set_proc_status(f"[!] {e}")
+#endregion
 
     def __on_btn_pcd_save_clicked(self):
         """현재 결과(필터된 스풀 또는 재건 메시)를 파일로 저장."""

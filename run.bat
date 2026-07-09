@@ -33,7 +33,7 @@ goto help
 goto end
 
 :viewer
-"%PYTHON%" python\viewer.py --config "%~dp0python\viewer.cfg"
+"%PYTHON%" python\viewervedo.py --config "%~dp0python\viewervedo.cfg"
 goto end
 
 :controller

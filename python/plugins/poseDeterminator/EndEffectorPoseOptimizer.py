@@ -47,6 +47,62 @@ class EndEffectorPoseOptimizer:
         # 스케일
         self._scan_data.scale(scale, np.asarray([0.0, 0.0, 0.0]))  # type: ignore
 
+    def calculate_pipe_end_profiles(
+        self,
+        file_path: str,
+        scale: float = 1.0,
+        voxel_size: float | None = None,
+        max_points: int = 25000,
+        max_segments: int = 6,
+        min_segment_points: int | None = None,
+        ransac_iterations: int = 250,
+        sample_size: int = 128,
+        distance_threshold: float | None = None,
+        connection_threshold: float | None = None,
+        profile_sample_count: int = 64,
+        include_segment_points: bool = False,
+    ) -> dict[str, Any]:
+        """Calculate terminal end positions and circular profiles of a pipe.
+
+        Args:
+            file_path: PCD/PLY path for a single pipe.
+            scale: Scale applied after loading. Use 0.001 for mm-to-m data.
+            voxel_size: Optional Open3D voxel downsample size.
+            max_points: Maximum number of points used for fitting.
+            max_segments: Maximum number of straight cylinder sections to extract.
+            min_segment_points: Minimum inlier points required for a section.
+            ransac_iterations: Number of cylinder RANSAC trials per straight section.
+            sample_size: Number of points sampled in each RANSAC trial.
+            distance_threshold: Radial inlier threshold. If None, it is inferred
+                from the point-cloud bounding-box diagonal.
+            connection_threshold: Max distance for two section endpoints to be
+                considered a joint. If None, it is inferred from radius.
+            profile_sample_count: Number of points sampled on each end circle.
+            include_segment_points: Include fitted segment point clouds,
+                fit_cylinder input point clouds, and unassigned fit points in
+                the returned dict for visualization/debugging.
+        """
+        from PipeEndProfileAnalyzer import analyze_pipe_end_profiles
+
+        return analyze_pipe_end_profiles(
+            file_path=file_path,
+            scale=scale,
+            voxel_size=voxel_size,
+            max_points=max_points,
+            max_segments=max_segments,
+            min_segment_points=min_segment_points,
+            ransac_iterations=ransac_iterations,
+            sample_size=sample_size,
+            distance_threshold=distance_threshold,
+            connection_threshold=connection_threshold,
+            profile_sample_count=profile_sample_count,
+            include_segment_points=include_segment_points,
+        )
+
+    def calculate_l_pipe_end_profiles(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        """Backward-compatible alias for older L-pipe callers."""
+        return self.calculate_pipe_end_profiles(*args, **kwargs)
+
     def load_DDA_from_urdf(
         self,
         file_path: str,
@@ -126,6 +182,7 @@ class EndEffectorPoseOptimizer:
         target_point: tuple[float, float, float],  # x,y,z
         num_candidates: int = 8,
         distance: float = 0.3,
+        distance_reference_mesh: o3d.geometry.TriangleMesh | None = None,
     ):
         """용접부 탐색을 위한 DDA 자세 후보 계산.
 
@@ -154,6 +211,12 @@ class EndEffectorPoseOptimizer:
         )
 
         # 배관과 충돌하는 후보 제거------------------------------------------------
+        dda_tcp_pose_candidates = self.__adjust_dda_candidates_for_mesh_surface_distance(
+            dda_tcp_pose_candidates,
+            distance,
+            self.__dda_mesh if distance_reference_mesh is None else distance_reference_mesh,
+        )
+
         mask = []
         for i in range(len(dda_tcp_pose_candidates)):
             is_collision = self.__check_collision(
@@ -233,14 +296,14 @@ class EndEffectorPoseOptimizer:
         """주어진 DDA 자세와 각도에 대해 RT 자세 계산.
 
         RT 자세 조건:
-            - RT TCP의 X축이 DDA TCP의 중심을 향함
+            - RT source의 -Z축이 DDA TCP와 배관을 향함
             - DDA TCP와 RT TCP 간 거리는 distance_from_dda_to_rt
-            - DDA TCP의 XY 평면과 RT TCP의 XY 평면이 일치
-            - DDA TCP의 XY 평면에서 DDA TCP의 X축과 RT TCP의 X축이 ±angle_deg만큼 벌어짐
+            - DDA에서 RT로 향하는 방향은 DDA X축을 DDA Z축 기준으로 angle_deg만큼 회전한 방향
+            - RT TCP의 Y축은 DDA Z축과 같게 두어 같은 배관 단면 기준을 공유함
 
         Args:
             dda_tcp_pose: DDA TCP 자세 [x, y, z, roll, pitch, yaw].
-            angle_deg: DDA X축과 RT X축 사이의 각도 (도). 양수면 DDA Z축 기준 반시계 방향.
+            angle_deg: DDA에서 RT로 향하는 방향을 DDA X축에서 벌리는 각도 (도).
             distance_from_dda_to_rt: DDA TCP와 RT TCP 사이의 거리 (m).
 
         Returns:
@@ -275,7 +338,7 @@ class EndEffectorPoseOptimizer:
         sin_angle = np.sin(np.radians(angle_deg))
 
         k_cross_v = np.cross(dda_z_axis_unit, dda_x_axis)
-        k_dot_v = np.dot(dda_z_axis_unit, dda_x_axis)
+        k_dot_v   = np.dot(dda_z_axis_unit, dda_x_axis)
 
         # DDA에서 RT로 향하는 방향 (DDA X축을 angle_deg만큼 회전)
         dda_to_rt_direction = dda_x_axis * cos_angle + k_cross_v * sin_angle + dda_z_axis_unit * k_dot_v * (1 - cos_angle)
@@ -288,20 +351,22 @@ class EndEffectorPoseOptimizer:
         rt_position = dda_tcp_pose[:3] + dda_to_rt_direction * distance_from_dda_to_rt
 
         # RT TCP 방향 계산
-        # RT TCP X축: RT TCP에서 DDA TCP를 바라보는 방향 (= -dda_to_rt_direction)
-        rt_x_axis = -dda_to_rt_direction
+        # RT source는 -Z축 방향으로 배관/DDA를 바라본다.
+        # 따라서 RT +Z축은 DDA에서 RT로 향하는 방향과   같아진다.
+        rt_z_axis = dda_to_rt_direction
+        rt_z_axis = rt_z_axis / np.linalg.norm(rt_z_axis)
+
+        # RT TCP Y축은 DDA Z축과 동일하게 두어 같은 배관 단면 기준을 공유한다.
+        rt_y_axis = dda_z_axis_unit
+        rt_y_axis = rt_y_axis / np.linalg.norm(rt_y_axis)
+
+        # 오른손 좌표계가 되도록 X축을 보완한다. x cross y = z.
+        rt_x_axis = np.cross(rt_y_axis, rt_z_axis)
         rt_x_axis = rt_x_axis / np.linalg.norm(rt_x_axis)
 
         # [DEBUG] RT X축 출력
         if self.__is_debug_mode:
             print(f"  - rt_x_axis: {rt_x_axis}, norm: {np.linalg.norm(rt_x_axis)}")
-
-        # RT TCP Z축: DDA Z축과 동일 (같은 XY 평면 공유)
-        rt_z_axis = dda_z_axis_unit
-
-        # RT TCP Y축: Z축과 X축의 외적으로 계산 (오른손 좌표계)
-        rt_y_axis = np.cross(rt_z_axis, rt_x_axis)
-        rt_y_axis = rt_y_axis / np.linalg.norm(rt_y_axis)
 
         # [DEBUG] RT Y, Z 축 출력 및 직교 여부 확인
         if self.__is_debug_mode:
@@ -326,13 +391,11 @@ class EndEffectorPoseOptimizer:
             print(f"  - det(rt_rot_matrix): {det}")
 
         if det < 0:
-            # 좌수 좌표계인 경우 Z축의 방향을 뒤집어서 우수 좌표계로 변경
-            rt_z_axis = -rt_z_axis
-            rt_y_axis = np.cross(rt_z_axis, rt_x_axis)
-            rt_y_axis = rt_y_axis / np.linalg.norm(rt_y_axis)
+            # 좌수 좌표계인 경우 X축만 뒤집어 -Z축의 시선 방향은 유지한다.
+            rt_x_axis = -rt_x_axis
             rt_rot_matrix = np.column_stack([rt_x_axis, rt_y_axis, rt_z_axis])
             if self.__is_debug_mode:
-                print(f"  - det < 0이므로 Z축 반전 적용")
+                print(f"  - det < 0이므로 X축 반전 적용")
 
         rt_rpy = R.from_matrix(rt_rot_matrix).as_euler("xyz")
 
@@ -351,6 +414,7 @@ class EndEffectorPoseOptimizer:
         distance_from_dda_to_surface: float,
         distance_from_dda_to_rt: float,
         angle_of_rt: float,
+        distance_reference_mesh: o3d.geometry.TriangleMesh | None = None,
     ):
         """x-ray 촬영을 위한 DDA, RT 자세 후보 계산.
 
@@ -362,10 +426,10 @@ class EndEffectorPoseOptimizer:
             - 원본 자세(0도)와 배관 중심축 기준 90도 회전 자세 모두 검사
 
         RT 자세 후보 조건:
-            - RT TCP의 X축이 DDA TCP의 중심을 향함
+            - RT source의 -Z축이 DDA TCP와 배관을 향함
             - DDA TCP와 RT TCP 간 거리는 distance_from_dda_to_rt
-            - DDA TCP의 XY 평면과 RT TCP의 XY 평면이 일치
-            - DDA TCP의 XY 평면에서 DDA TCP의 X축과 RT TCP의 X축이 ±angle_of_rt만큼 벌어짐
+            - DDA에서 RT로 향하는 방향은 DDA X축을 DDA Z축 기준으로 ±angle_of_rt만큼 회전한 방향
+            - RT TCP의 Y축은 DDA Z축과 같게 두어 같은 배관 단면 기준을 공유함
             - 배관과 충돌하지 않음
 
         Args:
@@ -373,7 +437,7 @@ class EndEffectorPoseOptimizer:
             num_candidates: 계산할 자세 후보의 수(자세별 간격은 등간격).
             distance_from_dda_to_surface: DDA TCP와 배관 표면 사이의 거리 (m).
             distance_from_dda_to_rt: DDA TCP와 RT TCP 사이의 거리 (m).
-            angle_of_rt: RT TCP X축과 DDA TCP X축 사이의 각도 (degree).
+            angle_of_rt: DDA에서 RT로 향하는 방향을 DDA X축에서 벌리는 각도 (degree).
 
         Returns:
             tuple: DDA-RT 자세 그룹을 2가지 형태로 반환.
@@ -388,6 +452,11 @@ class EndEffectorPoseOptimizer:
             np.asarray(target_point),
             self.__pipe_radius + distance_from_dda_to_surface,
             num_candidates,
+        )
+        dda_base_candidates = self.__adjust_dda_candidates_for_mesh_surface_distance(
+            dda_base_candidates,
+            distance_from_dda_to_surface,
+            self.__dda_mesh if distance_reference_mesh is None else distance_reference_mesh,
         )
 
         if self.__is_debug_mode:
@@ -454,6 +523,104 @@ class EndEffectorPoseOptimizer:
 
         return pose_groups_json, pose_groups
 
+    def calculate_DDA_RT_pose_for_taking_xray_indexed_0_90(
+        self,
+        target_point: tuple[float, float, float] | np.ndarray,
+        num_candidates: int,
+        distance_from_dda_to_surface: float,
+        distance_from_dda_to_rt: float,
+        angle_of_rt: float,
+        distance_reference_mesh: o3d.geometry.TriangleMesh | None = None,
+    ):
+        """x-ray 촬영을 위한 0°/90° DDA-RT 자세 후보 계산.
+
+        기존 ``calculate_DDA_RT_pose_for_taking_xray`` 와 같은 0°/90° 쌍을
+        찾되, DDA 자세를 매번 90° 회전시키지 않는다. 배관 둘레 후보를 먼저
+        모두 만들고 각 후보의 DDA/RT 충돌 여부를 한 번씩만 계산한 뒤,
+        90° 떨어진 후보 index를 참조해 쌍을 구성한다.
+
+        ``num_candidates`` 는 90°가 정확히 후보 index에 매핑되도록 4의 배수여야
+        한다. 예를 들어 8개 후보이면 90° offset은 2 index이다.
+        """
+        if num_candidates <= 0:
+            raise ValueError(f"num_candidates must be > 0, got {num_candidates}")
+        if num_candidates % 4 != 0:
+            raise ValueError(
+                "num_candidates must be divisible by 4 for indexed 0/90 pairing, "
+                f"got {num_candidates}"
+            )
+
+        if self.__is_debug_mode:
+            self.debuging_info = {}
+
+        dda_base_candidates = self.__calculate_dda_pose_candidate(
+            np.asarray(target_point),
+            self.__pipe_radius + distance_from_dda_to_surface,
+            num_candidates,
+        )
+        dda_base_candidates = self.__adjust_dda_candidates_for_mesh_surface_distance(
+            dda_base_candidates,
+            distance_from_dda_to_surface,
+            self.__dda_mesh if distance_reference_mesh is None else distance_reference_mesh,
+        )
+
+        slot_results: list[dict[str, list[float]] | None] = []
+        valid_base_dda_poses = []
+        valid_slot_indices = []
+        invalid_slot_indices = []
+
+        for idx, dda_pose in enumerate(dda_base_candidates):
+            slot = self.__process_dda_rt_slot_with_collision(
+                dda_pose,
+                angle_of_rt,
+                distance_from_dda_to_rt,
+            )
+            slot_results.append(slot)
+            if slot is None:
+                invalid_slot_indices.append(idx)
+            else:
+                valid_slot_indices.append(idx)
+                valid_base_dda_poses.append(dda_pose)
+
+        if self.__is_debug_mode:
+            self.debuging_info["dda_base_candidates"] = dda_base_candidates
+            self.debuging_info["valid_base_dda_poses"] = valid_base_dda_poses
+            self.debuging_info["indexed_0_90_slot_results"] = slot_results
+            self.debuging_info["indexed_0_90_valid_slot_indices"] = valid_slot_indices
+            self.debuging_info["indexed_0_90_invalid_slot_indices"] = invalid_slot_indices
+
+        pose_groups = []
+        incomplete_pose_groups = []
+        quarter_offset = num_candidates // 4
+        step_deg = 360.0 / num_candidates
+
+        for idx in range(num_candidates):
+            idx_90 = (idx + quarter_offset) % num_candidates
+            group_0_data = slot_results[idx]
+            group_90_data = slot_results[idx_90]
+
+            if group_0_data is not None and group_90_data is not None:
+                group_data = {
+                    "0": dict(group_0_data),
+                    "90": dict(group_90_data),
+                }
+                group_data["0"]["_actual_deg"] = int(round(idx * step_deg))
+                group_data["90"]["_actual_deg"] = int(round(idx_90 * step_deg))
+                pose_groups.append(group_data)
+            elif self.__is_debug_mode and (group_0_data is not None or group_90_data is not None):
+                partial_group = {}
+                if group_0_data is not None:
+                    partial_group["0"] = dict(group_0_data)
+                if group_90_data is not None:
+                    partial_group["90"] = dict(group_90_data)
+                incomplete_pose_groups.append(partial_group)
+
+        if self.__is_debug_mode:
+            self.debuging_info["indexed_0_90_incomplete_pose_groups"] = incomplete_pose_groups
+            self.debuging_info["indexed_0_90_quarter_offset"] = quarter_offset
+
+        return json.dumps(pose_groups), pose_groups
+
     def calculate_DDA_RT_pose_for_taking_xray_3pair_120(
         self,
         target_point: tuple[float, float, float] | np.ndarray,
@@ -463,6 +630,7 @@ class EndEffectorPoseOptimizer:
         candidate_step_deg: float = 3.0,
         gap_tolerance_deg: float = 10.0,
         allow_2pair_fallback: bool = True,
+        distance_reference_mesh: o3d.geometry.TriangleMesh | None = None,
     ) -> tuple[str, list[dict]]:
         """x-ray 촬영을 위한 DDA, RT 자세 3-쌍 (120° 간격) 조합 계산.
 
@@ -525,7 +693,13 @@ class EndEffectorPoseOptimizer:
             num_candidates,
         )
 
-        # 각 인덱스별 슬롯 결과 (None = 무효, dict = 유효) ----------------------
+        # jkpark 각 인덱스별 슬롯 결과 (None = 무효, dict = 유효) ----------------------
+        dda_base_candidates = self.__adjust_dda_candidates_for_mesh_surface_distance(
+            dda_base_candidates,
+            distance_from_dda_to_surface,
+            self.__dda_mesh if distance_reference_mesh is None else distance_reference_mesh,
+        )
+
         slot_results: list[dict | None] = []
         for dda_pose in dda_base_candidates:
             if self.__check_collision(self.__dda_mesh, dda_pose, self.__dda_invers_transform_mat):
@@ -628,6 +802,26 @@ class EndEffectorPoseOptimizer:
             slot["_arc_deg"] = best_pair_arc_deg
             group[ideal_label] = slot
         return json.dumps(pose_groups), pose_groups
+
+    def __process_dda_rt_slot_with_collision(
+        self,
+        dda_pose: np.ndarray,
+        angle_of_rt: float,
+        distance_from_dda_to_rt: float,
+    ) -> dict[str, list[float]] | None:
+        """DDA 충돌까지 포함해 한 후보 slot의 DDA/RT 유효성을 검사."""
+        is_dda_collision = self.__check_collision(
+            self.__dda_mesh,
+            dda_pose,
+            self.__dda_invers_transform_mat,
+        )
+        if is_dda_collision:
+            return None
+        return self.__process_dda_rt_combination(
+            dda_pose,
+            angle_of_rt,
+            distance_from_dda_to_rt,
+        )
 
     def __process_dda_rt_combination(
         self,
@@ -736,6 +930,12 @@ class EndEffectorPoseOptimizer:
 
         if self.__is_debug_mode:
             self.debuging_info["points_in_cylinder"] = points_in_cylinder
+            self.debuging_info["pipe_profile_sampling_cylinder"] = {
+                "start": target_point,
+                "axis": normal_m * -1,
+                "radius": 0.005,
+                "height_range": (-0.1, 0.3),
+            }
 
         # 중앙 벡터에 투영 후 군집화
         clusters = self.__cluster_points_along_line(
@@ -767,6 +967,9 @@ class EndEffectorPoseOptimizer:
         )
 
         # 실린더 피팅------------------------------------------------------------
+        if self.__is_debug_mode:
+            self.debuging_info["points_in_sphere"] = points_in_sphere
+
         direction, center, radius, _ = fit_cylinder(points_in_sphere)
 
         # 멤버변수에 파이프 프로파일 저장-------------------------------------------
@@ -847,6 +1050,62 @@ class EndEffectorPoseOptimizer:
         # 각 행이 [x, y, z, roll, pitch, yaw] 형태인 numpy array of shape (num_candidates, 6)
         poses = np.hstack((positions, rpy_array))
         return poses
+
+    def __adjust_dda_candidates_for_mesh_surface_distance(
+        self,
+        dda_poses: np.ndarray,
+        desired_surface_distance: float,
+        distance_reference_mesh: o3d.geometry.TriangleMesh,
+    ) -> np.ndarray:
+        adjusted = []
+        clearances = []
+        shifts = []
+        for pose in np.asarray(dda_poses, dtype=float):
+            clearance = self.__mesh_pipe_surface_clearance(
+                distance_reference_mesh,
+                pose,
+                self.__dda_invers_transform_mat,
+            )
+            shift = float(desired_surface_distance - clearance)
+            tcp_x_axis = R.from_euler("xyz", pose[3:]).as_matrix()[:, 0]
+            outward_axis = -tcp_x_axis / np.linalg.norm(tcp_x_axis)
+            corrected = pose.copy()
+            corrected[:3] = corrected[:3] + outward_axis * shift
+            adjusted.append(corrected)
+            clearances.append(float(clearance))
+            shifts.append(float(shift))
+
+        if self.__is_debug_mode:
+            self.debuging_info["mesh_surface_clearances_before_adjustment"] = clearances
+            self.debuging_info["mesh_surface_distance_shifts"] = shifts
+            self.debuging_info["desired_mesh_surface_distance"] = float(desired_surface_distance)
+
+        return np.asarray(adjusted, dtype=float)
+
+    def __mesh_pipe_surface_clearance(
+        self,
+        link_model: o3d.geometry.TriangleMesh,
+        tcp_pose: np.ndarray,
+        tcp_to_link_pose_T: np.ndarray,
+        sample_count: int = 3000,
+    ) -> float:
+        tcp_pose_T = np.eye(4)
+        tcp_pose_T[:3, :3] = R.from_euler("xyz", tcp_pose[3:]).as_matrix()
+        tcp_pose_T[:3, 3] = tcp_pose[:3]
+
+        mesh_copy = copy.deepcopy(link_model)
+        mesh_copy.transform(tcp_pose_T @ tcp_to_link_pose_T)  # type: ignore
+        mesh_pcd = mesh_copy.sample_points_uniformly(number_of_points=sample_count)
+        points = np.asarray(mesh_pcd.points, dtype=float)
+        if len(points) == 0:
+            return float("inf")
+
+        pipe_axis = self.__pipe_direction / np.linalg.norm(self.__pipe_direction)
+        rel = points - self.__pipe_center
+        axial = np.outer(np.dot(rel, pipe_axis), pipe_axis)
+        radial = rel - axial
+        radial_distances = np.linalg.norm(radial, axis=1)
+        return float(np.min(radial_distances - self.__pipe_radius))
 
     @staticmethod
     def __extract_points_in_cylinder(

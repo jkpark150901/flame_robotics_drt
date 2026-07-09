@@ -170,6 +170,8 @@ class ZAPI(QObject, ZAPIBase):
         else:
             self.__console.warning("[ZAPI] Cannot send filter_spool: Socket not connected")
 
+## mesh reconstruction 현재 미사용
+##region mesh reconstruction
     def _ZAPI_request_reconstruct_mesh(self, params: dict = None):
         """현재 로드된 스풀로 메시 재건 (Marching Cubes)."""
         if self.__dealer_socket and self.__dealer_socket.is_joined:
@@ -178,6 +180,7 @@ class ZAPI(QObject, ZAPIBase):
             self.__console.info(f"[ZAPI] Sent reconstruct_mesh request: params={params}")
         else:
             self.__console.warning("[ZAPI] Cannot send reconstruct_mesh: Socket not connected")
+##endregion
 
     def _ZAPI_request_save_spool(self, file_path: str):
         """현재 로드된 스풀(또는 재건 메시)을 파일로 저장."""
@@ -213,6 +216,34 @@ class ZAPI(QObject, ZAPIBase):
         else:
             self.__console.warning("[ZAPI] Cannot send pick_inspection_point: Socket not connected")
 
+    def _ZAPI_request_pick_chuck_mount_points(self, enabled: bool = True, clear: bool = True):
+        """Enable/disable two-click pipe chuck mount point picking in the viewer."""
+        if self.__dealer_socket and self.__dealer_socket.is_joined:
+            kwargs = {"enabled": bool(enabled), "clear": bool(clear)}
+            self.call(self.__dealer_socket, "zapi_pick_chuck_mount_points", kwargs)
+            self.__console.info(f"[ZAPI] Sent pick_chuck_mount_points: {kwargs}")
+        else:
+            self.__console.warning("[ZAPI] Cannot send pick_chuck_mount_points: Socket not connected")
+
+    def _ZAPI_request_set_chuck_mount_points(self, points, local_points=None):
+        """Render stored chuck mount points in the viewer."""
+        if self.__dealer_socket and self.__dealer_socket.is_joined:
+            kwargs = {"points": points or []}
+            if local_points is not None:
+                kwargs["local_points"] = local_points
+            self.call(self.__dealer_socket, "zapi_set_chuck_mount_points", kwargs)
+            self.__console.info(f"[ZAPI] Sent set_chuck_mount_points: {kwargs}")
+        else:
+            self.__console.warning("[ZAPI] Cannot send set_chuck_mount_points: Socket not connected")
+
+    def _ZAPI_request_clear_chuck_mount_points(self):
+        """Clear rendered chuck mount points in the viewer."""
+        if self.__dealer_socket and self.__dealer_socket.is_joined:
+            self.call(self.__dealer_socket, "zapi_clear_chuck_mount_points", {})
+            self.__console.info("[ZAPI] Sent clear_chuck_mount_points")
+        else:
+            self.__console.warning("[ZAPI] Cannot send clear_chuck_mount_points: Socket not connected")
+
     def _ZAPI_request_plan_inspection_path(self, planner: str, robot: str = "rb20_1900es",
                                            step_size: float = 0.08, max_iter: int = 3000):
         """Request EF-only path planning to the currently picked pipe inspection point."""
@@ -227,6 +258,14 @@ class ZAPI(QObject, ZAPIBase):
             self.__console.info(f"[ZAPI] Sent plan_inspection_path: {kwargs}")
         else:
             self.__console.warning("[ZAPI] Cannot send plan_inspection_path: Socket not connected")
+
+    def _ZAPI_request_determine_ef_pose(self):
+        """Request EF pose determination for the currently picked inspection point."""
+        if self.__dealer_socket and self.__dealer_socket.is_joined:
+            self.call(self.__dealer_socket, "zapi_determine_ef_pose", {})
+            self.__console.info("[ZAPI] Sent determine_ef_pose")
+        else:
+            self.__console.warning("[ZAPI] Cannot send determine_ef_pose: Socket not connected")
 
     def _ZAPI_request_clear_inspection_path(self):
         """Clear picked inspection point and planned path visuals."""
