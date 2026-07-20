@@ -5,7 +5,7 @@
     "positioner_clamp_resolution":0.01,
     "positioner_x_range": [0.0, 8.0],
     "positioner_z_range": [0.0, 3.0],
-    "positioner_r_range": [0.0, 360.0],
+    "positioner_r_range": [-180.0, 180.0],
     "positioner_clamp_range": [0.0, 0.9],
     "spool_x_resolution": 0.01,
     "spool_y_resolution": 0.01,

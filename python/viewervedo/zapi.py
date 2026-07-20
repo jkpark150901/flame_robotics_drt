@@ -261,6 +261,29 @@ class ZAPI(ZAPIBase):
             self.__router_socket.dispatch(reply_parts)
             self.__console.info(f"[ZAPI_VIEWERVEDO] Sent inspection point update: {point}")
 
+    def update_positioner_pose(self, pose: dict, identity=None):
+        """Send latest positioner pose to SimTool."""
+        if self.__router_socket and self.__router_socket.is_joined and identity:
+            reply_parts = [
+                identity,
+                self.__router_socket.socket_id.encode('utf-8'),
+                "update_positioner_pose".encode('utf-8'),
+                json.dumps(pose).encode('utf-8')
+            ]
+            self.__router_socket.dispatch(reply_parts)
+            self.__console.info(f"[ZAPI_VIEWERVEDO] Sent positioner pose update: {pose}")
+
+    def update_robot_joint_state(self, state: dict, identity=None):
+        """Send latest robot joint states to SimTool."""
+        if self.__router_socket and self.__router_socket.is_joined and identity:
+            reply_parts = [
+                identity,
+                self.__router_socket.socket_id.encode('utf-8'),
+                "update_robot_joint_state".encode('utf-8'),
+                json.dumps(state).encode('utf-8')
+            ]
+            self.__router_socket.dispatch(reply_parts)
+
     def update_chuck_mount_points(self, points: dict, identity=None):
         """Send picked pipe chuck mount points to SimTool."""
         if self.__router_socket and self.__router_socket.is_joined and identity:
@@ -273,17 +296,236 @@ class ZAPI(ZAPIBase):
             self.__router_socket.dispatch(reply_parts)
             self.__console.info(f"[ZAPI_VIEWERVEDO] Sent chuck mount points update: {points}")
 
-    def reply_inspection_path(self, result: dict, identity=None):
-        """Send path planning result to SimTool."""
+    def update_chuck_mount_profile(self, profile: dict, identity=None):
+        """Send the pipe cylinder profile used for chuck alignment to SimTool."""
         if self.__router_socket and self.__router_socket.is_joined and identity:
             reply_parts = [
                 identity,
                 self.__router_socket.socket_id.encode('utf-8'),
-                "reply_inspection_path".encode('utf-8'),
-                json.dumps(result).encode('utf-8')
+                "update_chuck_mount_profile".encode('utf-8'),
+                json.dumps(profile).encode('utf-8')
             ]
             self.__router_socket.dispatch(reply_parts)
-            self.__console.info(f"[ZAPI_VIEWERVEDO] Sent inspection path result: {result}")
+            self.__console.info(f"[ZAPI_VIEWERVEDO] Sent chuck mount profile update: {profile}")
+
+    def reply_inspection_path(self, result: dict, identity=None):
+        """Send path planning result to SimTool."""
+        if self.__router_socket and self.__router_socket.is_joined and identity:
+            payload = json.dumps(result).encode('utf-8')
+            reply_parts = [
+                identity,
+                self.__router_socket.socket_id.encode('utf-8'),
+                "reply_inspection_path".encode('utf-8'),
+                payload
+            ]
+            self.__router_socket.dispatch(reply_parts)
+            try:
+                compact_result = self._inspection_path_log_text(result)
+            except Exception:
+                compact_result = str(result)
+            self.__console.debug("[ZAPI_VIEWERVEDO] Sent inspection path result\n" + compact_result)
+
+    def _fmt_float(self, value, digits=3, default="-"):
+        try:
+            return f"{float(value):.{digits}f}"
+        except Exception:
+            return default
+
+    def _fmt_q(self, values):
+        if values is None:
+            return "-"
+        try:
+            return "[" + ", ".join(f"{float(v):.4g}" for v in values) + "]"
+        except Exception:
+            return str(values)
+
+    def _inspection_path_log_text(self, result: dict):
+        """Human-readable inspection path log; the full JSON payload is still sent to the UI."""
+        if not isinstance(result, dict):
+            return str(result)
+
+        is_ik_check = result.get("mode") == "ik_check"
+        lines = [
+            "Inspection IK check result" if is_ik_check else "Inspection path result",
+            f"  status  : {result.get('status', '-')}",
+            f"  planner : {result.get('planner', '-')}",
+        ]
+        timing = result.get("timing") or {}
+        if timing:
+            lines.append(
+                "  timing  : "
+                f"wall={self._fmt_float(timing.get('planning_wall', timing.get('ik_wall')))}s, "
+                f"sum={self._fmt_float(timing.get('planning_sum', timing.get('ik_sum')))}s, "
+                f"obstacle={self._fmt_float(timing.get('obstacle_mesh'))}s"
+            )
+
+        robots = result.get("robots")
+        inspection_groups = result.get("inspection_groups")
+        if isinstance(inspection_groups, list) and inspection_groups:
+            for group in inspection_groups:
+                if not isinstance(group, dict):
+                    continue
+                lines.append(f"  {group.get('name', 'inspection pose')} :")
+                group_robots = group.get("robots") or {}
+                for robot_name, robot_result in group_robots.items():
+                    if not isinstance(robot_result, dict):
+                        continue
+                    ik = robot_result.get("ik_result") or {}
+                    rt = robot_result.get("timing") or {}
+                    verification = robot_result.get("verification") or {}
+                    preview_reason = robot_result.get("collision_preview_reason") or robot_result.get("fallback_reason")
+                    lines.extend([
+                        f"    - {robot_name} ({robot_result.get('pose_name', '-')})",
+                        f"        waypoints : {robot_result.get('waypoints', '-')}",
+                        f"        preview   : collision={bool(robot_result.get('collision_preview', False))}"
+                        + (f", reason={preview_reason}" if preview_reason else ""),
+                        "        collision : "
+                        f"edges={verification.get('colliding_edges', '-')}, "
+                        f"positioner_checked={bool(verification.get('positioner_collision_checked', False))}",
+                        "        ik        : "
+                        f"success={bool(ik.get('success', False))}, "
+                        f"fallback={bool(ik.get('fallback', False))}, "
+                        f"pos_err={self._fmt_float(ik.get('position_error'), 6)}m, "
+                        f"ori_err={self._fmt_float(ik.get('orientation_error'), 6)}rad, "
+                        f"collision={bool(ik.get('collision', False))}, "
+                        f"pairs={ik.get('collision_pair_count', 0)}, "
+                        f"iter={ik.get('iterations', '-')}",
+                        f"        init_q    : {self._fmt_q(robot_result.get('init_q'))}",
+                        f"        target_q  : {self._fmt_q(robot_result.get('target_q'))}",
+                    ])
+                    if robot_result.get("ik_experiment"):
+                        exp = robot_result.get("ik_experiment") or {}
+                        lines.append(f"        experiment: {exp.get('meta', exp)}")
+                    if is_ik_check:
+                        lines.append(
+                            "        timing    : "
+                            f"target={self._fmt_float(rt.get('target_setup'))}s, "
+                            f"pin_cache={self._fmt_float(rt.get('pin_cache_lookup'))}s, "
+                            f"start_q={self._fmt_float(rt.get('start_q_setup'))}s, "
+                            f"ik={self._fmt_float(rt.get('ik'))}s, "
+                            f"result={self._fmt_float(rt.get('ik_result_check'))}s, "
+                            f"total={self._fmt_float(rt.get('total'))}s")
+                    else:
+                        lines.append(
+                            "        timing    : "
+                            f"setup={self._fmt_float(rt.get('planner_setup'))}s, "
+                            f"ik={self._fmt_float(rt.get('ik'))}s, "
+                            f"planning={self._fmt_float(rt.get('planning'))}s, "
+                            f"verify={self._fmt_float(rt.get('collision_verification'))}s, "
+                            f"convert={self._fmt_float(rt.get('path_conversion'))}s, "
+                            f"total={self._fmt_float(rt.get('total'))}s")
+                failures = group.get("failures") or {}
+                if failures:
+                    lines.append(f"    failures : {failures}")
+            return "\n".join(lines)
+
+        if isinstance(robots, dict) and robots:
+            for robot_name, robot_result in robots.items():
+                if not isinstance(robot_result, dict):
+                    continue
+                ik = robot_result.get("ik_result") or {}
+                rt = robot_result.get("timing") or {}
+                verification = robot_result.get("verification") or {}
+                preview_reason = robot_result.get("collision_preview_reason") or robot_result.get("fallback_reason")
+                lines.extend([
+                    f"  - {robot_name} ({robot_result.get('pose_name', '-')})",
+                    f"      waypoints : {robot_result.get('waypoints', '-')}",
+                    f"      preview   : collision={bool(robot_result.get('collision_preview', False))}"
+                    + (f", reason={preview_reason}" if preview_reason else ""),
+                    "      collision : "
+                    f"edges={verification.get('colliding_edges', '-')}, "
+                    f"positioner_checked={bool(verification.get('positioner_collision_checked', False))}",
+                    "      ik        : "
+                    f"success={bool(ik.get('success', False))}, "
+                    f"fallback={bool(ik.get('fallback', False))}, "
+                    f"pos_err={self._fmt_float(ik.get('position_error'), 6)}m, "
+                    f"ori_err={self._fmt_float(ik.get('orientation_error'), 6)}rad, "
+                    f"collision={bool(ik.get('collision', False))}, "
+                    f"pairs={ik.get('collision_pair_count', 0)}, "
+                    f"iter={ik.get('iterations', '-')}",
+                    f"      init_q    : {self._fmt_q(robot_result.get('init_q'))}",
+                    f"      target_q  : {self._fmt_q(robot_result.get('target_q'))}",
+                ])
+                if robot_result.get("ik_experiment"):
+                    exp = robot_result.get("ik_experiment") or {}
+                    lines.append(f"      experiment: {exp.get('meta', exp)}")
+                if is_ik_check:
+                    lines.append(
+                        "      timing    : "
+                        f"target={self._fmt_float(rt.get('target_setup'))}s, "
+                        f"pin_cache={self._fmt_float(rt.get('pin_cache_lookup'))}s, "
+                        f"start_q={self._fmt_float(rt.get('start_q_setup'))}s, "
+                        f"ik={self._fmt_float(rt.get('ik'))}s, "
+                        f"result={self._fmt_float(rt.get('ik_result_check'))}s, "
+                        f"total={self._fmt_float(rt.get('total'))}s")
+                else:
+                    lines.append(
+                        "      timing    : "
+                        f"setup={self._fmt_float(rt.get('planner_setup'))}s, "
+                        f"ik={self._fmt_float(rt.get('ik'))}s, "
+                        f"planning={self._fmt_float(rt.get('planning'))}s, "
+                        f"verify={self._fmt_float(rt.get('collision_verification'))}s, "
+                        f"convert={self._fmt_float(rt.get('path_conversion'))}s, "
+                        f"total={self._fmt_float(rt.get('total'))}s")
+            return "\n".join(lines)
+
+        ik = result.get("ik_result") or {}
+        lines.extend([
+            f"  robot   : {result.get('robot', '-')}",
+            f"  waypoints: {result.get('waypoints', '-')}",
+            "  ik      : "
+            f"success={bool(ik.get('success', False))}, "
+            f"fallback={bool(ik.get('fallback', False))}, "
+            f"pos_err={self._fmt_float(ik.get('position_error'), 6)}m, "
+            f"ori_err={self._fmt_float(ik.get('orientation_error'), 6)}rad, "
+            f"collision={bool(ik.get('collision', False))}, "
+            f"iter={ik.get('iterations', '-')}",
+            f"  init_q  : {self._fmt_q(result.get('init_q'))}",
+            f"  target_q: {self._fmt_q(result.get('target_q'))}",
+        ])
+        if result.get("message"):
+            lines.append(f"  message : {result.get('message')}")
+        return "\n".join(lines)
+
+    def _inspection_path_log_summary(self, result: dict):
+        """Keep inspection path logs compact; the full payload is still sent to the UI."""
+        if not isinstance(result, dict):
+            return result
+        summary = {
+            "status": result.get("status"),
+            "planner": result.get("planner"),
+        }
+        if "timing" in result:
+            summary["timing"] = result.get("timing")
+        robots = result.get("robots")
+        if isinstance(robots, dict):
+            summary["robots"] = {
+                robot_name: {
+                    "pose_name": robot_result.get("pose_name"),
+                    "waypoints": robot_result.get("waypoints"),
+                    "collision_preview": robot_result.get("collision_preview"),
+                    "collision_preview_reason": robot_result.get("collision_preview_reason"),
+                    "fallback_reason": robot_result.get("fallback_reason"),
+                    "ik_result": robot_result.get("ik_result"),
+                    "init_q": robot_result.get("init_q"),
+                    "target_q": robot_result.get("target_q"),
+                    "timing": robot_result.get("timing"),
+                }
+                for robot_name, robot_result in robots.items()
+                if isinstance(robot_result, dict)
+            }
+            return summary
+        summary.update({
+            "robot": result.get("robot"),
+            "waypoints": result.get("waypoints"),
+            "collision_preview": result.get("collision_preview"),
+            "collision_preview_reason": result.get("collision_preview_reason"),
+            "fallback_reason": result.get("fallback_reason"),
+            "ik_result": result.get("ik_result"),
+            "init_q": result.get("init_q"),
+            "target_q": result.get("target_q"),
+        })
+        return summary
 
     def reply_ef_pose(self, result: dict, identity=None):
         """Send EF pose determination result to SimTool."""
@@ -377,6 +619,19 @@ class ZAPI(ZAPIBase):
         else:
             self.push_to_queue(request_payload)
 
+    def zapi_reset_robot_base_pose(self, kwargs=None):
+        """Reset collaborative robot joints to their zero/base pose."""
+        self.__console.info(f"Received zapi_reset_robot_base_pose with kwargs: {kwargs}")
+        request_payload = {
+            "command": "reset_robot_base_pose",
+            "robot": (kwargs or {}).get("robot"),
+            "_identity": (kwargs or {}).get("_identity"),
+        }
+        if self._visualizer:
+            self._visualizer.push_request(request_payload)
+        else:
+            self.push_to_queue(request_payload)
+
     def zapi_filter_spool(self, kwargs=None):
         """Handle filter_spool request (현재 로드된 스풀에 직접 적용)."""
         self.__console.info(f"Received zapi_filter_spool with kwargs: {kwargs}")
@@ -462,6 +717,44 @@ class ZAPI(ZAPIBase):
             "robot": (kwargs or {}).get("robot", "rb20_1900es"),
             "step_size": (kwargs or {}).get("step_size", 0.08),
             "max_iter": (kwargs or {}).get("max_iter", 3000),
+            "ik_solver": (kwargs or {}).get("ik_solver", "normalized_dls"),
+            "ik_normalize": (kwargs or {}).get("ik_normalize", True),
+            "_identity": (kwargs or {}).get("_identity"),
+        }
+        if self._visualizer:
+            self._visualizer.push_request(request_payload)
+        else:
+            self.push_to_queue(request_payload)
+
+    def zapi_plan_ef_pose_paths(self, kwargs=None):
+        """Handle simultaneous path planning to the determined EF poses."""
+        self.__console.info(f"Received zapi_plan_ef_pose_paths with kwargs: {kwargs}")
+        request_payload = {
+            "command": "plan_ef_pose_paths",
+            "planner": (kwargs or {}).get("planner", "rrt_connect"),
+            "step_size": (kwargs or {}).get("step_size", 0.08),
+            "max_iter": (kwargs or {}).get("max_iter", 3000),
+            "max_workers": (kwargs or {}).get("max_workers", 2),
+            "ik_solver": (kwargs or {}).get("ik_solver", "normalized_dls"),
+            "ik_normalize": (kwargs or {}).get("ik_normalize", True),
+            "_identity": (kwargs or {}).get("_identity"),
+        }
+        if self._visualizer:
+            self._visualizer.push_request(request_payload)
+        else:
+            self.push_to_queue(request_payload)
+
+    def zapi_check_ef_pose_ik(self, kwargs=None):
+        """Handle IK-only validation request for the determined EF poses."""
+        self.__console.info(f"Received zapi_check_ef_pose_ik with kwargs: {kwargs}")
+        request_payload = {
+            "command": "check_ef_pose_ik",
+            "planner": (kwargs or {}).get("planner", "rrt_connect"),
+            "step_size": (kwargs or {}).get("step_size", 0.08),
+            "max_iter": (kwargs or {}).get("max_iter", 3000),
+            "max_workers": (kwargs or {}).get("max_workers", 2),
+            "ik_solver": (kwargs or {}).get("ik_solver", "normalized_dls"),
+            "ik_normalize": (kwargs or {}).get("ik_normalize", True),
             "_identity": (kwargs or {}).get("_identity"),
         }
         if self._visualizer:
@@ -476,6 +769,8 @@ class ZAPI(ZAPIBase):
             "command": "pick_chuck_mount_points",
             "enabled": (kwargs or {}).get("enabled", True),
             "clear": (kwargs or {}).get("clear", True),
+            "align_on_pick": (kwargs or {}).get("align_on_pick", False),
+            "align_target": (kwargs or {}).get("align_target", "f"),
             "_identity": (kwargs or {}).get("_identity"),
         }
         if self._visualizer:
@@ -490,6 +785,19 @@ class ZAPI(ZAPIBase):
             "command": "set_chuck_mount_points",
             "points": (kwargs or {}).get("points", []),
             "local_points": (kwargs or {}).get("local_points"),
+            "_identity": (kwargs or {}).get("_identity"),
+        }
+        if self._visualizer:
+            self._visualizer.push_request(request_payload)
+        else:
+            self.push_to_queue(request_payload)
+
+    def zapi_set_chuck_mount_config(self, kwargs=None):
+        """Update chuck mount center offset/axis config in the viewer."""
+        self.__console.info(f"Received zapi_set_chuck_mount_config with kwargs: {kwargs}")
+        request_payload = {
+            "command": "set_chuck_mount_config",
+            "chuck_mount": (kwargs or {}).get("chuck_mount", {}),
             "_identity": (kwargs or {}).get("_identity"),
         }
         if self._visualizer:

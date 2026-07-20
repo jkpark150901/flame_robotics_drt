@@ -1,0 +1,2 @@
+iteration,phase,sample_type,nearest_idx,node_count,accepted,collision,collision_pairs,reason,cost,from_q,to_q,sample_q
+-1,goal_collision,,,1,False,True,,goal configuration is in collision,,,"[3.399833, -1.0, -3.14, -2.811652, 3.14, -1.979678, 1.585004, 3.14]",

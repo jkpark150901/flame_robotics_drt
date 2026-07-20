@@ -219,6 +219,11 @@ def analyze_pipe_endpoints_by_voxel_graph(
     max_points: int = 50000,
     min_voxel_points: int = 1,
     neighbor_radius_voxels: int = 1,
+    max_endpoint_candidates: int = 8,
+    min_branch_length: float | None = None,
+    mount_backoff_distance: float | None = None,
+    mount_straight_window: float | None = None,
+    mount_min_straightness: float = 0.92,
     include_points: bool = False,
     random_seed: int = 0,
 ) -> dict[str, Any]:
@@ -291,6 +296,38 @@ def analyze_pipe_endpoints_by_voxel_graph(
 
     endpoint_node_indices = [int(far_a), int(far_b)]
     endpoint_points = nodes[endpoint_node_indices]
+    dist_to_diameter_path = _multi_source_dijkstra_graph(
+        adjacency,
+        path_indices,
+        allowed=component_indices,
+    )
+    if min_branch_length is None:
+        min_branch_length = max(float(voxel_size) * 1.5, float(dist_from_a[far_b]) * 0.03)
+    endpoint_candidates = _endpoint_candidates_from_graph(
+        nodes=nodes,
+        adjacency=adjacency,
+        component_indices=component_indices,
+        diameter_endpoint_indices=endpoint_node_indices,
+        diameter_distance=float(dist_from_a[far_b]),
+        dist_to_diameter_path=dist_to_diameter_path,
+        max_candidates=max_endpoint_candidates,
+        min_branch_length=float(min_branch_length),
+    )
+    if mount_backoff_distance is None:
+        mount_backoff_distance = float(voxel_size) * 2.0
+    if mount_straight_window is None:
+        mount_straight_window = max(float(voxel_size) * 3.0, float(dist_from_a[far_b]) * 0.04)
+    mount_candidates = _mount_candidates_from_endpoint_candidates(
+        nodes=nodes,
+        adjacency=adjacency,
+        component_indices=component_indices,
+        endpoint_candidates=endpoint_candidates,
+        diameter_endpoint_indices=endpoint_node_indices,
+        diameter_path_indices=path_indices,
+        mount_backoff_distance=float(mount_backoff_distance),
+        mount_straight_window=float(mount_straight_window),
+        mount_min_straightness=float(mount_min_straightness),
+    )
     graph_edges = [
         [int(i), int(j)]
         for i, j, _ in edges
@@ -310,6 +347,12 @@ def analyze_pipe_endpoints_by_voxel_graph(
         "diameter_distance": float(dist_from_a[far_b]),
         "terminal_node_indices": endpoint_node_indices,
         "terminal_end_points": endpoint_points.tolist(),
+        "endpoint_candidates": endpoint_candidates,
+        "mount_candidates": mount_candidates,
+        "min_branch_length": float(min_branch_length),
+        "mount_backoff_distance": float(mount_backoff_distance),
+        "mount_straight_window": float(mount_straight_window),
+        "mount_min_straightness": float(mount_min_straightness),
         "graph": {
             "nodes": nodes.tolist(),
             "voxel_keys": voxel_keys.tolist(),
@@ -318,6 +361,10 @@ def analyze_pipe_endpoints_by_voxel_graph(
             "component_node_indices": [int(i) for i in component_indices],
             "path_node_indices": [int(i) for i in path_indices],
             "path_points": nodes[path_indices].tolist() if path_indices else [],
+            "distance_to_diameter_path": [
+                None if not np.isfinite(value) else float(value)
+                for value in dist_to_diameter_path
+            ],
         },
         "timing_sec": float(perf_counter() - started),
     }
@@ -1046,6 +1093,221 @@ def _dijkstra_graph(
                 previous[neighbor] = node
                 heapq.heappush(heap, (candidate, neighbor))
     return distances, previous
+
+
+def _multi_source_dijkstra_graph(
+    adjacency: list[list[tuple[int, float]]],
+    sources: list[int],
+    allowed: list[int] | set[int] | None = None,
+) -> np.ndarray:
+    allowed_set = set(allowed) if allowed is not None else set(range(len(adjacency)))
+    distances = np.full(len(adjacency), np.inf, dtype=float)
+    heap: list[tuple[float, int]] = []
+    for source in sources:
+        source = int(source)
+        if source not in allowed_set:
+            continue
+        distances[source] = 0.0
+        heapq.heappush(heap, (0.0, source))
+
+    while heap:
+        distance, node = heapq.heappop(heap)
+        if distance > distances[node]:
+            continue
+        for neighbor, weight in adjacency[node]:
+            if neighbor not in allowed_set:
+                continue
+            candidate = distance + weight
+            if candidate < distances[neighbor]:
+                distances[neighbor] = candidate
+                heapq.heappush(heap, (candidate, neighbor))
+    return distances
+
+
+def _endpoint_candidates_from_graph(
+    nodes: np.ndarray,
+    adjacency: list[list[tuple[int, float]]],
+    component_indices: list[int],
+    diameter_endpoint_indices: list[int],
+    diameter_distance: float,
+    dist_to_diameter_path: np.ndarray,
+    max_candidates: int,
+    min_branch_length: float,
+) -> list[dict[str, Any]]:
+    component_set = set(component_indices)
+    candidate_by_node: dict[int, dict[str, Any]] = {}
+
+    def add_candidate(node_index: int, reason: str, score: float, branch_distance: float = 0.0):
+        node_index = int(node_index)
+        existing = candidate_by_node.get(node_index)
+        if existing is not None and existing["score"] >= score:
+            if reason not in existing["reasons"]:
+                existing["reasons"].append(reason)
+            return
+        candidate_by_node[node_index] = {
+            "node_index": node_index,
+            "point": nodes[node_index].tolist(),
+            "score": float(score),
+            "branch_distance": float(branch_distance),
+            "reasons": [reason],
+        }
+
+    for rank, node_index in enumerate(diameter_endpoint_indices):
+        add_candidate(
+            node_index,
+            reason="diameter_endpoint",
+            score=1.0 - rank * 1e-6,
+            branch_distance=0.0,
+        )
+
+    branch_tip_indices: list[int] = []
+    for node_index in component_indices:
+        distance = dist_to_diameter_path[node_index]
+        if not np.isfinite(distance) or distance < min_branch_length:
+            continue
+        neighbor_distances = [
+            dist_to_diameter_path[neighbor]
+            for neighbor, _ in adjacency[node_index]
+            if neighbor in component_set and np.isfinite(dist_to_diameter_path[neighbor])
+        ]
+        if neighbor_distances and distance < max(neighbor_distances):
+            continue
+        branch_tip_indices.append(int(node_index))
+
+    branch_tip_indices.sort(
+        key=lambda idx: (float(dist_to_diameter_path[idx]), float(np.linalg.norm(nodes[idx]))),
+        reverse=True,
+    )
+    dedup_radius = max(min_branch_length * 0.75, np.finfo(float).eps)
+    selected_branch_tips: list[int] = []
+    for node_index in branch_tip_indices:
+        point = nodes[node_index]
+        if any(np.linalg.norm(point - nodes[selected]) < dedup_radius for selected in selected_branch_tips):
+            continue
+        selected_branch_tips.append(node_index)
+        branch_distance = float(dist_to_diameter_path[node_index])
+        score = 0.5 + 0.5 * min(1.0, branch_distance / max(diameter_distance, np.finfo(float).eps))
+        add_candidate(
+            node_index,
+            reason="branch_tip",
+            score=score,
+            branch_distance=branch_distance,
+        )
+
+    candidates = sorted(candidate_by_node.values(), key=lambda item: item["score"], reverse=True)
+    if max_candidates > 0:
+        candidates = candidates[:max_candidates]
+    for rank, candidate in enumerate(candidates):
+        candidate["rank"] = int(rank)
+    return candidates
+
+
+def _mount_candidates_from_endpoint_candidates(
+    nodes: np.ndarray,
+    adjacency: list[list[tuple[int, float]]],
+    component_indices: list[int],
+    endpoint_candidates: list[dict[str, Any]],
+    diameter_endpoint_indices: list[int],
+    diameter_path_indices: list[int],
+    mount_backoff_distance: float,
+    mount_straight_window: float,
+    mount_min_straightness: float,
+) -> list[dict[str, Any]]:
+    component_set = set(component_indices)
+    diameter_path_set = set(diameter_path_indices)
+    mount_candidates: list[dict[str, Any]] = []
+    for candidate in endpoint_candidates:
+        endpoint_node = int(candidate["node_index"])
+        distances, previous = _dijkstra_graph(adjacency, endpoint_node, allowed=component_indices)
+        if "diameter_endpoint" in candidate.get("reasons", []):
+            targets = [idx for idx in diameter_endpoint_indices if int(idx) != endpoint_node]
+        else:
+            targets = [idx for idx in diameter_path_indices if idx in component_set]
+        if not targets:
+            continue
+        target = min(targets, key=lambda idx: distances[int(idx)])
+        if not np.isfinite(distances[int(target)]):
+            continue
+        path = _reconstruct_path(previous, endpoint_node, int(target))
+        if len(path) < 2:
+            continue
+        arc_lengths = _path_arc_lengths(nodes, path)
+        selected_node, selected_straightness, selected_distance = _select_mount_node_on_path(
+            nodes,
+            path,
+            arc_lengths,
+            mount_backoff_distance=mount_backoff_distance,
+            mount_straight_window=mount_straight_window,
+            mount_min_straightness=mount_min_straightness,
+        )
+        if selected_node is None:
+            continue
+        mount_candidates.append(
+            {
+                "rank": int(len(mount_candidates)),
+                "endpoint_candidate_rank": int(candidate.get("rank", len(mount_candidates))),
+                "endpoint_node_index": endpoint_node,
+                "endpoint_point": nodes[endpoint_node].tolist(),
+                "endpoint_reasons": list(candidate.get("reasons", [])),
+                "mount_node_index": int(selected_node),
+                "mount_point": nodes[int(selected_node)].tolist(),
+                "distance_from_endpoint": float(selected_distance),
+                "straightness": float(selected_straightness),
+                "path_to_mount_node_indices": [
+                    int(node) for node in path[: path.index(int(selected_node)) + 1]
+                ],
+                "target_is_diameter_path": bool(int(target) in diameter_path_set),
+            }
+        )
+    return mount_candidates
+
+
+def _path_arc_lengths(nodes: np.ndarray, path: list[int]) -> np.ndarray:
+    arc_lengths = np.zeros(len(path), dtype=float)
+    for i in range(1, len(path)):
+        arc_lengths[i] = arc_lengths[i - 1] + float(
+            np.linalg.norm(nodes[path[i]] - nodes[path[i - 1]])
+        )
+    return arc_lengths
+
+
+def _select_mount_node_on_path(
+    nodes: np.ndarray,
+    path: list[int],
+    arc_lengths: np.ndarray,
+    mount_backoff_distance: float,
+    mount_straight_window: float,
+    mount_min_straightness: float,
+) -> tuple[int | None, float, float]:
+    if len(path) < 2:
+        return None, 0.0, 0.0
+    total_length = float(arc_lengths[-1])
+    best_node: int | None = None
+    best_straightness = -1.0
+    best_distance = 0.0
+    for i, node in enumerate(path):
+        distance_from_endpoint = float(arc_lengths[i])
+        if distance_from_endpoint < mount_backoff_distance:
+            continue
+        if distance_from_endpoint >= total_length:
+            break
+        j = int(np.searchsorted(arc_lengths, distance_from_endpoint + mount_straight_window, side="left"))
+        if j >= len(path):
+            j = len(path) - 1
+        if j <= i:
+            continue
+        window_length = float(arc_lengths[j] - arc_lengths[i])
+        if window_length <= np.finfo(float).eps:
+            continue
+        chord = float(np.linalg.norm(nodes[path[j]] - nodes[node]))
+        straightness = chord / window_length
+        if straightness > best_straightness:
+            best_node = int(node)
+            best_straightness = float(straightness)
+            best_distance = distance_from_endpoint
+        if straightness >= mount_min_straightness:
+            return int(node), float(straightness), distance_from_endpoint
+    return best_node, max(0.0, float(best_straightness)), float(best_distance)
 
 
 def _farthest_reachable_node(distances: np.ndarray) -> int:

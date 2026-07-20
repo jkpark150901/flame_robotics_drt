@@ -30,16 +30,16 @@
   <joint name="dda_joint_linear_track" type="prismatic">
     <parent link="dda_link_linear_track" />
     <child link="dda_link_carriage" />
-    <origin xyz="0 0 0.2" rpy="0 0 0" />
+    <origin xyz="0 0 0.7" rpy="0 0 0" />
     <axis xyz="1 0 0" />
     <limit lower="0.0" upper="7.9" effort="1000.0" velocity="1.0" />
   </joint>
 
   <link name="dda_link_carriage">
     <visual>
-      <origin xyz="0.2 0 0.1" rpy="0 0 0" />
+      <origin xyz="0.2 0 0.0" rpy="0 0 0" />
       <geometry>
-        <box size="0.4 0.7 0.2" />
+        <box size="0.4 0.7 1.0" />
       </geometry>
       <material name="color_darkgray">
         <color rgba="0.1 0.1 0.1 1"/>
@@ -48,7 +48,7 @@
     <collision>
       <origin xyz="0 0.25 0.05" rpy="0 0 0" />
       <geometry>
-        <box size="0.4 0.5 0.1" />
+        <box size="0.4 0.5 1.0" />
       </geometry>
     </collision>
     <inertial>
@@ -61,9 +61,9 @@
   <joint name="dda_joint_carriage" type="prismatic">
     <parent link="dda_link_carriage" />
     <child link="dda_link0" />
-    <origin xyz="0.2 0 0.2" rpy="0 0 0" />
+    <origin xyz="0.2 0 0.5" rpy="0 0 0" />
     <axis xyz="0 1 0" />
-    <limit lower="0.0" upper="0.5" effort="1000.0" velocity="1.0" />
+    <limit lower="-1" upper="1" effort="1000.0" velocity="1.0" />
   </joint>
 
   <link name="dda_link0">
@@ -190,6 +190,7 @@
   </link>
   <link name="dda_link_end">
     <visual>
+      <!-- <origin xyz="0.0 0.1163 0.0" rpy="0.0 0 0" /> -->
       <origin xyz="0.0 0.1163 0.0" rpy="0.0 0 0" />
       <geometry>
         <mesh filename="meshes/link_dda.stl" scale="0.001 0.001 0.001" />
@@ -210,7 +211,6 @@
       <inertia ixx="0.015852" iyy="0.112139" izz="0.097847" ixy="-0.0" iyz="0.0" ixz="0.0" />
     </inertial>
   </link>
-  <link name="dda_link_tcp" />
   <joint name="dda_joint_base" type="revolute">
     <origin rpy="0 0 1.57079632679" xyz="0 0 0" />
     <parent link="dda_link0" />
@@ -257,10 +257,5 @@
     <origin xyz="0.0 -0.1163 0.0" rpy="0 0 0" />
     <parent link="dda_link6" />
     <child link="dda_link_end" />
-  </joint>
-  <joint name="dda_joint_tcp" type="fixed">
-    <origin xyz="0.0 -0.03 0.0" rpy="0 0 -1.57" />
-    <parent link="dda_link_end" />
-    <child link="dda_link_tcp" />
   </joint>
 </robot>

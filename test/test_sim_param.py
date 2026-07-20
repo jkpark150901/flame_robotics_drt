@@ -45,7 +45,7 @@ class TestSimParameterMap(unittest.TestCase):
                 "positioner_r_resolution": 0.5,
                 "positioner_x_range": [0.0, 10.0],
                 "positioner_z_range": [0.0, 5.0],
-                "positioner_r_range": [0.0, 360.0]
+                "positioner_r_range": [-180.0, 180.0]
             }''')
 
         self.param_map.load_parameters(test_json)
@@ -62,7 +62,7 @@ class TestSimParameterMap(unittest.TestCase):
         self.ui.slider_positioner_z_pos.setValue(100) # 100 * 0.02 = 2.0
         self.assertEqual(self.ui.edit_positioner_z_pos.text(), "2.000")
 
-        self.ui.slider_positioner_r_pos.setValue(180) # 180 * 0.5 = 90.0
+        self.ui.slider_positioner_r_pos.setValue(540) # -180 + 540 * 0.5 = 90.0
         self.assertEqual(self.ui.edit_positioner_r_pos.text(), "90.000")
 
         # Check signal connections: LineEdit -> Slider

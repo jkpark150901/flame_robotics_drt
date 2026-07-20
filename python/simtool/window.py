@@ -22,6 +22,7 @@ import subprocess
 import threading
 
 from util.logger.console import ConsoleLogger
+from common.config_loader import load_config
 from plugins.pluginbase.plannerbase import PlannerBase
 from plugins.pluginbase.optimizerbase import OptimizerBase
 from simtool.param import SimParameterMap
@@ -39,7 +40,7 @@ class AppWindow(QMainWindow):
     # 관절 테이블: (slider, edit, joint, kind, lo, hi)  kind: 'lin'(m) | 'rot'(deg)
     _SOURCE_JOINTS = [
         ('slider_source_base_pos',   'edit_source_base_pos',   'rt_joint_linear_track', 'lin',   0.0,  7.9),
-        ('slider_source_base_pos_2', 'edit_source_base_pos_2', 'rt_joint_carriage',     'lin',   0.0,  0.5),
+        ('slider_source_base_pos_2', 'edit_source_base_pos_2', 'rt_joint_carriage',     'lin',  -0.5,  0.5),
         ('slider_source_base_pos_3', 'edit_source_base_pos_3', 'rt_base',               'rot', -180.0, 180.0),
         ('slider_source_base_pos_4', 'edit_source_base_pos_4', 'rt_shoulder',           'rot', -180.0, 180.0),
         ('slider_source_base_pos_5', 'edit_source_base_pos_5', 'rt_elbow',              'rot', -180.0, 180.0),
@@ -49,7 +50,7 @@ class AppWindow(QMainWindow):
     ]
     _DDA_JOINTS = [
         ('slider_source_base_pos_9',  'edit_source_base_pos_9',  'dda_joint_linear_track', 'lin',   0.0,  7.9),
-        ('slider_source_base_pos_10', 'edit_source_base_pos_10', 'dda_joint_carriage',     'lin',   0.0,  0.5),
+        ('slider_source_base_pos_10', 'edit_source_base_pos_10', 'dda_joint_carriage',     'lin',  -0.5,  0.5),
         ('slider_source_base_pos_11', 'edit_source_base_pos_11', 'dda_joint_base',         'rot', -180.0, 180.0),
         ('slider_source_base_pos_12', 'edit_source_base_pos_12', 'dda_joint_shoulder',     'rot', -180.0, 180.0),
         ('slider_source_base_pos_13', 'edit_source_base_pos_13', 'dda_joint_elbow',        'rot', -180.0, 180.0),
@@ -244,9 +245,22 @@ class AppWindow(QMainWindow):
         self.__ensure_determine_ef_pose_button()
         if hasattr(self, 'btn_determine_ef_pose'):
             self.btn_determine_ef_pose.clicked.connect(self.__on_btn_determine_ef_pose_clicked)
+        if hasattr(self, 'btn_check_inspection_ik'):
+            self.btn_check_inspection_ik.clicked.connect(self.__on_btn_check_inspection_ik_clicked)
         self.__ensure_chuck_mount_pick_button()
-        if hasattr(self, 'btn_pick_chuck_mount_points'):
-            self.btn_pick_chuck_mount_points.clicked.connect(self.__on_btn_pick_chuck_mount_points_clicked)
+        if hasattr(self, 'btn_align_f_column'):
+            self.btn_align_f_column.clicked.connect(self.__on_btn_align_f_column_clicked)
+        if hasattr(self, 'btn_align_m_column'):
+            self.btn_align_m_column.clicked.connect(self.__on_btn_align_m_column_clicked)
+        if hasattr(self, 'btn_apply_chuck_mount_cfg'):
+            self.btn_apply_chuck_mount_cfg.clicked.connect(self.__on_btn_apply_chuck_mount_cfg_clicked)
+        if hasattr(self, 'btn_save_chuck_mount_cfg'):
+            self.btn_save_chuck_mount_cfg.clicked.connect(self.__on_btn_save_chuck_mount_cfg_clicked)
+        if hasattr(self, 'btn_fix_chuck_mount'):
+            self.btn_fix_chuck_mount.clicked.connect(self.__on_btn_fix_chuck_mount_clicked)
+        if hasattr(self, 'btn_release_chuck_mount'):
+            self.btn_release_chuck_mount.clicked.connect(self.__on_btn_release_chuck_mount_clicked)
+        self.__hide_legacy_spool_fix_controls()
         if hasattr(self, 'btn_plan_inspection_path'):
             self.btn_plan_inspection_path.clicked.connect(self.__on_btn_plan_inspection_path_clicked)
         if hasattr(self, 'btn_clear_inspection_path'):
@@ -280,6 +294,12 @@ class AppWindow(QMainWindow):
                                 'btn_robot_source_move', 'btn_robot_source_stop')
         self.__wire_manipulator(self._DDA_ROBOT, self._DDA_JOINTS,
                                 'btn_robot_dda_move', 'btn_robot_dda_stop')
+        if hasattr(self, 'btn_robot_source_base'):
+            self.btn_robot_source_base.clicked.connect(
+                lambda _=False: self.__reset_robot_base_pose(self._SOURCE_ROBOT))
+        if hasattr(self, 'btn_robot_dda_base'):
+            self.btn_robot_dda_base.clicked.connect(
+                lambda _=False: self.__reset_robot_base_pose(self._DDA_ROBOT))
 
         # 스풀 고정 체크박스 → 수동 컨트롤(슬라이더/이동) 잠금 토글
         if hasattr(self, 'chk_spool_fix_f_column_r'):
@@ -295,7 +315,22 @@ class AppWindow(QMainWindow):
                           self.chk_spool_fix_f_column_r.isChecked())
         fix_m_column_z = (hasattr(self, 'chk_spool_fix_m_column_z') and
                           self.chk_spool_fix_m_column_z.isChecked())
+        if hasattr(self, '_spool_mount_fixed'):
+            fixed = bool(self._spool_mount_fixed)
+            return fixed, fixed
         return fix_f_column_r, fix_m_column_z
+
+    def __hide_legacy_spool_fix_controls(self):
+        if not hasattr(self, '_spool_mount_fixed'):
+            self._spool_mount_fixed = False
+        for name in (
+            'groupBox_spool_fix',
+            'chk_spool_fix_f_column_r',
+            'chk_spool_fix_m_column_z',
+        ):
+            widget = getattr(self, name, None)
+            if widget is not None:
+                widget.hide()
 
     def __spool_move_blocked_by_fix(self):
         """스풀이 링크에 고정(r 또는 m 중 하나라도)되어 있으면 스풀 수동 이동을 차단."""
@@ -322,6 +357,37 @@ class AppWindow(QMainWindow):
             w = getattr(self, name, None)
             if w is not None:
                 w.setEnabled(enabled)
+        positioner_locked_widgets = [
+            'slider_positioner_x_pos',
+            'edit_positioner_x_pos',
+            'edit_positioner_x_vel',
+            'btn_positioner_x_move',
+            'btn_positioner_x_stop',
+            'slider_positioner_clamp_pos',
+            'edit_positioner_clamp_pos',
+            'edit_positioner_clamp_vel',
+            'btn_positioner_clamp_move',
+            'btn_positioner_clamp_stop',
+        ]
+        for name in positioner_locked_widgets:
+            w = getattr(self, name, None)
+            if w is not None:
+                w.setEnabled(enabled)
+        for name in (
+            'slider_positioner_z_pos',
+            'edit_positioner_z_pos',
+            'edit_positioner_z_vel',
+            'btn_positioner_z_move',
+            'btn_positioner_z_stop',
+            'slider_positioner_r_pos',
+            'edit_positioner_r_pos',
+            'edit_positioner_r_vel',
+            'btn_positioner_r_move',
+            'btn_positioner_r_stop',
+        ):
+            w = getattr(self, name, None)
+            if w is not None:
+                w.setEnabled(True)
 
     def __on_spool_fixation_toggled(self, *args):
         fix_f, fix_z = self.__get_spool_fix_flags()
@@ -330,6 +396,9 @@ class AppWindow(QMainWindow):
 
     def __on_btn_positioner_x_move_clicked(self):
         try:
+            if bool(getattr(self, '_spool_mount_fixed', False)):
+                self.__set_path_plan_status("Mount fixed: only R/Z axes can move")
+                return
             pos = float(self.edit_positioner_x_pos.text() or "0")
             vel = float(self.edit_positioner_x_vel.text() or "0")
             fix_f, fix_z = self.__get_spool_fix_flags()
@@ -360,6 +429,9 @@ class AppWindow(QMainWindow):
 
     def __on_btn_positioner_clamp_move_clicked(self):
         try:
+            if bool(getattr(self, '_spool_mount_fixed', False)):
+                self.__set_path_plan_status("Mount fixed: only R/Z axes can move")
+                return
             pos = float(self.edit_positioner_clamp_pos.text() or "0")
             vel = float(self.edit_positioner_clamp_vel.text() or "0")
             fix_f, fix_z = self.__get_spool_fix_flags()
@@ -437,6 +509,28 @@ class AppWindow(QMainWindow):
             "z_rotation": z_rotation,
         }
 
+    def __get_robot_joint_state_from_ui(self):
+        import math
+        robots = {}
+
+        def read_table(robot_name, table):
+            joints = {}
+            for _slider_name, edit_name, joint_name, kind, _lo, _hi in table:
+                edit = getattr(self, edit_name, None)
+                if edit is None:
+                    continue
+                try:
+                    ui_value = float(edit.text() or "0")
+                except ValueError:
+                    continue
+                joints[joint_name] = math.radians(ui_value) if kind == 'rot' else ui_value
+            if joints:
+                robots[robot_name] = joints
+
+        read_table(self._SOURCE_ROBOT, self._SOURCE_JOINTS)
+        read_table(self._DDA_ROBOT, self._DDA_JOINTS)
+        return robots
+
     def __request_spool_pose_move(self, pose, force=False):
         if not force and self.__spool_move_blocked_by_fix():
             return
@@ -459,6 +553,12 @@ class AppWindow(QMainWindow):
             return
         if self.zapi:
             fix_f, fix_z = self.__get_spool_fix_flags()
+            if bool(getattr(self, '_spool_mount_fixed', False)):
+                self.zapi._ZAPI_request_move_positioner("z", pose["z"], 0.0, fix_f, fix_z)
+                self.zapi._ZAPI_request_move_positioner("r", pose["r"], 0.0, fix_f, fix_z)
+                self.__console.info(
+                    f"Requested to move fixed positioner Z/R only: z={pose['z']}, r={pose['r']}")
+                return
             self.zapi._ZAPI_request_move_positioner("x", pose["x"], 0.0, fix_f, fix_z)
             self.zapi._ZAPI_request_move_positioner("z", pose["z"], 0.0, fix_f, fix_z)
             self.zapi._ZAPI_request_move_positioner("r", pose["r"], 0.0, fix_f, fix_z)
@@ -511,6 +611,11 @@ class AppWindow(QMainWindow):
             # 고정(체크) 상태 — spool 포즈는 chuck 기준 오프셋이다
             "fix_f_column_r": bool(fix_f),
             "fix_m_column_z": bool(fix_z),
+            "fixation": {
+                "fixed": bool(fix_f or fix_z),
+                "fix_f_column_r": bool(fix_f),
+                "fix_m_column_z": bool(fix_z),
+            },
             "chuck_mount_points": {
                 "points": getattr(self, '_chuck_mount_points', []),
                 "local_points": getattr(self, '_chuck_mount_local_points', []),
@@ -582,6 +687,7 @@ class AppWindow(QMainWindow):
 
     def __set_spool_fix_checks(self, fix_f, fix_z):
         """고정 체크박스 상태를 시그널 없이 설정하고 컨트롤 잠금만 갱신."""
+        self._spool_mount_fixed = bool(fix_f or fix_z)
         for name, val in (('chk_spool_fix_f_column_r', fix_f),
                           ('chk_spool_fix_m_column_z', fix_z)):
             chk = getattr(self, name, None)
@@ -628,12 +734,6 @@ class AppWindow(QMainWindow):
         else:
             text = self.cbx_plugin_pathplanner.currentText()
             planner_name = text.strip().lower() if text else "rrt_connect"
-        q_space_planners = {"rrt_connect", "rrt_star"}
-        if planner_name not in q_space_planners:
-            self.__console.warning(
-                f"Inspection path planning requires q-space planner; "
-                f"'{planner_name}' is not supported, using rrt_connect")
-            return "rrt_connect"
         return planner_name
 
     def __current_path_robot_name(self):
@@ -646,41 +746,257 @@ class AppWindow(QMainWindow):
                 return self._DDA_ROBOT
         return self._SOURCE_ROBOT
 
+    def __current_ik_normalize_enabled(self):
+        if hasattr(self, 'chk_ik_normalize'):
+            return bool(self.chk_ik_normalize.isChecked())
+        return True
+
+    def __current_ik_solver_name(self):
+        if hasattr(self, 'cbx_ik_solver'):
+            data = self.cbx_ik_solver.currentData()
+            if data:
+                return str(data)
+            text = self.cbx_ik_solver.currentText()
+            if text:
+                return str(text).strip().lower()
+        return "normalized_dls" if self.__current_ik_normalize_enabled() else "dls"
+
+    def __current_ik_request_options(self):
+        solver = self.__current_ik_solver_name()
+        if solver == "dls":
+            return solver, False
+        if solver == "normalized_dls":
+            return solver, True
+        return solver, self.__current_ik_normalize_enabled()
+
     def __set_path_plan_status(self, msg):
         if hasattr(self, 'label_path_plan_status'):
             self.label_path_plan_status.setText(str(msg))
         self.__console.info(str(msg))
 
     def __ensure_determine_ef_pose_button(self):
-        if hasattr(self, 'btn_determine_ef_pose'):
-            return
         if not hasattr(self, 'btn_pick_inspection_point') or not hasattr(self, 'btn_clear_inspection_path'):
             return
         parent = self.btn_clear_inspection_path.parent()
-        self.btn_pick_inspection_point.setGeometry(10, 348, 74, 32)
-        self.btn_determine_ef_pose = QPushButton("EF Pose", parent)
-        self.btn_determine_ef_pose.setObjectName("btn_determine_ef_pose")
-        self.btn_determine_ef_pose.setGeometry(88, 348, 74, 32)
+        if parent is not None and hasattr(parent, 'geometry'):
+            parent_geo = parent.geometry()
+            target_height = 492
+            if parent_geo.height() < target_height:
+                parent.setGeometry(parent_geo.x(), parent_geo.y(), parent_geo.width(), target_height)
+        self.btn_pick_inspection_point.setGeometry(10, 348, 101, 32)
+        if not hasattr(self, 'btn_determine_ef_pose'):
+            self.btn_determine_ef_pose = QPushButton("EF Pose", parent)
+            self.btn_determine_ef_pose.setObjectName("btn_determine_ef_pose")
+        self.btn_determine_ef_pose.setGeometry(116, 348, 101, 32)
+        if not hasattr(self, 'btn_check_inspection_ik'):
+            self.btn_check_inspection_ik = QPushButton("Check IK", parent)
+            self.btn_check_inspection_ik.setObjectName("btn_check_inspection_ik")
+        self.btn_check_inspection_ik.setGeometry(10, 386, 153, 32)
         if hasattr(self, 'btn_plan_inspection_path'):
-            self.btn_plan_inspection_path.setGeometry(166, 348, 74, 32)
-        self.btn_clear_inspection_path.setGeometry(244, 348, 77, 32)
+            self.btn_plan_inspection_path.setGeometry(168, 386, 153, 32)
+        if not hasattr(self, 'label_ik_solver'):
+            self.label_ik_solver = QLabel("IK Solver", parent)
+            self.label_ik_solver.setObjectName("label_ik_solver")
+        self.label_ik_solver.setGeometry(10, 424, 80, 24)
+        if not hasattr(self, 'cbx_ik_solver'):
+            self.cbx_ik_solver = QComboBox(parent)
+            self.cbx_ik_solver.setObjectName("cbx_ik_solver")
+            self.cbx_ik_solver.addItem("DLS", "dls")
+            self.cbx_ik_solver.addItem("Normalized DLS", "normalized_dls")
+            self.cbx_ik_solver.addItem("QP IK", "qp")
+            self.cbx_ik_solver.setCurrentIndex(1)
+        self.cbx_ik_solver.setGeometry(92, 424, 125, 24)
+        if not hasattr(self, 'chk_ik_normalize'):
+            self.chk_ik_normalize = QCheckBox("Normalize IK joints", parent)
+            self.chk_ik_normalize.setObjectName("chk_ik_normalize")
+            self.chk_ik_normalize.setChecked(True)
+        self.chk_ik_normalize.setGeometry(224, 424, 97, 24)
+        self.btn_clear_inspection_path.setGeometry(222, 348, 99, 32)
+        if hasattr(self, 'edit_inspection_point'):
+            self.edit_inspection_point.setGeometry(10, 456, 171, 22)
+        if hasattr(self, 'label_path_plan_status'):
+            self.label_path_plan_status.setGeometry(188, 456, 133, 22)
+        display_group = getattr(self, 'groupBox_3', None)
+        if display_group is not None:
+            geo = display_group.geometry()
+            target_y = 510
+            if parent is not None and hasattr(parent, 'geometry'):
+                parent_geo = parent.geometry()
+                target_y = parent_geo.y() + parent_geo.height() + 14
+            if geo.y() < target_y:
+                display_group.setGeometry(geo.x(), target_y, geo.width(), geo.height())
         self.btn_determine_ef_pose.show()
+        self.btn_check_inspection_ik.show()
+        self.label_ik_solver.show()
+        self.cbx_ik_solver.show()
+        self.chk_ik_normalize.show()
 
     def __ensure_chuck_mount_pick_button(self):
-        if hasattr(self, 'btn_pick_chuck_mount_points'):
-            return
         if not hasattr(self, 'btn_spool_pose_load'):
             return
         parent = self.btn_spool_pose_load.parent()
+        group = parent
+        if group is not None and hasattr(group, 'geometry'):
+            group_geo = group.geometry()
+            target_height = 430
+            if group_geo.height() < target_height:
+                group.setGeometry(group_geo.x(), group_geo.y(), group_geo.width(), target_height)
+                fix_group = getattr(self, 'groupBox_spool_fix', None)
+                if fix_group is not None:
+                    fix_geo = fix_group.geometry()
+                    fix_group.setGeometry(fix_geo.x(), group_geo.y() + target_height + 7, fix_geo.width(), fix_geo.height())
         geo = self.btn_spool_pose_load.geometry()
-        self.btn_pick_chuck_mount_points = QPushButton("Pick Chucks", parent)
-        self.btn_pick_chuck_mount_points.setObjectName("btn_pick_chuck_mount_points")
-        self.btn_pick_chuck_mount_points.setGeometry(
-            max(10, geo.x() + geo.width() - 96),
-            geo.y() + geo.height() + 4,
-            96,
-            geo.height())
-        self.btn_pick_chuck_mount_points.show()
+        self.btn_spool_pose_load.setGeometry(geo.x(), geo.y(), geo.width(), geo.height())
+        self.btn_spool_pose_load.setText("Load")
+        y = geo.y() + geo.height() + 8
+        group_width = parent.geometry().width() if hasattr(parent, 'geometry') else 330
+        left_x = 10
+        gap = 8
+        col_w = max(130, int((group_width - left_x * 2 - gap) / 2))
+
+        if not hasattr(self, 'btn_align_f_column'):
+            self.btn_align_f_column = QPushButton("Align F column", parent)
+            self.btn_align_f_column.setObjectName("btn_align_f_column")
+        self.btn_align_f_column.setGeometry(left_x, y, col_w, geo.height())
+        self.btn_align_f_column.show()
+
+        if not hasattr(self, 'btn_align_m_column'):
+            self.btn_align_m_column = QPushButton("Align M column", parent)
+            self.btn_align_m_column.setObjectName("btn_align_m_column")
+        self.btn_align_m_column.setGeometry(left_x + col_w + gap, y, col_w, geo.height())
+        self.btn_align_m_column.show()
+
+        self.__ensure_chuck_mount_config_controls(parent, left_x, y + geo.height() + 10, col_w, gap)
+
+    def __ensure_chuck_mount_config_controls(self, parent, left_x, y, col_w, gap):
+        cfg = self.__load_viewer_chuck_mount_cfg()
+        row_h = 24
+        label_w = 52
+        edit_w = max(74, col_w - label_w - 4)
+        fields = (
+            ("lbl_f_chuck_offset", "F off", "edit_f_chuck_offset", "f_column", "center_offset", 0),
+            ("lbl_m_chuck_offset", "M off", "edit_m_chuck_offset", "m_column", "center_offset", 0),
+            ("lbl_f_chuck_axis", "F axis", "edit_f_chuck_axis", "f_column", "axis", 1),
+            ("lbl_m_chuck_axis", "M axis", "edit_m_chuck_axis", "m_column", "axis", 1),
+        )
+        for label_name, label_text, edit_name, column_name, key, row in fields:
+            is_m = label_name.startswith("lbl_m")
+            x = left_x + (col_w + gap if is_m else 0)
+            row_y = y + row * (row_h + 6)
+            if not hasattr(self, label_name):
+                label = QLabel(label_text, parent)
+                label.setObjectName(label_name)
+                setattr(self, label_name, label)
+            label = getattr(self, label_name)
+            label.setGeometry(x, row_y, label_w, row_h)
+            label.show()
+
+            if not hasattr(self, edit_name):
+                edit = QLineEdit(parent)
+                edit.setObjectName(edit_name)
+                setattr(self, edit_name, edit)
+            edit = getattr(self, edit_name)
+            edit.setGeometry(x + label_w, row_y, edit_w, row_h)
+            edit.setText(self.__format_chuck_mount_vec(cfg, column_name, key))
+            edit.show()
+
+        button_y = y + 2 * (row_h + 6) + 2
+        if not hasattr(self, 'btn_apply_chuck_mount_cfg'):
+            self.btn_apply_chuck_mount_cfg = QPushButton("Apply chuck cfg", parent)
+            self.btn_apply_chuck_mount_cfg.setObjectName("btn_apply_chuck_mount_cfg")
+        self.btn_apply_chuck_mount_cfg.setGeometry(left_x, button_y, col_w, 30)
+        self.btn_apply_chuck_mount_cfg.show()
+
+        if not hasattr(self, 'btn_save_chuck_mount_cfg'):
+            self.btn_save_chuck_mount_cfg = QPushButton("Save chuck cfg", parent)
+            self.btn_save_chuck_mount_cfg.setObjectName("btn_save_chuck_mount_cfg")
+        self.btn_save_chuck_mount_cfg.setGeometry(left_x + col_w + gap, button_y, col_w, 30)
+        self.btn_save_chuck_mount_cfg.show()
+
+        profile_y = button_y + 38
+        if not hasattr(self, 'label_chuck_mount_profile'):
+            self.label_chuck_mount_profile = QLabel("Cylinder: -", parent)
+            self.label_chuck_mount_profile.setObjectName("label_chuck_mount_profile")
+            self.label_chuck_mount_profile.setWordWrap(True)
+        self.label_chuck_mount_profile.setGeometry(left_x, profile_y, col_w * 2 + gap, 42)
+        self.label_chuck_mount_profile.show()
+
+        fix_y = profile_y + 50
+        if not hasattr(self, 'btn_fix_chuck_mount'):
+            self.btn_fix_chuck_mount = QPushButton("Fix aligned mount", parent)
+            self.btn_fix_chuck_mount.setObjectName("btn_fix_chuck_mount")
+        self.btn_fix_chuck_mount.setGeometry(left_x, fix_y, col_w, 30)
+        self.btn_fix_chuck_mount.show()
+
+        if not hasattr(self, 'btn_release_chuck_mount'):
+            self.btn_release_chuck_mount = QPushButton("Release mount", parent)
+            self.btn_release_chuck_mount.setObjectName("btn_release_chuck_mount")
+        self.btn_release_chuck_mount.setGeometry(left_x + col_w + gap, fix_y, col_w, 30)
+        self.btn_release_chuck_mount.show()
+
+    def __viewer_cfg_path(self):
+        return pathlib.Path(self.__config.get("root_path", "")) / "python" / "viewervedo.cfg"
+
+    def __load_viewer_config(self):
+        path = self.__viewer_cfg_path()
+        if path.exists():
+            return load_config(path)
+        return {}
+
+    def __load_viewer_chuck_mount_cfg(self):
+        cfg = self.__load_viewer_config().get("chuck_mount", {}) or {}
+        defaults = {
+            "f_column": {
+                "center_offset": [0.0, 0.0, 0.0],
+                "axis": [1.0, 0.0, 0.0],
+            },
+            "m_column": {
+                "center_offset": [0.0, 0.0, 0.0],
+                "axis": [-1.0, 0.0, 0.0],
+                "profile_align_axis_sign": -1.0,
+                "r_rotation_sign": -1.0,
+            },
+        }
+        for column_name, values in defaults.items():
+            cfg.setdefault(column_name, {})
+            for key, default_value in values.items():
+                cfg[column_name].setdefault(key, default_value)
+        return cfg
+
+    def __format_chuck_mount_vec(self, cfg, column_name, key):
+        values = cfg.get(column_name, {}).get(key, [0.0, 0.0, 0.0])
+        return ", ".join(f"{float(v):.6g}" for v in values)
+
+    def __parse_chuck_mount_vec(self, widget_name):
+        text = getattr(self, widget_name).text().strip()
+        values = [item.strip() for item in text.replace(";", ",").split(",") if item.strip()]
+        if len(values) != 3:
+            raise ValueError(f"{widget_name} must have 3 values: x,y,z")
+        return [float(value) for value in values]
+
+    def __chuck_mount_cfg_from_ui(self):
+        cfg = self.__load_viewer_chuck_mount_cfg()
+        cfg.setdefault("f_column", {})
+        cfg.setdefault("m_column", {})
+        cfg["f_column"]["center_offset"] = self.__parse_chuck_mount_vec("edit_f_chuck_offset")
+        cfg["f_column"]["axis"] = self.__parse_chuck_mount_vec("edit_f_chuck_axis")
+        cfg["m_column"]["center_offset"] = self.__parse_chuck_mount_vec("edit_m_chuck_offset")
+        cfg["m_column"]["axis"] = self.__parse_chuck_mount_vec("edit_m_chuck_axis")
+        return cfg
+
+    def __apply_chuck_mount_cfg(self, save=False):
+        chuck_cfg = self.__chuck_mount_cfg_from_ui()
+        if save:
+            viewer_cfg = self.__load_viewer_config()
+            viewer_cfg["chuck_mount"] = chuck_cfg
+            path = self.__viewer_cfg_path()
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(viewer_cfg, f, indent=4)
+                f.write("\n")
+            self.__console.info(f"Saved chuck mount cfg: {path}")
+        if self.zapi:
+            self.zapi._ZAPI_request_set_chuck_mount_config(chuck_cfg)
+        return chuck_cfg
 
     def __on_btn_pick_inspection_point_clicked(self):
         try:
@@ -693,15 +1009,64 @@ class AppWindow(QMainWindow):
             self.__console.error(f"Error requesting inspection point pick: {e}")
             self.__set_path_plan_status(f"[!] {e}")
 
-    def __on_btn_pick_chuck_mount_points_clicked(self):
+    def __on_btn_align_f_column_clicked(self):
         try:
             if not self.zapi:
                 self.__set_path_plan_status("[!] ZAPI not available")
                 return
-            self.zapi._ZAPI_request_pick_chuck_mount_points(True, clear=True)
-            self.__set_path_plan_status("Chuck pick mode: click fixed-side, then moving-side")
+            self.zapi._ZAPI_request_pick_chuck_mount_points(
+                True, clear=True, align_on_pick=True, align_target="f")
+            self.__set_path_plan_status("Align F: click pipe point for f-column")
         except Exception as e:
-            self.__console.error(f"Error requesting chuck mount point pick: {e}")
+            self.__console.error(f"Error requesting f-column align pick: {e}")
+            self.__set_path_plan_status(f"[!] {e}")
+
+    def __on_btn_align_m_column_clicked(self):
+        try:
+            if not self.zapi:
+                self.__set_path_plan_status("[!] ZAPI not available")
+                return
+            self.zapi._ZAPI_request_pick_chuck_mount_points(
+                True, clear=True, align_on_pick=True, align_target="m")
+            self.__set_path_plan_status("Align M: click pipe point for m-column")
+        except Exception as e:
+            self.__console.error(f"Error requesting m-column align pick: {e}")
+            self.__set_path_plan_status(f"[!] {e}")
+
+    def __on_btn_fix_chuck_mount_clicked(self):
+        try:
+            self.__set_spool_fix_checks(True, True)
+            if self.zapi:
+                self.zapi._ZAPI_request_set_spool_fixation(True, True)
+            self.__set_path_plan_status("Mount fixed: R/Z axes drive pipe")
+        except Exception as e:
+            self.__console.error(f"Error fixing chuck mount: {e}")
+            self.__set_path_plan_status(f"[!] {e}")
+
+    def __on_btn_release_chuck_mount_clicked(self):
+        try:
+            self.__set_spool_fix_checks(False, False)
+            if self.zapi:
+                self.zapi._ZAPI_request_set_spool_fixation(False, False)
+            self.__set_path_plan_status("Mount released")
+        except Exception as e:
+            self.__console.error(f"Error releasing chuck mount: {e}")
+            self.__set_path_plan_status(f"[!] {e}")
+
+    def __on_btn_apply_chuck_mount_cfg_clicked(self):
+        try:
+            self.__apply_chuck_mount_cfg(save=False)
+            self.__set_path_plan_status("Chuck mount cfg applied")
+        except Exception as e:
+            self.__console.error(f"Error applying chuck mount cfg: {e}")
+            self.__set_path_plan_status(f"[!] {e}")
+
+    def __on_btn_save_chuck_mount_cfg_clicked(self):
+        try:
+            self.__apply_chuck_mount_cfg(save=True)
+            self.__set_path_plan_status("Chuck mount cfg saved")
+        except Exception as e:
+            self.__console.error(f"Error saving chuck mount cfg: {e}")
             self.__set_path_plan_status(f"[!] {e}")
 
     def __on_btn_determine_ef_pose_clicked(self):
@@ -715,19 +1080,40 @@ class AppWindow(QMainWindow):
             self.__console.error(f"Error requesting EF pose determination: {e}")
             self.__set_path_plan_status(f"[!] {e}")
 
+    def __on_btn_check_inspection_ik_clicked(self):
+        try:
+            if not self.zapi:
+                self.__set_path_plan_status("[!] ZAPI not available")
+                return
+            planner = self.__current_planner_module_name()
+            ik_solver, ik_normalize = self.__current_ik_request_options()
+            self.zapi._ZAPI_request_check_ef_pose_ik(
+                planner=planner,
+                step_size=0.08,
+                max_iter=3000,
+                max_workers=2,
+                ik_solver=ik_solver,
+                ik_normalize=ik_normalize)
+            self.__set_path_plan_status(f"EF pose IK check requested: solver={ik_solver}, normalize={ik_normalize}")
+        except Exception as e:
+            self.__console.error(f"Error requesting inspection IK check: {e}")
+            self.__set_path_plan_status(f"[!] {e}")
+
     def __on_btn_plan_inspection_path_clicked(self):
         try:
             if not self.zapi:
                 self.__set_path_plan_status("[!] ZAPI not available")
                 return
             planner = self.__current_planner_module_name()
-            robot = self.__current_path_robot_name()
-            self.zapi._ZAPI_request_plan_inspection_path(
+            ik_solver, ik_normalize = self.__current_ik_request_options()
+            self.zapi._ZAPI_request_plan_ef_pose_paths(
                 planner=planner,
-                robot=robot,
                 step_size=0.08,
-                max_iter=3000)
-            self.__set_path_plan_status(f"Planning requested: {planner}, {robot}")
+                max_iter=3000,
+                max_workers=2,
+                ik_solver=ik_solver,
+                ik_normalize=ik_normalize)
+            self.__set_path_plan_status(f"EF pose path planning requested: {planner}, solver={ik_solver}, normalize={ik_normalize}")
         except Exception as e:
             self.__console.error(f"Error requesting inspection path plan: {e}")
             self.__set_path_plan_status(f"[!] {e}")
@@ -855,6 +1241,21 @@ class AppWindow(QMainWindow):
                 except json.JSONDecodeError:
                     pass
 
+            if topic == "update_positioner_pose":
+                try:
+                    pose = json.loads(msg)
+                    self.__set_positioner_pose_to_ui(pose)
+                    self.__console.info(f"Updated positioner pose from viewer: {pose}")
+                except Exception:
+                    pass
+
+            if topic == "update_robot_joint_state":
+                try:
+                    state = json.loads(msg)
+                    self.__set_robot_joint_state_to_ui(state)
+                except Exception:
+                    pass
+
             if topic == "update_inspection_point":
                 try:
                     point = json.loads(msg)
@@ -870,10 +1271,26 @@ class AppWindow(QMainWindow):
                 try:
                     result = json.loads(msg)
                     status = result.get("status", "unknown")
-                    if status == "success":
-                        self.__set_path_plan_status(
-                            f"Path OK: {result.get('waypoints', 0)} wp, "
-                            f"{float(result.get('elapsed', 0.0)):.2f}s")
+                    if status in ("success", "partial"):
+                        mode = result.get("mode")
+                        robots = result.get("robots")
+                        if isinstance(robots, dict) and robots:
+                            summary = ", ".join(
+                                f"{name}:{info.get('ik_result', {}).get('success', False)}"
+                                if mode == "ik_check"
+                                else f"{name}:{int(info.get('waypoints', 0))}wp/{float(info.get('elapsed', 0.0)):.2f}s"
+                                for name, info in robots.items())
+                            if mode == "ik_check":
+                                prefix = "IK OK" if status == "success" else "IK partial"
+                            else:
+                                prefix = "Paths OK" if status == "success" else "Paths partial"
+                            wall_elapsed = result.get("wall_elapsed", result.get("elapsed", 0.0))
+                            self.__set_path_plan_status(
+                                f"{prefix}: {summary} | wall {float(wall_elapsed):.2f}s")
+                        else:
+                            self.__set_path_plan_status(
+                                f"Path OK: {result.get('waypoints', 0)} wp, "
+                                f"{float(result.get('elapsed', 0.0)):.2f}s")
                     else:
                         self.__set_path_plan_status(f"Path failed: {result.get('message', status)}")
                 except Exception:
@@ -893,8 +1310,30 @@ class AppWindow(QMainWindow):
                             "Chuck points selected: "
                             f"F({float(p0[0]):.3f},{float(p0[1]):.3f},{float(p0[2]):.3f}) "
                             f"M({float(p1[0]):.3f},{float(p1[1]):.3f},{float(p1[2]):.3f})")
-                    else:
-                        self.__set_path_plan_status("Chuck point selection incomplete")
+                except Exception:
+                    pass
+
+            if topic == "update_chuck_mount_profile":
+                try:
+                    profile = json.loads(msg)
+                    target = str(profile.get("target", "chuck"))
+                    center = profile.get("center", [0.0, 0.0, 0.0])
+                    axis = profile.get("axis", [0.0, 0.0, 0.0])
+                    radius = float(profile.get("radius", 0.0))
+                    text = (
+                        f"{target} cylinder | "
+                        f"C=({float(center[0]):.4f}, {float(center[1]):.4f}, {float(center[2]):.4f}) "
+                        f"A=({float(axis[0]):.4f}, {float(axis[1]):.4f}, {float(axis[2]):.4f}) "
+                        f"R={radius:.5f}"
+                    )
+                    if "center_error" in profile or "axis_error_deg" in profile:
+                        text += (
+                            f" | errC={float(profile.get('center_error', 0.0)):.5f}, "
+                            f"errA={float(profile.get('axis_error_deg', 0.0)):.2f}deg"
+                        )
+                    if hasattr(self, 'label_chuck_mount_profile'):
+                        self.label_chuck_mount_profile.setText(text)
+                    self.__set_path_plan_status(text)
                 except Exception:
                     pass
 
@@ -904,9 +1343,12 @@ class AppWindow(QMainWindow):
                     status = result.get("status", "unknown")
                     if status == "success":
                         count = len(result.get("poses", {}))
-                        self.__set_path_plan_status(f"EF pose ready: {count} pose(s)")
+                        self.__set_path_plan_status(
+                            f"EF pose ready: {count} pose(s), {float(result.get('elapsed', 0.0)):.2f}s")
                     else:
-                        self.__set_path_plan_status(f"EF pose failed: {result.get('message', status)}")
+                        self.__set_path_plan_status(
+                            f"EF pose failed: {result.get('message', status)} "
+                            f"({float(result.get('elapsed', 0.0)):.2f}s)")
                 except Exception:
                     pass
 
@@ -1045,6 +1487,37 @@ class AppWindow(QMainWindow):
         if e is not None:
             e.setText(f"{value * res:.3f}")
 
+    def __set_robot_joint_state_to_ui(self, state):
+        robots = state.get("robots", {}) if isinstance(state, dict) else {}
+        if not isinstance(robots, dict):
+            return
+
+        def apply_table(robot_name, table):
+            joints = robots.get(robot_name)
+            if not isinstance(joints, dict):
+                return
+            import math
+            for slider_name, edit_name, joint_name, kind, lo, hi in table:
+                if joint_name not in joints:
+                    continue
+                raw_value = float(joints[joint_name])
+                ui_value = math.degrees(raw_value) if kind == 'rot' else raw_value
+                ui_value = max(float(lo), min(float(ui_value), float(hi)))
+                res = self._ROT_RES if kind == 'rot' else self._LIN_RES
+                slider = getattr(self, slider_name, None)
+                edit = getattr(self, edit_name, None)
+                if slider is not None:
+                    blocked = slider.blockSignals(True)
+                    slider.setValue(int(round(ui_value / res)))
+                    slider.blockSignals(blocked)
+                if edit is not None:
+                    blocked = edit.blockSignals(True)
+                    edit.setText(f"{ui_value:.3f}")
+                    edit.blockSignals(blocked)
+
+        apply_table(self._SOURCE_ROBOT, self._SOURCE_JOINTS)
+        apply_table(self._DDA_ROBOT, self._DDA_JOINTS)
+
     def __manip_edit_changed(self, edit_name, slider_name, res, lo, hi):
         e = getattr(self, edit_name, None); s = getattr(self, slider_name, None)
         if e is None or s is None:
@@ -1085,6 +1558,12 @@ class AppWindow(QMainWindow):
         if self.zapi:
             self.zapi._ZAPI_request_stop_manipulator(robot, None)   # 해당 로봇 전체 정지
 
+    def __reset_robot_base_pose(self, robot=None):
+        if not self.zapi:
+            return
+        self.zapi._ZAPI_request_reset_robot_base_pose(robot)
+        self.__console.info(f"Robot base pose reset requested: {robot or 'all'}")
+
     def __save_positioner_json(self, geom_path):
         """저장한 지오메트리 옆에 포지셔너/스풀 자세를 <name>.json 으로 기록."""
         try:
@@ -1113,6 +1592,11 @@ class AppWindow(QMainWindow):
             },
             "fix_f_column_r": bool(fix_f),
             "fix_m_column_z": bool(fix_z),
+            "fixation": {
+                "fixed": bool(fix_f or fix_z),
+                "fix_f_column_r": bool(fix_f),
+                "fix_m_column_z": bool(fix_z),
+            },
         }
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=4)

@@ -810,6 +810,19 @@ QProgressBar::chunk {
       <string>Move</string>
      </property>
     </widget>
+    <widget class="QPushButton" name="btn_robot_source_base">
+     <property name="geometry">
+      <rect>
+       <x>200</x>
+       <y>320</y>
+       <width>76</width>
+       <height>36</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Base</string>
+     </property>
+    </widget>
     <widget class="QPushButton" name="btn_robot_source_stop">
      <property name="geometry">
       <rect>
@@ -1669,45 +1682,6 @@ QProgressBar::chunk {
      </property>
     </widget>
    </widget>
-   <widget class="QGroupBox" name="groupBox_spool_fix">
-    <property name="geometry">
-      <rect>
-      <x>355</x>
-      <y>205</y>
-      <width>521</width>
-      <height>75</height>
-     </rect>
-    </property>
-    <property name="title">
-     <string>Spool Fixation</string>
-    </property>
-    <widget class="QCheckBox" name="chk_spool_fix_f_column_r">
-     <property name="geometry">
-      <rect>
-       <x>10</x>
-       <y>28</y>
-       <width>240</width>
-       <height>22</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>Fix to F-Column R (rotation)</string>
-     </property>
-    </widget>
-    <widget class="QCheckBox" name="chk_spool_fix_m_column_z">
-     <property name="geometry">
-      <rect>
-       <x>265</x>
-       <y>28</y>
-       <width>240</width>
-       <height>22</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>Fix to M-Column Z</string>
-     </property>
-    </widget>
-   </widget>
    <!-- <widget class="QGroupBox" name="groupBox_pcd_processing">
     <property name="geometry"><rect><x>355</x><y>283</y><width>521</width><height>148</height></rect></property>
     <property name="title"><string>PCD Processing (loaded spool)</string></property>
@@ -2198,6 +2172,19 @@ QProgressBar::chunk {
      </property>
      <property name="text">
       <string>Move</string>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="btn_robot_dda_base">
+     <property name="geometry">
+      <rect>
+       <x>200</x>
+       <y>320</y>
+       <width>76</width>
+       <height>36</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Base</string>
      </property>
     </widget>
     <widget class="QPushButton" name="btn_robot_dda_stop">

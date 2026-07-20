@@ -35,6 +35,58 @@ class EndEffectorPoseOptimizer:
     def __init__(self, debug_mode: bool = False):
         self.__is_debug_mode = debug_mode
         self.debuging_info = {}
+        self.__dda_pipe_facing_axis = np.asarray([1.0, 0.0, 0.0], dtype=float)
+        self.__dda_pipe_parallel_axis = np.asarray([0.0, 1.0, 0.0], dtype=float)
+        self.__rt_pipe_facing_axis = np.asarray([0.0, -1.0, 0.0], dtype=float)
+        self.__collision_checker = None
+
+    @staticmethod
+    def __normalized_config_axis(
+        axis: tuple[float, float, float] | list[float] | np.ndarray,
+        name: str,
+    ) -> np.ndarray:
+        axis_arr = np.asarray(axis, dtype=float).reshape(-1)
+        if axis_arr.shape[0] != 3:
+            raise ValueError(f"{name} must have 3 values, got shape={axis_arr.shape}")
+        axis_norm = float(np.linalg.norm(axis_arr))
+        if axis_norm < 1e-9:
+            raise ValueError(f"{name} must be non-zero")
+        return axis_arr / axis_norm
+
+    def set_dda_pipe_facing_axis(
+        self,
+        axis: tuple[float, float, float] | list[float] | np.ndarray,
+        pipe_parallel_axis: tuple[float, float, float] | list[float] | np.ndarray | None = None,
+    ):
+        self.__dda_pipe_facing_axis = self.__normalized_config_axis(axis, "dda pipe facing axis")
+        if pipe_parallel_axis is not None:
+            parallel_axis = self.__normalized_config_axis(pipe_parallel_axis, "dda pipe parallel axis")
+            if abs(float(np.dot(self.__dda_pipe_facing_axis, parallel_axis))) > 0.98:
+                raise ValueError("dda pipe facing axis and pipe parallel axis must not be parallel")
+            self.__dda_pipe_parallel_axis = parallel_axis
+
+    def set_rt_pipe_facing_axis(self, axis: tuple[float, float, float] | list[float] | np.ndarray):
+        self.__rt_pipe_facing_axis = self.__normalized_config_axis(axis, "rt pipe facing axis")
+
+    def set_collision_checker(self, checker):
+        """Register an external mesh-vs-point-cloud collision checker."""
+        self.__collision_checker = checker
+
+    def set_DDA_geometry(
+        self,
+        link_mesh: o3d.geometry.TriangleMesh,
+        tcp_to_link_transform: np.ndarray,
+    ):
+        self.__dda_mesh = copy.deepcopy(link_mesh)
+        self.__dda_invers_transform_mat = self.__offset_to_transform(tcp_to_link_transform)
+
+    def set_RT_geometry(
+        self,
+        link_mesh: o3d.geometry.TriangleMesh,
+        tcp_to_link_transform: np.ndarray,
+    ):
+        self.__rt_mesh = copy.deepcopy(link_mesh)
+        self.__rt_invers_transform_mat = self.__offset_to_transform(tcp_to_link_transform)
 
     def load_scan_data(
         self,
@@ -106,28 +158,37 @@ class EndEffectorPoseOptimizer:
     def load_DDA_from_urdf(
         self,
         file_path: str,
+        end_link_name: str = "dda_link_end",
+        tcp_joint_name: str | tuple[str, ...] = "dda_joint_tcp",
+        pose_to_link_offset: np.ndarray | dict[str, Any] | None = None,
     ):
         self.__dda_mesh, self.__dda_invers_transform_mat = self.__extract_tcp_and_end(
             file_path,
-            "dda_link_end",
-            "dda_joint_tcp",
+            end_link_name,
+            tcp_joint_name,
+            pose_to_link_offset,
         )
 
     def load_RT_from_urdf(
         self,
         file_path: str,
+        end_link_name: str = "rt_link_end",
+        tcp_joint_name: str | tuple[str, ...] = "rt_joint_end",
+        pose_to_link_offset: np.ndarray | dict[str, Any] | None = None,
     ):
         self.__rt_mesh, self.__rt_invers_transform_mat = self.__extract_tcp_and_end(
             file_path,
-            "rt_link_end",
-            "rt_joint_tcp",
+            end_link_name,
+            tcp_joint_name,
+            pose_to_link_offset,
         )
 
     def __extract_tcp_and_end(
         self,
         file_path: str,
         end_link_name: str,
-        tcp_joint_name: str,
+        tcp_joint_name: str | tuple[str, ...],
+        pose_to_link_offset: np.ndarray | dict[str, Any] | None = None,
     ):
         # urdf 파일 로드---------------------------------------------------------
         urdf: URDF = URDF.from_xml_file(file_path)
@@ -163,19 +224,90 @@ class EndEffectorPoseOptimizer:
         T[:3, 3] = end_pose_xyz
         link_mesh = link_mesh.transform(T)  # type: ignore
 
+        if pose_to_link_offset is not None:
+            return link_mesh, self.__offset_to_transform(pose_to_link_offset)
+
         # tcp와 엔드이펙터 형상 위치관계 정보 추출-----------------------------------
         # end to tcp 정보 추출
-        end_to_tcp_relative_pose_xyz = urdf.joint_map[tcp_joint_name].origin.xyz
-        end_to_tcp_relative_pose_rpy = urdf.joint_map[tcp_joint_name].origin.rpy
+        tcp_joint_names = (tcp_joint_name,) if isinstance(tcp_joint_name, str) else tcp_joint_name
+        tcp_joint = None
+        for candidate_name in tcp_joint_names:
+            tcp_joint = urdf.joint_map.get(candidate_name)
+            if tcp_joint is not None:
+                break
+        if tcp_joint is None:
+            raise KeyError(f"TCP joint not found. candidates={tcp_joint_names}")
+
+        end_to_tcp_relative_pose_xyz = tcp_joint.origin.xyz
+        end_to_tcp_relative_pose_rpy = tcp_joint.origin.rpy
 
         # tcp to end 변환 행렬 계산
-        end_to_tcp_relative_pose_T = np.eye(4)
-        end_to_tcp_relative_pose_T[:3, :3] = R.from_euler("xyz", end_to_tcp_relative_pose_rpy).as_matrix()
-        end_to_tcp_relative_pose_T[:3, 3] = end_to_tcp_relative_pose_xyz
+        direct_end_to_tcp_T = np.eye(4)
+        direct_end_to_tcp_T[:3, :3] = R.from_euler("xyz", end_to_tcp_relative_pose_rpy).as_matrix()
+        direct_end_to_tcp_T[:3, 3] = end_to_tcp_relative_pose_xyz
+        end_to_tcp_relative_pose_T = self.__relative_link_transform(
+            urdf,
+            end_link_name,
+            tcp_joint.child,
+            fallback_T=direct_end_to_tcp_T,
+        )
         tcp_to_origin_mat = np.linalg.inv(end_to_tcp_relative_pose_T)
 
         # ----------------------------------------------------------------------
         return link_mesh, tcp_to_origin_mat
+
+    @staticmethod
+    def __offset_to_transform(offset: np.ndarray | dict[str, Any]) -> np.ndarray:
+        if isinstance(offset, dict):
+            if "matrix" in offset:
+                T = np.asarray(offset["matrix"], dtype=float)
+            else:
+                xyz = np.asarray(offset.get("xyz", [0.0, 0.0, 0.0]), dtype=float)
+                rpy = np.asarray(offset.get("rpy", [0.0, 0.0, 0.0]), dtype=float)
+                T = np.eye(4)
+                T[:3, :3] = R.from_euler("xyz", rpy).as_matrix()
+                T[:3, 3] = xyz
+        else:
+            T = np.asarray(offset, dtype=float)
+        if T.shape != (4, 4):
+            raise ValueError(f"pose_to_link_offset must be 4x4, got shape={T.shape}")
+        return T.astype(float, copy=True)
+
+    @staticmethod
+    def __joint_origin_T(joint) -> np.ndarray:
+        T = np.eye(4)
+        origin = getattr(joint, "origin", None)
+        if origin is not None:
+            T[:3, :3] = R.from_euler("xyz", origin.rpy).as_matrix()
+            T[:3, 3] = origin.xyz
+        return T
+
+    @classmethod
+    def __relative_link_transform(
+        cls,
+        urdf: URDF,
+        source_link_name: str,
+        target_link_name: str,
+        fallback_T: np.ndarray,
+    ) -> np.ndarray:
+        child_to_joint = {joint.child: joint for joint in urdf.joints}
+        cache: dict[str, np.ndarray] = {}
+
+        def root_to_link(link_name: str) -> np.ndarray:
+            if link_name in cache:
+                return cache[link_name]
+            joint = child_to_joint.get(link_name)
+            if joint is None:
+                cache[link_name] = np.eye(4)
+                return cache[link_name]
+            T = root_to_link(joint.parent) @ cls.__joint_origin_T(joint)
+            cache[link_name] = T
+            return T
+
+        try:
+            return np.linalg.inv(root_to_link(source_link_name)) @ root_to_link(target_link_name)
+        except Exception:
+            return fallback_T
 
     def calculate_DDA_pose_for_detecting_welding_point(
         self,
@@ -204,9 +336,13 @@ class EndEffectorPoseOptimizer:
                 - all candidates array: 모든 자세 후보들
         """
         # DDA 자세 후보 생성------------------------------------------------------
+        candidate_radius = self.__dda_candidate_centerline_radius(
+            distance,
+            self.__dda_mesh if distance_reference_mesh is None else distance_reference_mesh,
+        )
         dda_tcp_pose_candidates = self.__calculate_dda_pose_candidate(
             np.asarray(target_point),
-            self.__pipe_radius + distance,
+            candidate_radius,
             num_candidates,
         )
 
@@ -296,7 +432,7 @@ class EndEffectorPoseOptimizer:
         """주어진 DDA 자세와 각도에 대해 RT 자세 계산.
 
         RT 자세 조건:
-            - RT source의 -Z축이 DDA TCP와 배관을 향함
+            - RT source의 -Y축이 DDA TCP와 배관을 향함
             - DDA TCP와 RT TCP 간 거리는 distance_from_dda_to_rt
             - DDA에서 RT로 향하는 방향은 DDA X축을 DDA Z축 기준으로 angle_deg만큼 회전한 방향
             - RT TCP의 Y축은 DDA Z축과 같게 두어 같은 배관 단면 기준을 공유함
@@ -322,6 +458,8 @@ class EndEffectorPoseOptimizer:
         dda_x_axis = dda_rot_matrix[:, 0]  # DDA TCP X축
         dda_y_axis = dda_rot_matrix[:, 1]  # DDA TCP Y축
         dda_z_axis = dda_rot_matrix[:, 2]  # DDA TCP Z축
+        dda_pipe_facing_axis = dda_rot_matrix @ self.__dda_pipe_facing_axis
+        dda_pipe_facing_axis = dda_pipe_facing_axis / np.linalg.norm(dda_pipe_facing_axis)
 
         # [DEBUG] DDA 좌표계 축 출력
         if self.__is_debug_mode:
@@ -332,55 +470,62 @@ class EndEffectorPoseOptimizer:
         # DDA TCP의 Z축 단위 벡터 (XY 평면의 법선)
         dda_z_axis_unit = dda_z_axis / np.linalg.norm(dda_z_axis)
 
-        # 로드리게스 회전 공식으로 DDA X축을 DDA Z축 주위로 angle_deg만큼 회전
+        # Rotate the configured DDA pipe-facing axis instead of hard-coded DDA +X.
         # 이 회전된 방향이 RT가 배치될 방향 (DDA에서 RT로 향하는 방향)
         cos_angle = np.cos(np.radians(angle_deg))
         sin_angle = np.sin(np.radians(angle_deg))
 
-        k_cross_v = np.cross(dda_z_axis_unit, dda_x_axis)
-        k_dot_v   = np.dot(dda_z_axis_unit, dda_x_axis)
+        k_cross_v = np.cross(dda_z_axis_unit, dda_pipe_facing_axis)
+        k_dot_v = np.dot(dda_z_axis_unit, dda_pipe_facing_axis)
 
-        # DDA에서 RT로 향하는 방향 (DDA X축을 angle_deg만큼 회전)
-        dda_to_rt_direction = dda_x_axis * cos_angle + k_cross_v * sin_angle + dda_z_axis_unit * k_dot_v * (1 - cos_angle)
+        # DDA에서 RT로 향하는 방향 (DDA pipe-facing axis를 angle_deg만큼 회전)
+        dda_to_rt_direction = (
+            dda_pipe_facing_axis * cos_angle
+            + k_cross_v * sin_angle
+            + dda_z_axis_unit * k_dot_v * (1 - cos_angle)
+        )
 
         # [DEBUG] DDA to RT 방향 출력
         if self.__is_debug_mode:
             print(f"  - dda_to_rt_direction: {dda_to_rt_direction}, norm: {np.linalg.norm(dda_to_rt_direction)}")
+            print(f"  - dda_pipe_facing_axis(world): {dda_pipe_facing_axis}")
 
         # RT TCP 위치: DDA TCP에서 회전된 방향으로 distance_from_dda_to_rt만큼 떨어진 위치
-        rt_position = dda_tcp_pose[:3] + dda_to_rt_direction * distance_from_dda_to_rt
+        rt_front_extent = self.__rt_candidate_origin_distance_offset()
+        adjusted_distance_from_dda_to_rt = float(distance_from_dda_to_rt + rt_front_extent)
+        # Push RT pose origin out so the source mesh front, not the origin, satisfies clearance.
+        rt_position = dda_tcp_pose[:3] + dda_to_rt_direction * adjusted_distance_from_dda_to_rt
+        if self.__is_debug_mode:
+            self.debuging_info["rt_mesh_front_extent_along_facing_axis"] = float(rt_front_extent)
+            self.debuging_info["rt_adjusted_distance_from_dda_to_rt"] = adjusted_distance_from_dda_to_rt
 
-        # RT TCP 방향 계산
-        # RT source는 -Z축 방향으로 배관/DDA를 바라본다.
-        # 따라서 RT +Z축은 DDA에서 RT로 향하는 방향과   같아진다.
-        rt_z_axis = dda_to_rt_direction
-        rt_z_axis = rt_z_axis / np.linalg.norm(rt_z_axis)
-
-        # RT TCP Y축은 DDA Z축과 동일하게 두어 같은 배관 단면 기준을 공유한다.
-        rt_y_axis = dda_z_axis_unit
-        rt_y_axis = rt_y_axis / np.linalg.norm(rt_y_axis)
-
-        # 오른손 좌표계가 되도록 X축을 보완한다. x cross y = z.
-        rt_x_axis = np.cross(rt_y_axis, rt_z_axis)
-        rt_x_axis = rt_x_axis / np.linalg.norm(rt_x_axis)
+        # RT local axis chosen in config points from the RT pose origin toward the pipe.
+        rt_rot_matrix = self.__rotation_from_pipe_facing_axis(
+            pipe_facing_world=-dda_to_rt_direction,
+            world_up_hint=dda_z_axis_unit,
+            local_pipe_facing_axis=self.__rt_pipe_facing_axis,
+        )
+        rt_x_axis = rt_rot_matrix[:, 0]
+        rt_y_axis = rt_rot_matrix[:, 1]
+        rt_z_axis = rt_rot_matrix[:, 2]
 
         # [DEBUG] RT X축 출력
         if self.__is_debug_mode:
             print(f"  - rt_x_axis: {rt_x_axis}, norm: {np.linalg.norm(rt_x_axis)}")
+            print(f"  - rt_pipe_facing_axis(local): {self.__rt_pipe_facing_axis}")
 
         # [DEBUG] RT Y, Z 축 출력 및 직교 여부 확인
         if self.__is_debug_mode:
             dot_xy = np.dot(rt_x_axis, rt_y_axis)
             dot_xz = np.dot(rt_x_axis, rt_z_axis)
             dot_yz = np.dot(rt_y_axis, rt_z_axis)
+            dot_dda_y_rt_y = np.dot(dda_y_axis, rt_y_axis)
             print(f"  - rt_y_axis: {rt_y_axis}, norm: {np.linalg.norm(rt_y_axis)}")
             print(f"  - rt_z_axis: {rt_z_axis}, norm: {np.linalg.norm(rt_z_axis)}")
             print(f"  - dot(rt_x, rt_y): {dot_xy} (0에 가까워야 직교)")
             print(f"  - dot(rt_x, rt_z): {dot_xz} (0에 가까워야 직교)")
             print(f"  - dot(rt_y, rt_z): {dot_yz} (0에 가까워야 직교)")
-
-        # RT TCP 회전 행렬 생성
-        rt_rot_matrix = np.column_stack([rt_x_axis, rt_y_axis, rt_z_axis])
+            print(f"  - dot(dda_y, rt_y): {dot_dda_y_rt_y} (±1이면 평행)")
 
         # 회전 행렬의 유효성 검사
         det = np.linalg.det(rt_rot_matrix)
@@ -407,6 +552,61 @@ class EndEffectorPoseOptimizer:
         # RT TCP 자세 [x, y, z, roll, pitch, yaw]
         return np.hstack([rt_position, rt_rpy])
 
+    @staticmethod
+    def __orthogonal_reference_axis(axis: np.ndarray) -> np.ndarray:
+        candidates = (
+            np.asarray([0.0, 0.0, 1.0], dtype=float),
+            np.asarray([0.0, 1.0, 0.0], dtype=float),
+            np.asarray([1.0, 0.0, 0.0], dtype=float),
+        )
+        axis = axis / np.linalg.norm(axis)
+        return min(candidates, key=lambda candidate: abs(float(np.dot(axis, candidate))))
+
+    @classmethod
+    def __basis_from_facing_and_up(cls, facing_axis: np.ndarray, up_hint: np.ndarray) -> np.ndarray:
+        facing_axis = np.asarray(facing_axis, dtype=float)
+        facing_axis = facing_axis / np.linalg.norm(facing_axis)
+        up_hint = np.asarray(up_hint, dtype=float)
+        up_hint = up_hint / np.linalg.norm(up_hint)
+        up_axis = up_hint - facing_axis * float(np.dot(up_hint, facing_axis))
+        if np.linalg.norm(up_axis) < 1e-9:
+            up_hint = cls.__orthogonal_reference_axis(facing_axis)
+            up_axis = up_hint - facing_axis * float(np.dot(up_hint, facing_axis))
+        up_axis = up_axis / np.linalg.norm(up_axis)
+        side_axis = np.cross(up_axis, facing_axis)
+        side_axis = side_axis / np.linalg.norm(side_axis)
+        return np.column_stack([side_axis, up_axis, facing_axis])
+
+    @classmethod
+    def __rotation_from_pipe_facing_axis(
+        cls,
+        pipe_facing_world: np.ndarray,
+        world_up_hint: np.ndarray,
+        local_pipe_facing_axis: np.ndarray,
+        local_reference_axis: np.ndarray | None = None,
+    ) -> np.ndarray:
+        pipe_facing_world = np.asarray(pipe_facing_world, dtype=float)
+        local_pipe_facing_axis = np.asarray(local_pipe_facing_axis, dtype=float)
+        local_up_hint = (
+            np.asarray([0.0, 0.0, 1.0], dtype=float)
+            if local_reference_axis is None
+            else np.asarray(local_reference_axis, dtype=float)
+        )
+        local_axis_unit = local_pipe_facing_axis / np.linalg.norm(local_pipe_facing_axis)
+        if np.linalg.norm(local_up_hint) < 1e-9:
+            local_up_hint = cls.__orthogonal_reference_axis(local_axis_unit)
+        local_up_hint = local_up_hint / np.linalg.norm(local_up_hint)
+        if abs(float(np.dot(local_axis_unit, local_up_hint))) > 0.98:
+            local_up_hint = cls.__orthogonal_reference_axis(local_axis_unit)
+
+        local_basis = cls.__basis_from_facing_and_up(local_axis_unit, local_up_hint)
+        world_basis = cls.__basis_from_facing_and_up(pipe_facing_world, world_up_hint)
+        rot_matrix = world_basis @ local_basis.T
+        if np.linalg.det(rot_matrix) < 0:
+            world_basis[:, 0] *= -1.0
+            rot_matrix = world_basis @ local_basis.T
+        return rot_matrix
+
     def calculate_DDA_RT_pose_for_taking_xray(
         self,
         target_point: tuple[float, float, float] | np.ndarray,
@@ -426,7 +626,7 @@ class EndEffectorPoseOptimizer:
             - 원본 자세(0도)와 배관 중심축 기준 90도 회전 자세 모두 검사
 
         RT 자세 후보 조건:
-            - RT source의 -Z축이 DDA TCP와 배관을 향함
+            - RT source의 -Y축이 DDA TCP와 배관을 향함
             - DDA TCP와 RT TCP 간 거리는 distance_from_dda_to_rt
             - DDA에서 RT로 향하는 방향은 DDA X축을 DDA Z축 기준으로 ±angle_of_rt만큼 회전한 방향
             - RT TCP의 Y축은 DDA Z축과 같게 두어 같은 배관 단면 기준을 공유함
@@ -448,9 +648,13 @@ class EndEffectorPoseOptimizer:
             self.debuging_info = {}
 
         # DDA 자세 후보 생성------------------------------------------------------
+        candidate_radius = self.__dda_candidate_centerline_radius(
+            distance_from_dda_to_surface,
+            self.__dda_mesh if distance_reference_mesh is None else distance_reference_mesh,
+        )
         dda_base_candidates = self.__calculate_dda_pose_candidate(
             np.asarray(target_point),
-            self.__pipe_radius + distance_from_dda_to_surface,
+            candidate_radius,
             num_candidates,
         )
         dda_base_candidates = self.__adjust_dda_candidates_for_mesh_surface_distance(
@@ -464,6 +668,7 @@ class EndEffectorPoseOptimizer:
 
         # 배관과 충돌하지 않는 DDA 기본 자세만 필터링---------------------------------
         valid_base_dda_poses = []
+        base_dda_collision_count = 0
         for dda_pose in dda_base_candidates:
             is_collision = self.__check_collision(
                 self.__dda_mesh,
@@ -472,12 +677,16 @@ class EndEffectorPoseOptimizer:
             )
             if not is_collision:
                 valid_base_dda_poses.append(dda_pose)
+            else:
+                base_dda_collision_count += 1
 
         if self.__is_debug_mode:
             self.debuging_info["valid_base_dda_poses"] = valid_base_dda_poses
+            self.debuging_info["base_dda_collision_count"] = base_dda_collision_count
 
         # DDA-RT 자세 그룹 생성---------------------------------------------------
         pose_groups = []
+        rotated_dda_collision_count = 0
         collision_pose_groups = []  # 충돌하는 자세 그룹을 따로 저장
 
         for base_dda_pose in valid_base_dda_poses:
@@ -504,6 +713,8 @@ class EndEffectorPoseOptimizer:
                 )
                 if group_90_data:
                     group_data["90"] = group_90_data
+            else:
+                rotated_dda_collision_count += 1
 
             # "0"과 "90" 모두 유효할 때만 그룹에 추가, 그렇지 않으면 충돌 그룹에 추가
             if "0" in group_data and "90" in group_data:
@@ -517,6 +728,22 @@ class EndEffectorPoseOptimizer:
         # 디버그 모드일 때 충돌 그룹 정보 저장
         if self.__is_debug_mode:
             self.debuging_info["collision_pose_groups"] = collision_pose_groups
+            self.debuging_info["complete_pose_group_count"] = len(pose_groups)
+            self.debuging_info["partial_pose_group_count"] = len(collision_pose_groups)
+            self.debuging_info["rotated_dda_collision_count"] = rotated_dda_collision_count
+            rejected_groups = self.debuging_info.get("rejected_pose_groups", [])
+            self.debuging_info["rejected_pose_group_count"] = len(rejected_groups)
+            self.debuging_info["rt1_collision_count"] = sum(
+                1 for item in rejected_groups if item.get("rejected", {}).get("_rt1_collision", False)
+            )
+            self.debuging_info["rt2_collision_count"] = sum(
+                1 for item in rejected_groups if item.get("rejected", {}).get("_rt2_collision", False)
+            )
+
+        if not pose_groups and collision_pose_groups:
+            pose_groups = collision_pose_groups
+            if self.__is_debug_mode:
+                self.debuging_info["used_partial_pose_group_fallback"] = True
 
         # JSON 형태 출력 생성-----------------------------------------------------
         pose_groups_json = json.dumps(pose_groups)
@@ -553,9 +780,13 @@ class EndEffectorPoseOptimizer:
         if self.__is_debug_mode:
             self.debuging_info = {}
 
+        candidate_radius = self.__dda_candidate_centerline_radius(
+            distance_from_dda_to_surface,
+            self.__dda_mesh if distance_reference_mesh is None else distance_reference_mesh,
+        )
         dda_base_candidates = self.__calculate_dda_pose_candidate(
             np.asarray(target_point),
-            self.__pipe_radius + distance_from_dda_to_surface,
+            candidate_radius,
             num_candidates,
         )
         dda_base_candidates = self.__adjust_dda_candidates_for_mesh_surface_distance(
@@ -566,6 +797,7 @@ class EndEffectorPoseOptimizer:
 
         slot_results: list[dict[str, list[float]] | None] = []
         valid_base_dda_poses = []
+        base_dda_collision_count = 0
         valid_slot_indices = []
         invalid_slot_indices = []
 
@@ -687,9 +919,13 @@ class EndEffectorPoseOptimizer:
         num_candidates = int(round(360.0 / candidate_step_deg))
         step_deg = 360.0 / num_candidates  # 보정된 실제 step (정수 N 보장)
 
+        candidate_radius = self.__dda_candidate_centerline_radius(
+            distance_from_dda_to_surface,
+            self.__dda_mesh if distance_reference_mesh is None else distance_reference_mesh,
+        )
         dda_base_candidates = self.__calculate_dda_pose_candidate(
             np.asarray(target_point),
-            self.__pipe_radius + distance_from_dda_to_surface,
+            candidate_radius,
             num_candidates,
         )
 
@@ -867,6 +1103,15 @@ class EndEffectorPoseOptimizer:
         if "RT1" in result or "RT2" in result:
             return result
         else:
+            if self.__is_debug_mode:
+                rejected = {
+                    "DDA": dda_pose.tolist(),
+                    "RT1": rt1_pose.tolist(),
+                    "RT2": rt2_pose.tolist(),
+                    "_rt1_collision": bool(is_rt1_collision),
+                    "_rt2_collision": bool(is_rt2_collision),
+                }
+                self.debuging_info.setdefault("rejected_pose_groups", []).append({"rejected": rejected})
             return None
 
     def calculate_pipe_profile(
@@ -874,6 +1119,8 @@ class EndEffectorPoseOptimizer:
         target_point: tuple[float, float, float] | np.ndarray,  # x,y,z
         sampling_size_for_calculating_normal: float = 0.01,
         radius_offset_for_sampling_points_in_sphere: float = 0.003,
+        sampling_cylinder_radius: float = 0.005,
+        sampling_cylinder_height_range: tuple[float, float] = (-0.1, 0.3),
     ):
         """직배관의 프로파일(방향벡터, 중심점, 반지름) 계산하여 멤버변수에 저장.
 
@@ -924,8 +1171,8 @@ class EndEffectorPoseOptimizer:
             np.asarray(self._scan_data.points),
             target_point,
             normal_m * -1,  # 법선 벡터의 반대 방향
-            0.005,  # 배관 지름에 따라 조절 필요
-            (-0.1, 0.3),  # 배관 직경 및 브랜치 간 거리에 따라 조절 필요
+            sampling_cylinder_radius,  # 배관 지름에 따라 조절 필요
+            sampling_cylinder_height_range,  # 배관 직경 및 브랜치 간 거리에 따라 조절 필요
         )
 
         if self.__is_debug_mode:
@@ -933,8 +1180,8 @@ class EndEffectorPoseOptimizer:
             self.debuging_info["pipe_profile_sampling_cylinder"] = {
                 "start": target_point,
                 "axis": normal_m * -1,
-                "radius": 0.005,
-                "height_range": (-0.1, 0.3),
+                "radius": sampling_cylinder_radius,
+                "height_range": sampling_cylinder_height_range,
             }
 
         # 중앙 벡터에 투영 후 군집화
@@ -942,7 +1189,7 @@ class EndEffectorPoseOptimizer:
             points_in_cylinder,
             target_point,
             normal_m * -1,
-            0.005,  # 점군 밀도에 따라 조절 필요
+            sampling_cylinder_radius,  # 점군 밀도에 따라 조절 필요
         )
         self.debuging_info["pipe_profile_clusters"] = clusters
         self.debuging_info["pipe_profile_points_in_cylinder"] = points_in_cylinder
@@ -976,6 +1223,51 @@ class EndEffectorPoseOptimizer:
         self.__pipe_direction = direction
         self.__pipe_center = center
         self.__pipe_radius = radius
+
+    def __dda_candidate_centerline_radius(
+        self,
+        surface_clearance: float,
+        distance_reference_mesh: o3d.geometry.TriangleMesh | None = None,
+    ) -> float:
+        mesh = self.__dda_mesh if distance_reference_mesh is None else distance_reference_mesh
+        front_extent = self.__mesh_extent_along_local_axis(
+            mesh,
+            self.__dda_invers_transform_mat,
+            self.__dda_pipe_facing_axis,
+        )
+        candidate_radius = float(self.__pipe_radius + surface_clearance + front_extent)
+        if self.__is_debug_mode:
+            self.debuging_info["dda_mesh_front_extent_along_facing_axis"] = float(front_extent)
+            self.debuging_info["dda_candidate_centerline_radius"] = candidate_radius
+            self.debuging_info["dda_candidate_surface_clearance"] = float(surface_clearance)
+        return candidate_radius
+
+    def __rt_candidate_origin_distance_offset(self) -> float:
+        return self.__mesh_extent_along_local_axis(
+            self.__rt_mesh,
+            self.__rt_invers_transform_mat,
+            self.__rt_pipe_facing_axis,
+        )
+
+    @staticmethod
+    def __mesh_extent_along_local_axis(
+        link_model: o3d.geometry.TriangleMesh,
+        tcp_to_link_pose_T: np.ndarray,
+        local_axis: np.ndarray,
+    ) -> float:
+        points = np.asarray(link_model.vertices, dtype=float)
+        if len(points) == 0:
+            mesh_pcd = link_model.sample_points_uniformly(number_of_points=3000)
+            points = np.asarray(mesh_pcd.points, dtype=float)
+        if len(points) == 0:
+            return 0.0
+
+        T = np.asarray(tcp_to_link_pose_T, dtype=float)
+        points_in_pose_frame = (T[:3, :3] @ points.T).T + T[:3, 3]
+        axis = np.asarray(local_axis, dtype=float)
+        axis = axis / np.linalg.norm(axis)
+        projected = points_in_pose_frame @ axis
+        return max(0.0, float(np.max(projected)))
 
     def __calculate_dda_pose_candidate(
         self,
@@ -1025,25 +1317,33 @@ class EndEffectorPoseOptimizer:
         # 투영된 중심 주변 원형 궤도상 위치 계산
         positions = center + offsets * radius
 
-        # 방향 자세--------------------------------------------------------------
-        # y축 방향(배관 축과 평행)
-        y_unit = self.__pipe_direction / np.linalg.norm(self.__pipe_direction)
-        y_axis = np.tile(y_unit, (num_candidates, 1))
+        # Direction pose: configured DDA local axis faces the pipe center.
+        pipe_direction_unit = self.__pipe_direction / np.linalg.norm(self.__pipe_direction)
+        facing_axes = center - positions
+        facing_norm = np.linalg.norm(facing_axes, axis=1, keepdims=True)
+        facing_norm[facing_norm < 1e-12] = 1.0
+        facing_axes = facing_axes / facing_norm
 
-        # x축 방향(DDA TCP 위치에서 배관 중심을 바라보는 방향, 배관 방향과 수직)
-        x_axis = center - positions  # center는 배관 축 위의 투영된 중심점
-        x_norm = np.linalg.norm(x_axis, axis=1, keepdims=True)
-        x_norm[x_norm < 1e-12] = 1.0
-        x_axis = x_axis / x_norm
-
-        # z축 방향(x축과 y축에 의해 결정됨)
-        z_axis = np.cross(x_axis, y_axis)
-        z_norm = np.linalg.norm(z_axis, axis=1, keepdims=True)
-        z_norm[z_norm < 1e-12] = 1.0
-        z_axis = z_axis / z_norm
-
-        # rpy 계산
-        rot_mats = np.stack([x_axis, y_axis, z_axis], axis=2)
+        rot_mats = np.stack([
+            self.__rotation_from_pipe_facing_axis(
+                pipe_facing_world=facing_axis,
+                world_up_hint=pipe_direction_unit,
+                local_pipe_facing_axis=self.__dda_pipe_facing_axis,
+                local_reference_axis=self.__dda_pipe_parallel_axis,
+            )
+            for facing_axis in facing_axes
+        ], axis=0)
+        if self.__is_debug_mode:
+            configured_facing_world = np.einsum("nij,j->ni", rot_mats, self.__dda_pipe_facing_axis)
+            local_minus_y_world = np.einsum("nij,j->ni", rot_mats, np.asarray([0.0, -1.0, 0.0]))
+            self.debuging_info["dda_pipe_facing_axis_local"] = self.__dda_pipe_facing_axis.tolist()
+            self.debuging_info["dda_pipe_parallel_axis_local"] = self.__dda_pipe_parallel_axis.tolist()
+            self.debuging_info["dda_configured_facing_dot_pipe_center"] = (
+                np.sum(configured_facing_world * facing_axes, axis=1).tolist()
+            )
+            self.debuging_info["dda_minus_y_dot_pipe_center"] = (
+                np.sum(local_minus_y_world * facing_axes, axis=1).tolist()
+            )
         rpy_array = R.from_matrix(rot_mats).as_euler("xyz", degrees=False)
 
         # 출력 포맷 설정----------------------------------------------------------
@@ -1067,8 +1367,8 @@ class EndEffectorPoseOptimizer:
                 self.__dda_invers_transform_mat,
             )
             shift = float(desired_surface_distance - clearance)
-            tcp_x_axis = R.from_euler("xyz", pose[3:]).as_matrix()[:, 0]
-            outward_axis = -tcp_x_axis / np.linalg.norm(tcp_x_axis)
+            pipe_facing_axis = R.from_euler("xyz", pose[3:]).as_matrix() @ self.__dda_pipe_facing_axis
+            outward_axis = -pipe_facing_axis / np.linalg.norm(pipe_facing_axis)
             corrected = pose.copy()
             corrected[:3] = corrected[:3] + outward_axis * shift
             adjusted.append(corrected)
@@ -1089,6 +1389,15 @@ class EndEffectorPoseOptimizer:
         tcp_to_link_pose_T: np.ndarray,
         sample_count: int = 3000,
     ) -> float:
+        if self.__collision_checker is not None:
+            return bool(self.__collision_checker(
+                link_model,
+                tcp_pose,
+                tcp_to_link_pose_T,
+                margin=margin,
+                sample_count=sample_count,
+            ))
+
         tcp_pose_T = np.eye(4)
         tcp_pose_T[:3, :3] = R.from_euler("xyz", tcp_pose[3:]).as_matrix()
         tcp_pose_T[:3, 3] = tcp_pose[:3]

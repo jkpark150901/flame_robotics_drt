@@ -13,3 +13,5 @@ trimesh
 networkx
 lxml
 pycollada
+# Robotics Pinocchio. PyPI package `pin` currently provides pip wheels on Linux only.
+pin; platform_system == "Linux"

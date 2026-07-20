@@ -11,6 +11,8 @@ positioner_traj/
 
 # resources
 sample/
+data/
+data(old)/
 
 # Distribution / packaging
 .Python

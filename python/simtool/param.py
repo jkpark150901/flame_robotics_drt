@@ -10,6 +10,10 @@ class SimParameterMap:
         self.z_res = 0.01
         self.r_res = 0.1
         self.clamp_res = 0.01
+        self.x_range = [0.0, 8.0]
+        self.z_range = [0.0, 3.0]
+        self.r_range = [-180.0, 180.0]
+        self.clamp_range = [0.0, 0.9]
         self.spool_x_res = 0.01
         self.spool_y_res = 0.01
         self.spool_z_res = 0.01
@@ -94,10 +98,12 @@ class SimParameterMap:
         self.spool_x_rot_res = params.get('spool_x_rotation_resolution', self.spool_x_rot_res)
         self.spool_z_rot_res = params.get('spool_z_rotation_resolution', self.spool_z_rot_res)
 
-        x_range = params.get('positioner_x_range', [0.0, 8.0])
-        z_range = params.get('positioner_z_range', [0.0, 3.0])
-        r_range = params.get('positioner_r_range', [0.0, 360.0])
-        clamp_range = params.get('positioner_clamp_range', [0.0, 0.9])
+        self.x_range = params.get('positioner_x_range', self.x_range)
+        self.z_range = params.get('positioner_z_range', self.z_range)
+        self.r_range = params.get('positioner_r_range', self.r_range)
+        self.clamp_range = params.get('positioner_clamp_range', self.clamp_range)
+        if self.r_range == [0.0, 360.0] or self.r_range == [0, 360]:
+            self.r_range = [-180.0, 180.0]
         self.spool_x_range = params.get('spool_x_range', self.spool_x_range)
         self.spool_y_range = params.get('spool_y_range', self.spool_y_range)
         self.spool_z_range = params.get('spool_z_range', self.spool_z_range)
@@ -106,19 +112,19 @@ class SimParameterMap:
 
         if hasattr(self.ui, 'slider_positioner_x_pos'):
             self.ui.slider_positioner_x_pos.setMinimum(0)
-            self.ui.slider_positioner_x_pos.setMaximum(int((x_range[1] - x_range[0]) / self.x_res))
+            self.ui.slider_positioner_x_pos.setMaximum(int((self.x_range[1] - self.x_range[0]) / self.x_res))
 
         if hasattr(self.ui, 'slider_positioner_z_pos'):
             self.ui.slider_positioner_z_pos.setMinimum(0)
-            self.ui.slider_positioner_z_pos.setMaximum(int((z_range[1] - z_range[0]) / self.z_res))
+            self.ui.slider_positioner_z_pos.setMaximum(int((self.z_range[1] - self.z_range[0]) / self.z_res))
 
         if hasattr(self.ui, 'slider_positioner_r_pos'):
             self.ui.slider_positioner_r_pos.setMinimum(0)
-            self.ui.slider_positioner_r_pos.setMaximum(int((r_range[1] - r_range[0]) / self.r_res))
+            self.ui.slider_positioner_r_pos.setMaximum(int((self.r_range[1] - self.r_range[0]) / self.r_res))
 
         if hasattr(self.ui, 'slider_positioner_clamp_pos'):
             self.ui.slider_positioner_clamp_pos.setMinimum(0)
-            self.ui.slider_positioner_clamp_pos.setMaximum(int((clamp_range[1] - clamp_range[0]) / self.clamp_res))
+            self.ui.slider_positioner_clamp_pos.setMaximum(int((self.clamp_range[1] - self.clamp_range[0]) / self.clamp_res))
 
         self._configure_spool_slider('x', self.spool_x_range, self.spool_x_res)
         self._configure_spool_slider('y', self.spool_y_range, self.spool_y_res)
@@ -180,12 +186,12 @@ class SimParameterMap:
 
     def set_positioner_values(self, x=None, z=None, r=None, clamp=None, update_sliders=True):
         values = {
-            "x": (x, self.x_res, "edit_positioner_x_pos", "slider_positioner_x_pos"),
-            "z": (z, self.z_res, "edit_positioner_z_pos", "slider_positioner_z_pos"),
-            "r": (r, self.r_res, "edit_positioner_r_pos", "slider_positioner_r_pos"),
-            "clamp": (clamp, self.clamp_res, "edit_positioner_clamp_pos", "slider_positioner_clamp_pos"),
+            "x": (x, self.x_range, self.x_res, "edit_positioner_x_pos", "slider_positioner_x_pos"),
+            "z": (z, self.z_range, self.z_res, "edit_positioner_z_pos", "slider_positioner_z_pos"),
+            "r": (r, self.r_range, self.r_res, "edit_positioner_r_pos", "slider_positioner_r_pos"),
+            "clamp": (clamp, self.clamp_range, self.clamp_res, "edit_positioner_clamp_pos", "slider_positioner_clamp_pos"),
         }
-        for _, (value, resolution, edit_name, slider_name) in values.items():
+        for _, (value, value_range, resolution, edit_name, slider_name) in values.items():
             if value is None:
                 continue
             value = float(value)
@@ -195,28 +201,28 @@ class SimParameterMap:
             if update_sliders:
                 slider = getattr(self.ui, slider_name, None)
                 if slider is not None:
-                    slider.setValue(int(value / resolution))
+                    slider.setValue(int(round((value - value_range[0]) / resolution)))
 
     # --- Handlers for Sliders -> LineEdits ---
 
     def _on_slider_x_changed(self, value):
         if hasattr(self.ui, 'edit_positioner_x_pos'):
-            real_val = value * self.x_res
+            real_val = self.x_range[0] + value * self.x_res
             self.ui.edit_positioner_x_pos.setText(f"{real_val:.3f}")
 
     def _on_slider_z_changed(self, value):
         if hasattr(self.ui, 'edit_positioner_z_pos'):
-            real_val = value * self.z_res
+            real_val = self.z_range[0] + value * self.z_res
             self.ui.edit_positioner_z_pos.setText(f"{real_val:.3f}")
 
     def _on_slider_r_changed(self, value):
         if hasattr(self.ui, 'edit_positioner_r_pos'):
-            real_val = value * self.r_res
+            real_val = self.r_range[0] + value * self.r_res
             self.ui.edit_positioner_r_pos.setText(f"{real_val:.3f}")
 
     def _on_slider_clamp_changed(self, value):
         if hasattr(self.ui, 'edit_positioner_clamp_pos'):
-            real_val = value * self.clamp_res
+            real_val = self.clamp_range[0] + value * self.clamp_res
             self.ui.edit_positioner_clamp_pos.setText(f"{real_val:.3f}")
 
     def _on_slider_spool_x_changed(self, value):
@@ -240,7 +246,7 @@ class SimParameterMap:
         if hasattr(self.ui, 'edit_positioner_x_pos') and hasattr(self.ui, 'slider_positioner_x_pos'):
             try:
                 val = float(self.ui.edit_positioner_x_pos.text())
-                self.ui.slider_positioner_x_pos.setValue(int(val / self.x_res))
+                self.ui.slider_positioner_x_pos.setValue(int(round((val - self.x_range[0]) / self.x_res)))
             except ValueError:
                 pass
 
@@ -248,7 +254,7 @@ class SimParameterMap:
         if hasattr(self.ui, 'edit_positioner_z_pos') and hasattr(self.ui, 'slider_positioner_z_pos'):
             try:
                 val = float(self.ui.edit_positioner_z_pos.text())
-                self.ui.slider_positioner_z_pos.setValue(int(val / self.z_res))
+                self.ui.slider_positioner_z_pos.setValue(int(round((val - self.z_range[0]) / self.z_res)))
             except ValueError:
                 pass
 
@@ -256,7 +262,7 @@ class SimParameterMap:
         if hasattr(self.ui, 'edit_positioner_r_pos') and hasattr(self.ui, 'slider_positioner_r_pos'):
             try:
                 val = float(self.ui.edit_positioner_r_pos.text())
-                self.ui.slider_positioner_r_pos.setValue(int(val / self.r_res))
+                self.ui.slider_positioner_r_pos.setValue(int(round((val - self.r_range[0]) / self.r_res)))
             except ValueError:
                 pass
 
@@ -264,7 +270,7 @@ class SimParameterMap:
         if hasattr(self.ui, 'edit_positioner_clamp_pos') and hasattr(self.ui, 'slider_positioner_clamp_pos'):
             try:
                 val = float(self.ui.edit_positioner_clamp_pos.text())
-                self.ui.slider_positioner_clamp_pos.setValue(int(val / self.clamp_res))
+                self.ui.slider_positioner_clamp_pos.setValue(int(round((val - self.clamp_range[0]) / self.clamp_res)))
             except ValueError:
                 pass
 

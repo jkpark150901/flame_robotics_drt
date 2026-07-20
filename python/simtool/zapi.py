@@ -208,6 +208,15 @@ class ZAPI(QObject, ZAPIBase):
         else:
             self.__console.warning("[ZAPI] Cannot send stop_manipulator: Socket not connected")
 
+    def _ZAPI_request_reset_robot_base_pose(self, robot: str = None):
+        """Reset collaborative robot joints to their zero/base pose."""
+        if self.__dealer_socket and self.__dealer_socket.is_joined:
+            kwargs = {"robot": robot} if robot else {}
+            self.call(self.__dealer_socket, "zapi_reset_robot_base_pose", kwargs)
+            self.__console.info(f"[ZAPI] Sent reset_robot_base_pose: {robot or 'all'}")
+        else:
+            self.__console.warning("[ZAPI] Cannot send reset_robot_base_pose: Socket not connected")
+
     def _ZAPI_request_pick_inspection_point(self, enabled: bool = True):
         """Enable/disable one-click pipe inspection point picking in the viewer."""
         if self.__dealer_socket and self.__dealer_socket.is_joined:
@@ -216,10 +225,21 @@ class ZAPI(QObject, ZAPIBase):
         else:
             self.__console.warning("[ZAPI] Cannot send pick_inspection_point: Socket not connected")
 
-    def _ZAPI_request_pick_chuck_mount_points(self, enabled: bool = True, clear: bool = True):
+    def _ZAPI_request_pick_chuck_mount_points(
+        self,
+        enabled: bool = True,
+        clear: bool = True,
+        align_on_pick: bool = False,
+        align_target: str = "f",
+    ):
         """Enable/disable two-click pipe chuck mount point picking in the viewer."""
         if self.__dealer_socket and self.__dealer_socket.is_joined:
-            kwargs = {"enabled": bool(enabled), "clear": bool(clear)}
+            kwargs = {
+                "enabled": bool(enabled),
+                "clear": bool(clear),
+                "align_on_pick": bool(align_on_pick),
+                "align_target": str(align_target),
+            }
             self.call(self.__dealer_socket, "zapi_pick_chuck_mount_points", kwargs)
             self.__console.info(f"[ZAPI] Sent pick_chuck_mount_points: {kwargs}")
         else:
@@ -236,6 +256,15 @@ class ZAPI(QObject, ZAPIBase):
         else:
             self.__console.warning("[ZAPI] Cannot send set_chuck_mount_points: Socket not connected")
 
+    def _ZAPI_request_set_chuck_mount_config(self, config: dict):
+        """Update viewer chuck mount center offsets and axes."""
+        if self.__dealer_socket and self.__dealer_socket.is_joined:
+            kwargs = {"chuck_mount": config or {}}
+            self.call(self.__dealer_socket, "zapi_set_chuck_mount_config", kwargs)
+            self.__console.info(f"[ZAPI] Sent set_chuck_mount_config: {kwargs}")
+        else:
+            self.__console.warning("[ZAPI] Cannot send set_chuck_mount_config: Socket not connected")
+
     def _ZAPI_request_clear_chuck_mount_points(self):
         """Clear rendered chuck mount points in the viewer."""
         if self.__dealer_socket and self.__dealer_socket.is_joined:
@@ -245,7 +274,9 @@ class ZAPI(QObject, ZAPIBase):
             self.__console.warning("[ZAPI] Cannot send clear_chuck_mount_points: Socket not connected")
 
     def _ZAPI_request_plan_inspection_path(self, planner: str, robot: str = "rb20_1900es",
-                                           step_size: float = 0.08, max_iter: int = 3000):
+                                           step_size: float = 0.08, max_iter: int = 3000,
+                                           ik_solver: str = "normalized_dls",
+                                           ik_normalize: bool = True):
         """Request EF-only path planning to the currently picked pipe inspection point."""
         if self.__dealer_socket and self.__dealer_socket.is_joined:
             kwargs = {
@@ -253,11 +284,55 @@ class ZAPI(QObject, ZAPIBase):
                 "robot": robot,
                 "step_size": step_size,
                 "max_iter": max_iter,
+                "ik_solver": ik_solver,
+                "ik_normalize": bool(ik_normalize),
             }
             self.call(self.__dealer_socket, "zapi_plan_inspection_path", kwargs)
             self.__console.info(f"[ZAPI] Sent plan_inspection_path: {kwargs}")
         else:
             self.__console.warning("[ZAPI] Cannot send plan_inspection_path: Socket not connected")
+
+    def _ZAPI_request_plan_ef_pose_paths(self, planner: str,
+                                         step_size: float = 0.08,
+                                         max_iter: int = 3000,
+                                         max_workers: int = 2,
+                                         ik_solver: str = "normalized_dls",
+                                         ik_normalize: bool = True):
+        """Request simultaneous path planning to the determined DDA/RT EF poses."""
+        if self.__dealer_socket and self.__dealer_socket.is_joined:
+            kwargs = {
+                "planner": planner,
+                "step_size": step_size,
+                "max_iter": max_iter,
+                "max_workers": max_workers,
+                "ik_solver": ik_solver,
+                "ik_normalize": bool(ik_normalize),
+            }
+            self.call(self.__dealer_socket, "zapi_plan_ef_pose_paths", kwargs)
+            self.__console.info(f"[ZAPI] Sent plan_ef_pose_paths: {kwargs}")
+        else:
+            self.__console.warning("[ZAPI] Cannot send plan_ef_pose_paths: Socket not connected")
+
+    def _ZAPI_request_check_ef_pose_ik(self, planner: str,
+                                       step_size: float = 0.08,
+                                       max_iter: int = 3000,
+                                       max_workers: int = 2,
+                                       ik_solver: str = "normalized_dls",
+                                       ik_normalize: bool = True):
+        """Request IK-only validation/visualization for the determined DDA/RT EF poses."""
+        if self.__dealer_socket and self.__dealer_socket.is_joined:
+            kwargs = {
+                "planner": planner,
+                "step_size": step_size,
+                "max_iter": max_iter,
+                "max_workers": max_workers,
+                "ik_solver": ik_solver,
+                "ik_normalize": bool(ik_normalize),
+            }
+            self.call(self.__dealer_socket, "zapi_check_ef_pose_ik", kwargs)
+            self.__console.info(f"[ZAPI] Sent check_ef_pose_ik: {kwargs}")
+        else:
+            self.__console.warning("[ZAPI] Cannot send check_ef_pose_ik: Socket not connected")
 
     def _ZAPI_request_determine_ef_pose(self):
         """Request EF pose determination for the currently picked inspection point."""
