@@ -36,6 +36,10 @@ if __name__ == "__main__":
         configure["root_path"] = ROOT_PATH
         configure["app_path"] = (pathlib.Path(__file__).parent / APP_NAME)
         configure["verbose_level"] = args.verbose_level.upper()
+        log_config = configure.get("logging", {}) or {}
+        log_config.setdefault("level", configure["verbose_level"])
+        console = ConsoleLogger.configure(log_config, force=True)
+        console.debug(f"Logger routing : {ConsoleLogger.describe()}")
 
         if configure["verbose_level"] == "DEBUG":
             console.debug(f"Root Path : {configure['root_path']}")

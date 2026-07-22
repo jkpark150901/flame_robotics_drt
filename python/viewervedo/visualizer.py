@@ -17,7 +17,6 @@ import types
 import os
 import json
 import copy
-import csv
 from pathlib import Path
 import numpy as np
 import vedo
@@ -35,10 +34,15 @@ import open3d as _o3d
 from util.logger.console import ConsoleLogger
 from common.graphic_device import GraphicDevice
 from viewervedo.robot import RobotModel, load_robots_from_config
+from viewervedo import geometry_utils as geom_utils
+from viewervedo import pipe_alignment_utils
+from viewervedo import vedo_visual_utils
 from plugins.pluginbase.plannerbase import PlannerBase
 from plugins.robotics.backend import RobotDescription
+from plugins.robotics.inspection_experiment_logger import InspectionExperimentLogger
 from plugins.robotics.inspection_planning_base import InspectionIKRequest, InspectionPlanningBase
 from plugins.robotics.pinocchio_backend import PinocchioRoboticsBackend
+from plugins.poseDeterminator.EndEffectorPoseOptimizer import EndEffectorPoseOptimizer
 
 
 class InspectionIKFailure(RuntimeError):
@@ -55,10 +59,9 @@ class Visualizer:
     
         self.__console = ConsoleLogger.get_logger()
         experiment_root = Path(config.get("experiment_dir", "experiment")) / "inspection_ik"
-        self._inspection_ik_experiment_dir = experiment_root / time.strftime("session_%Y%m%d_%H%M%S")
-        self._inspection_ik_experiment_dir.mkdir(parents=True, exist_ok=True)
+        self._inspection_ik_experiment_logger = InspectionExperimentLogger(experiment_root)
+        self._inspection_ik_experiment_dir = self._inspection_ik_experiment_logger.session_dir
         self.__console.info(f"inspection IK experiment session: {self._inspection_ik_experiment_dir}")
-
         # Thread-safe request queue (populated by Zapi)
         self._request_queue = deque(maxlen=100)
         self._queue_lock = threading.Lock()
@@ -90,14 +93,16 @@ class Visualizer:
         # Flag for external termination (set by Zapi)
         self._should_close = False
 
-        # 留ㅻ땲?곕젅?댄꽣 議곗씤???좊땲硫붿씠??蹂닿컙 ?대룞) ?곹깭
-        # 媛???ぉ: {"model", "joint", "target", "speed"}  speed ?⑥쐞/?꾨젅?꾨떦 = unit/s
+        # 매니퓰레이터 조인트 애니메이션(보간 이동) 상태
+        # 각 항목: {"model", "joint", "target", "speed"}  speed 단위/프레임당 = unit/s
         self._joint_animations = []
         self._last_anim_time = None
         self._inspection_pick_enabled = False
         self._inspection_pick_identity = None
         self._inspection_point = None
+        self._inspection_points = []
         self._inspection_marker = None
+        self._inspection_markers = []
         self._chuck_mount_pick_enabled = False
         self._chuck_mount_pick_identity = None
         self._chuck_mount_points = []
@@ -110,6 +115,7 @@ class Visualizer:
         self._inspection_goal_robot_actors = []
         self._ef_target_poses = {}
         self._ef_pose_groups = []
+        self._inspection_target_groups = []
         self._inspection_path_actor = None
         self._ik_failure_actors = []
         self._robot_tcp_axis_actors = []
@@ -141,8 +147,439 @@ class Visualizer:
         # Register key callback
         self.plotter.add_callback("KeyPress", self._on_key_press)
         self.plotter.add_callback("mouse click", self._on_mouse_click)
+        try:
+            self.plotter.add_callback("RightButtonPressEvent", self._on_right_mouse_click)
+        except Exception:
+            try:
+                self.plotter.add_callback("right mouse click", self._on_right_mouse_click)
+            except Exception:
+                pass
         self._show_chuck_frames(render=False)
         self._show_robot_tcp_axes(render=False)
+
+
+    
+    def _process_request(self, request_data):
+        """Process a request from the ZApi queue."""
+        try:
+            if isinstance(request_data, dict):
+                command = request_data.get("command")
+                handler = self._request_handlers().get(command)
+                if handler is None:
+                    self.__console.warning(f"Unknown request command: {command}")
+                    return None
+                return handler(request_data)
+            elif isinstance(request_data, (list, tuple)) and len(request_data) >= 2:
+                 pass  # Handle raw messages if any
+        except Exception as e:
+            self.__console.error(f"Error processing request: {e}")
+
+    def _request_handlers(self):
+        """Return ZApi command handlers keyed by request command name."""
+        return {
+            
+            "load_spool": self._handle_request_load_spool,                              # 배관 geometry를 로드하고 이전 align 상태를 복원한다.
+            "flip_spool_x": self._handle_request_flip_spool_x,                          # 현재 배관 actor를 x축 기준으로 반전한다.
+            "move_spool": self._handle_request_move_spool,                              # UI에서 입력된 배관 offset/회전을 적용한다.
+            "set_spool_fixation": self._handle_request_set_spool_fixation,              # 배관-포지셔너 고정 상태를 갱신한다.
+
+            "move_positioner": self._handle_request_move_positioner,                    # 포지셔너 조인트를 이동하고 고정 배관을 동기화한다.
+            "move_manipulator": self._handle_request_move_manipulator,                  # 협동로봇 단일 조인트 이동 애니메이션을 시작한다.
+            "stop_manipulator": self._handle_request_stop_manipulator,                  # 협동로봇 조인트 이동 애니메이션을 중지한다.
+
+            "reset_robot_base_pose": self._handle_request_reset_robot_base_pose,        # 로봇을 설정된 base pose로 초기화한다.
+            "filter_spool": self._handle_request_filter_spool,                          # 로드된 배관 점군을 필터링한다.
+            "reconstruct_mesh": self._handle_request_reconstruct_mesh,                  # 배관 점군에서 mesh를 재구성한다.
+            "save_spool": self._handle_request_save_spool,                              # 현재 배관 geometry와 align 상태를 저장한다.
+            "pick_inspection_point": self._handle_request_pick_inspection_point,        # 검사 지점 선택 모드를 켜거나 끈다.
+            "pick_chuck_mount_points": self._handle_request_pick_chuck_mount_points,    # chuck mount 기준점 선택/align 모드를 설정한다.
+            "set_chuck_mount_points": self._handle_request_set_chuck_mount_points,      # 외부에서 전달된 chuck mount 점을 반영한다.
+            "set_chuck_mount_config": self._handle_request_set_chuck_mount_config,      # chuck mount frame/offset 설정을 갱신한다.
+            "clear_chuck_mount_points": self._handle_request_clear_chuck_mount_points,  # 선택된 chuck mount 점을 초기화한다.
+
+            "determine_ef_pose": self._handle_request_determine_ef_pose,                # 선택 지점 기준으로 검사 end-effector pose 후보를 계산한다.
+            "check_ef_pose_ik": self._handle_request_check_ef_pose_ik,                  # EF pose 후보들의 IK 가능 여부를 검사한다.
+            "plan_inspection_path": self._handle_request_plan_inspection_path,          # 검사 pose target group을 순차적으로 경로 계획한다.
+            
+            "clear_inspection_path": self._handle_request_clear_inspection_path,        # 검사 경로/시각화/충돌 표시를 초기화한다.
+            "execute_inspection_path": self._handle_request_execute_inspection_path,    # 계산된 검사 경로 playback을 시작한다.
+            "load_test_weld_point": self._handle_request_load_test_weld_point,          # 테스트용 weld point CSV 경로를 처리한다.
+        }
+
+    def _handle_request_load_spool(self, request_data):
+        """배관 파일을 로드하고 viewer/align/cache 상태를 새 geometry 기준으로 초기화한다."""
+        path = request_data.get("path")
+        if not path:
+            return None
+        self.__console.info(f"Loading Spool: {path}")
+        identity = request_data.get("_identity")
+        try:
+            self._clear_collision_highlights()
+            import pathlib as _pl
+            mesh, _geom_kind, _mesh_o3d, _pcd = self._load_spool_geometry_with_normals(path)
+            if mesh is None:
+                self.__console.error(f"Failed to load mesh from {path}")
+                if hasattr(self, 'zapi') and self.zapi:
+                    self.zapi.reply_load_spool(path, False, identity=identity)
+                return None
+
+            # spool 위치는 chuck joint(m_column_passive_r)를 원점으로 본다.
+            # spool_world = T_chuck @ T_offset @ local
+            _is_pcd = _pl.Path(path).suffix.lower() == ".pcd"
+            _is_point_cloud = _geom_kind == "point_cloud"
+            _default_x = -0.442  # chuck 길이만큼 x 방향 기본 offset
+
+            self._remove_loaded_spool_actors()
+            self._reset_loaded_spool_state(path, _pcd, _mesh_o3d)
+
+            if _is_pcd:
+                _pts = np.asarray(_pcd.points, dtype=np.float64)
+                _visual_pts = np.asarray(mesh.vertices, dtype=np.float64)
+                centroid = _pts.mean(axis=0)
+                Rz = self._rotz(-90)[:3, :3]
+                # centroid 기준으로 -90도 정렬 후 chuck 기준 x offset을 더한다.
+                self._spool_full_local_points = (
+                    (Rz @ (_pts - centroid).T).T + np.array([_default_x, 0.0, 0.0]))
+                self._spool_local_verts = (
+                    (Rz @ (_visual_pts - centroid).T).T + np.array([_default_x, 0.0, 0.0]))
+            elif _is_point_cloud:
+                self._spool_full_local_points = np.asarray(_pcd.points, dtype=float).copy()
+                self._spool_local_verts = np.asarray(mesh.vertices, dtype=float).copy()
+            else:
+                # 저장된 PLY/mesh는 spool local frame(m)으로 간주한다.
+                if hasattr(mesh, "vertices"):
+                    self._spool_local_verts = np.asarray(mesh.vertices, dtype=float).copy()
+                    self._spool_full_local_points = self._spool_local_verts.copy()
+                else:
+                    self._spool_local_verts = None
+                    self._spool_full_local_points = None
+                if hasattr(mesh, "cells"):
+                    self._spool_recon_mesh = mesh
+
+            self.plotter.add(mesh)
+            self._loaded_spool_mesh = mesh
+            self._render_spool_offset()
+            self.plotter.render()
+            self._load_spool_alignment_state(path, identity=identity)
+            self._probe_current_spool_pinocchio_collision("load_spool")
+            self.__console.info(f"Successfully loaded {path}")
+            if hasattr(self, 'zapi') and self.zapi:
+                self.zapi.reply_load_spool(path, True, identity=identity)
+        except Exception as e:
+            self.__console.error(f"Exception loading mesh: {e}")
+            if hasattr(self, 'zapi') and self.zapi:
+                self.zapi.reply_load_spool(path, False, identity=identity)
+        return None
+
+    def _remove_loaded_spool_actors(self):
+        """Remove existing spool actors before loading new geometry."""
+        _old_sp = getattr(self, '_loaded_spool_mesh', None)
+        if _old_sp is not None:
+            self.plotter.remove(_old_sp)
+            self._loaded_spool_mesh = None
+        _old_rc = getattr(self, '_spool_recon_mesh', None)
+        if _old_rc is not None:
+            if _old_rc is not _old_sp:
+                self.plotter.remove(_old_rc)
+            self._spool_recon_mesh = None
+
+    def _reset_loaded_spool_state(self, path, pcd, mesh_o3d):
+        """Reset spool pose/cache fields for newly loaded geometry."""
+        self._spool_offset_xyz = [0.0, 0.0, 0.0]
+        self._spool_offset_xrot = 0.0
+        self._spool_offset_zrot = 0.0
+        self._spool_fix_r = False
+        self._positioner_r_deg = 0.0
+        self._spool_world_T = None
+        self._chuck_prev_T = None
+        self._loaded_spool_x_flipped = False
+        self._loaded_spool_point_cloud = pcd
+        self._loaded_spool_open3d_mesh = mesh_o3d
+        self._spool_full_local_points = None
+        self._spool_source_path = path
+
+    def _handle_request_flip_spool_x(self, _request_data):
+        """로드된 배관 actor를 현재 bounding box 중심 기준 x축 mirror로 반전한다."""
+        spool = getattr(self, '_loaded_spool_mesh', None)
+        if spool is None or (isinstance(spool, (list, tuple)) and len(spool) == 0):
+            self.__console.warning("Cannot flip spool X direction: no spool loaded")
+            return True
+
+        actors = spool if isinstance(spool, (list, tuple)) else [spool]
+        bounds_list = [a.bounds() for a in actors if hasattr(a, "bounds")]
+        if bounds_list:
+            x_min = min(b[0] for b in bounds_list)
+            x_max = max(b[1] for b in bounds_list)
+            y_min = min(b[2] for b in bounds_list)
+            y_max = max(b[3] for b in bounds_list)
+            z_min = min(b[4] for b in bounds_list)
+            z_max = max(b[5] for b in bounds_list)
+            center = [(x_min + x_max) / 2, (y_min + y_max) / 2, (z_min + z_max) / 2]
+        else:
+            center = [0, 0, 0]
+
+        for actor in actors:
+            if hasattr(actor, "mirror"):
+                actor.mirror(axis="x", origin=center)
+        if self._ensure_spool_frame_from_actor():
+            T = getattr(self, '_spool_world_T', None)
+            pts = self._get_spool_points()
+            if T is not None and pts is not None:
+                Tinv = np.linalg.inv(T)
+                self._spool_local_verts = (Tinv[:3, :3] @ pts.T).T + Tinv[:3, 3]
+
+        self._loaded_spool_x_flipped = not getattr(self, '_loaded_spool_x_flipped', False)
+        self.plotter.render()
+        self.__console.info(f"Flipped spool X direction: {self._loaded_spool_x_flipped}")
+        return True
+
+    def _handle_request_move_spool(self, request_data):
+        """UI에서 전달된 chuck 기준 배관 offset과 회전을 적용한다."""
+        spool = getattr(self, '_loaded_spool_mesh', None)
+        if spool is None:
+            self.__console.warning("move_spool: loaded spool is not available")
+            return True
+        new_xyz = [
+            float(request_data.get("x", 0.0)),
+            float(request_data.get("y", 0.0)),
+            float(request_data.get("z", 0.0)),
+        ]
+        new_xrot = float(request_data.get("x_rotation", 0.0))
+        new_zrot = float(request_data.get("z_rotation", 0.0))
+
+        # 저장된 mesh/ply처럼 world 좌표로 로드되어 local frame이 없는 경우 현재 화면 위치를 보존한다.
+        if getattr(self, '_spool_local_verts', None) is None:
+            pts = self._get_spool_points()
+            Tc = self._chuck_world_T()
+            if pts is None or Tc is None:
+                self.__console.warning("move_spool: failed to initialize spool local frame")
+                return True
+            old_xyz = getattr(self, '_spool_offset_xyz', [0.0, 0.0, 0.0])
+            old_xrot = getattr(self, '_spool_offset_xrot', 0.0)
+            old_zrot = getattr(self, '_spool_offset_zrot', 0.0)
+            self._spool_offset_xyz = new_xyz
+            self._spool_offset_xrot = new_xrot
+            self._spool_offset_zrot = new_zrot
+            Tnew = Tc @ self._spool_offset_T()
+            Tinv = np.linalg.inv(Tnew)
+            self._spool_local_verts = (Tinv[:3, :3] @ pts.T).T + Tinv[:3, 3]
+            self._spool_world_T = Tnew
+            self._spool_offset_xyz = old_xyz
+            self._spool_offset_xrot = old_xrot
+            self._spool_offset_zrot = old_zrot
+
+        self._spool_offset_xyz = new_xyz
+        self._spool_offset_xrot = new_xrot
+        self._spool_offset_zrot = new_zrot
+        self._render_spool_offset()
+        self.plotter.render()
+        self._probe_current_spool_pinocchio_collision("move_spool")
+        self.__console.info(
+            f"Spool offset set to xyz={self._spool_offset_xyz}, "
+            f"x_rot={self._spool_offset_xrot}, z_rot={self._spool_offset_zrot}")
+        return True
+
+    def _handle_request_set_spool_fixation(self, request_data):
+        """배관과 포지셔너 mount 사이의 고정 플래그를 갱신하고 현재 chuck frame을 저장한다."""
+        fix_m_column_z = bool(request_data.get("fix_m_column_z", False))
+        fix_f_column_r = bool(request_data.get("fix_f_column_r", False))
+        self._spool_fix_r = fix_f_column_r
+        self._spool_fix_m_column_z = fix_m_column_z
+        self._spool_positioner_fixed = fix_m_column_z or fix_f_column_r
+        if fix_m_column_z or fix_f_column_r:
+            self._ensure_spool_frame_from_actor()
+            self._clear_chuck_profile_visuals(render=False)
+            self._clear_chuck_frame_visuals(render=False)
+        Tc_now = self._chuck_world_T()
+        if Tc_now is not None:
+            self._chuck_prev_T = Tc_now
+        if self._spool_positioner_fixed:
+            self.plotter.render()
+        self._save_spool_alignment_state(reason="fixation")
+        self.__console.info(
+            "Spool-positioner fixation set: "
+            f"fixed={self._spool_positioner_fixed}, "
+            f"fix_f={fix_f_column_r}, fix_z={fix_m_column_z}")
+
+    def _handle_request_move_positioner(self, request_data):
+        """포지셔너 조인트를 이동하고 고정 상태이면 배관 pose도 함께 동기화한다."""
+        import math
+        axis = request_data.get("axis")
+        position = float(request_data.get("position", 0.0))
+        velocity = float(request_data.get("velocity", 0.0))
+        fix_m_column_z = bool(request_data.get("fix_m_column_z", False))
+        fix_f_column_r = bool(request_data.get("fix_f_column_r", False))
+        self._spool_fix_r = fix_f_column_r
+        self._spool_fix_m_column_z = fix_m_column_z
+        self._spool_positioner_fixed = fix_m_column_z or fix_f_column_r
+        if fix_m_column_z or fix_f_column_r:
+            self._ensure_spool_frame_from_actor()
+        if self._spool_positioner_fixed and axis not in ("r", "z"):
+            self.__console.warning(
+                f"Positioner {axis} move rejected: mount is fixed; only r/z axes can move")
+            self._send_positioner_pose_update(identity=request_data.get("_identity"))
+            return
+
+        prev_positioner_r = float(getattr(self, '_positioner_r_deg', 0.0))
+        if axis == "x":
+            self._positioner_x = position
+        elif axis == "z":
+            self._positioner_z = position
+        elif axis == "r":
+            self._positioner_r_deg = position
+        elif axis == "clamp":
+            self._positioner_clamp = position
+
+        for model in getattr(self, '_robot_models', []):
+            joint_map = model._urdf._joint_map if model._urdf else {}
+            if axis == "x" and "base_to_m_column" in joint_map:
+                model.set_joint("base_to_m_column", -position)
+            elif axis == "z" and "base_to_f_column_z" in joint_map:
+                model.set_joint("base_to_f_column_z", position)
+                model.set_joint("m_column_to_m_column_z", position)
+            elif axis == "r" and "f_column_z_to_f_column_r" in joint_map:
+                model.set_joint("f_column_z_to_f_column_r", math.radians(position))
+            elif axis == "clamp" and "f_column_r_to_f_column_passive_clamp" in joint_map:
+                # prismatic y-axis, range -0.9~0; UI value 0~0.9 maps to joint = -position
+                model.set_joint("f_column_r_to_f_column_passive_clamp", -position)
+            else:
+                continue
+            model.update_fk()
+
+        self._sync_fixed_spool_after_positioner_move(axis, position, prev_positioner_r, request_data)
+        self._show_chuck_frames(render=False)
+        self.plotter.render()
+        if self._spool_positioner_fixed:
+            self._save_spool_alignment_state(reason=f"fixed move {axis}")
+        self.__console.info(f"Positioner {axis} moved to {position} (vel={velocity})")
+
+    def _sync_fixed_spool_after_positioner_move(self, axis, position, prev_positioner_r, request_data):
+        """Move the loaded spool with fixed chuck constraints after positioner motion."""
+        Tc_now = self._chuck_world_T()
+        has_frame = (getattr(self, '_spool_world_T', None) is not None
+                     and getattr(self, '_spool_local_verts', None) is not None)
+        if has_frame and Tc_now is not None:
+            if axis in ("x", "z") and self._spool_fix_m_column_z and getattr(self, '_chuck_prev_T', None) is not None:
+                # m-column 고정: chuck 병진 이동만 spool에 평행 이동으로 반영한다.
+                dt = Tc_now[:3, 3] - self._chuck_prev_T[:3, 3]
+                T = np.eye(4)
+                T[:3, 3] = dt
+                self._spool_world_T = T @ self._spool_world_T
+                self._apply_spool_world_T()
+                self._update_chuck_mount_points_after_transform(T)
+                self._send_spool_pose_update(identity=request_data.get("_identity"))
+            elif axis == "r" and self._spool_fix_r:
+                # r-axis 고정: m chuck 중심과 chuck x축 기준으로 spool을 회전한다.
+                delta_r = position - prev_positioner_r
+                m_T = self._chuck_link_world_T(self.M_CHUCK_LINK_NAME)
+                m_cfg = self._chuck_frame_config(self.M_CHUCK_LINK_NAME)
+                r_rotation_sign = float(m_cfg.get("r_rotation_sign", -1.0))
+                if m_T is not None:
+                    center = self._chuck_center_world(self.M_CHUCK_LINK_NAME, m_T)
+                    axis_w = self._chuck_axis_world(self.M_CHUCK_LINK_NAME, m_T)
+                else:
+                    center = Tc_now[:3, 3]
+                    axis_w = Tc_now[:3, :3] @ np.array([1.0, 0.0, 0.0])
+                Rm = self._rot_about_axis(axis_w, center, delta_r * r_rotation_sign)
+                self._spool_world_T = Rm @ self._spool_world_T
+                self._apply_spool_world_T()
+                self._update_chuck_mount_points_after_transform(Rm)
+                self._send_spool_pose_update(identity=request_data.get("_identity"))
+        if Tc_now is not None:
+            self._chuck_prev_T = Tc_now
+        if axis == "r":
+            self._positioner_r_deg = position
+
+    def _handle_request_move_manipulator(self, request_data):
+        """협동로봇 특정 조인트의 목표 이동 애니메이션을 등록한다."""
+        self._set_joint_animation(
+            request_data.get("robot"),
+            request_data.get("joint"),
+            request_data.get("target", 0.0),
+            request_data.get("speed", 1.0),
+            request_data.get("accel"),
+            identity=request_data.get("_identity"))
+
+    def _handle_request_stop_manipulator(self, request_data):
+        """협동로봇 조인트 이동 애니메이션을 중지한다."""
+        self._stop_joint_animation(request_data.get("robot"), request_data.get("joint"))
+
+    def _handle_request_reset_robot_base_pose(self, request_data):
+        """선택 로봇 또는 전체 로봇을 설정된 base pose로 되돌린다."""
+        self._reset_robot_base_pose(request_data.get("robot"), identity=request_data.get("_identity"))
+
+    def _handle_request_pick_inspection_point(self, request_data):
+        """viewer mouse click을 검사 지점 선택으로 해석하도록 pick mode를 전환한다."""
+        self._inspection_pick_enabled = bool(request_data.get("enabled", True))
+        self._inspection_pick_identity = request_data.get("_identity")
+        if bool(request_data.get("clear", False)):
+            self._clear_inspection_points(render=False)
+        if self._inspection_pick_enabled:
+            self._chuck_mount_pick_enabled = False
+            self._clear_ik_failure_visuals(render=False)
+            self._inspection_pick_multi_select = bool(request_data.get("multi_select", True))
+        self.__console.info(
+            "inspection pick mode enabled" if self._inspection_pick_enabled
+            else "inspection pick mode disabled")
+
+    def _handle_request_pick_chuck_mount_points(self, request_data):
+        """viewer mouse click을 chuck mount 기준점 선택 또는 align 입력으로 해석한다."""
+        enabled = bool(request_data.get("enabled", True))
+        self._chuck_mount_pick_enabled = enabled
+        self._chuck_mount_pick_identity = request_data.get("_identity")
+        self._chuck_mount_align_on_pick = bool(request_data.get("align_on_pick", False))
+        self._chuck_mount_align_target = str(request_data.get("align_target", "f")).lower()
+        if enabled:
+            self._inspection_pick_enabled = False
+            if bool(request_data.get("clear", True)):
+                self._clear_chuck_mount_points()
+        self.__console.info(
+            (f"chuck mount align mode enabled: click {self._chuck_mount_align_target}-column mount point"
+             if self._chuck_mount_align_on_pick
+             else "chuck mount pick mode enabled: click fixed-side point, then moving-side point")
+            if enabled else "chuck mount pick mode disabled")
+
+    def _handle_request_set_chuck_mount_points(self, request_data):
+        """외부에서 전달된 chuck mount world/local point를 viewer 상태에 반영한다."""
+        self._set_chuck_mount_points(request_data.get("points", []), request_data.get("local_points"))
+
+    def _handle_request_set_chuck_mount_config(self, request_data):
+        """UI/config에서 전달된 chuck mount frame offset 설정을 갱신한다."""
+        self._set_chuck_mount_config(request_data.get("chuck_mount", {}))
+
+    def _handle_request_clear_chuck_mount_points(self, _request_data):
+        """선택된 chuck mount 점과 관련 pick mode를 초기화한다."""
+        self._chuck_mount_pick_enabled = False
+        self._clear_chuck_mount_points()
+
+    def _handle_request_clear_inspection_path(self, _request_data):
+        """검사 경로, playback 상태, 충돌 표시, 검사 지점 시각화를 초기화한다."""
+        self._inspection_pick_enabled = False
+        self._path_playback = None
+        self._robot_path_playback = None
+        self._clear_collision_highlights()
+        self._clear_inspection_visuals(clear_point=True)
+        self._clear_path_playback_marker()
+        self._last_inspection_path = None
+        self._last_inspection_q_path = None
+        self._last_inspection_edge_collisions = []
+        self._last_inspection_robot = None
+        self._last_inspection_plans = {}
+        self._last_inspection_plan_sequence = []
+
+    def _handle_request_execute_inspection_path(self, request_data):
+        """최근 계산된 검사 경로 playback을 시작한다."""
+        self._start_path_playback(
+            request_data.get("speed", 0.2),
+            identity=request_data.get("_identity"))
+
+    def _handle_request_load_test_weld_point(self, request_data):
+        """테스트용 weld point CSV 경로를 받아 로그에 기록한다."""
+        path = request_data.get("path")
+        if path:
+            self.__console.info(f"Loading Test Weld Point from CSV: {path}")
+            # CSV 포맷이 확정되면 실제 렌더링 로직을 여기에 붙인다.
+            self.__console.info(f"Successfully handled test weld point CSV path: {path}")
 
     def _setup_c_space(self, config: dict):
         """Add C-Space bounding box and axes to the plotter."""
@@ -197,7 +634,7 @@ class Visualizer:
             model.load()
             self._robot_models.append(model)
             self._register_robotics_backend_model(name, full_path, base)
-            self._cache_robot_pinocchio_collision_model(name, full_path)
+            self._cache_robot_collision_model(name, full_path)
 
         all_actors = [a for m in self._robot_models for a in m.actors]
         if all_actors:
@@ -219,13 +656,14 @@ class Visualizer:
             handle = backend.register_robot(description)
             self.__console.info(
                 f"registered robotics backend model: robot={robot_name}, "
-                f"backend={backend.name}, nq={handle.model.nq}")
+                f"backend={backend.name}, dof={backend.dof(robot_name)}")
             return handle
         except Exception as exc:
             raise RuntimeError(f"failed to register robotics backend model for {robot_name}: {exc}") from exc
 
-    def _cache_robot_pinocchio_collision_model(self, robot_name, urdf_path):
-        if pin is None:
+    def _cache_robot_collision_model(self, robot_name, urdf_path):
+        backend = getattr(self, "_robotics_backend", None)
+        if backend is None or not hasattr(backend, "collision_model_cache"):
             return
         cache = getattr(self, "_pinocchio_robot_collision_cache", None)
         if cache is None:
@@ -235,9 +673,6 @@ class Visualizer:
             return
         try:
             t0 = time.perf_counter()
-            backend = getattr(self, "_robotics_backend", None)
-            if backend is None:
-                raise RuntimeError("robotics backend is not initialized")
             backend.configure_collision(robot_name, static_meshes=None, sample_resolution=0.05)
             backend_cache = backend.collision_model_cache(robot_name)
             cache[robot_name] = {
@@ -248,14 +683,20 @@ class Visualizer:
             }
             cache[robot_name]["ik_collision_probe"] = self._make_inspection_ik_collision_probe(cache[robot_name])
             geom_model = cache[robot_name].get("pin_geom_model")
+            geom_count = len(getattr(geom_model, "geometryObjects", []) or [])
+            pair_count = len(getattr(geom_model, "collisionPairs", []) or [])
             self.__console.info(
-                "Cached Pinocchio collision model: "
-                f"robot={robot_name}, urdf={urdf_path}, "
-                f"geoms={len(geom_model.geometryObjects)}, "
-                f"pairs={len(geom_model.collisionPairs)}, "
+                "Cached robot collision model: "
+                f"backend={backend.name}, robot={robot_name}, urdf={urdf_path}, "
+                f"geoms={geom_count}, "
+                f"pairs={pair_count}, "
                 f"elapsed={time.perf_counter() - t0:.3f}s")
         except Exception as exc:
             raise RuntimeError(f"failed to cache robotics collision model for {robot_name}: {exc}") from exc
+
+    def _cache_robot_pinocchio_collision_model(self, robot_name, urdf_path):
+        """Backward-compatible alias. Prefer _cache_robot_collision_model()."""
+        return self._cache_robot_collision_model(robot_name, urdf_path)
 
     def _make_inspection_ik_collision_probe(self, pin_cache):
         if pin is None or not pin_cache:
@@ -327,6 +768,10 @@ class Visualizer:
 
     def _on_mouse_click(self, event):
         """Pick points on the currently loaded pipe when a viewer pick mode is armed."""
+        if self._is_right_mouse_event(event):
+            self._on_right_mouse_click(event)
+            return
+
         if getattr(self, '_chuck_mount_pick_enabled', False):
             self._handle_chuck_mount_pick(event)
             return
@@ -335,7 +780,7 @@ class Visualizer:
             return
         pts = self._get_spool_points()
         if pts is None or len(pts) == 0:
-            self.__console.warning("inspection pick: 濡쒕뱶???ㅽ????놁뒿?덈떎")
+            self.__console.warning("inspection pick: loaded pipe point cloud is not available")
             return
 
         picked = getattr(event, "picked3d", None)
@@ -344,29 +789,91 @@ class Visualizer:
             return
 
         picked = np.asarray(picked, dtype=float)
-        # PCD/mesh 紐⑤몢?먯꽌 ?ㅼ젣 pipe ?먯쑝濡??ㅻ깄????ν븳??
+        # PCD/mesh pick 모두에서 실제 pipe point로 스냅할 수 있도록 nearest point를 저장한다.
         idx = int(np.argmin(np.linalg.norm(pts - picked, axis=1)))
         point = np.asarray(pts[idx], dtype=float)
         self._set_inspection_point(point)
-        self._inspection_pick_enabled = False
+        if not bool(getattr(self, "_inspection_pick_multi_select", True)):
+            self._inspection_pick_enabled = False
 
         identity = getattr(self, '_inspection_pick_identity', None)
         if hasattr(self, 'zapi') and self.zapi and identity:
-            self.zapi.update_inspection_point({"point": point.tolist()}, identity=identity)
-        self.__console.info(f"inspection point picked: {np.round(point, 4)}")
+            self.zapi.update_inspection_point({
+                "point": point.tolist(),
+                "points": [p.tolist() for p in getattr(self, "_inspection_points", [])],
+            }, identity=identity)
+        self.__console.info(
+            f"inspection point picked: {np.round(point, 4)}, "
+            f"count={len(getattr(self, '_inspection_points', []) or [])}")
+
+    @staticmethod
+    def _is_right_mouse_event(event):
+        """vedo/VTK 이벤트 객체에서 우클릭 여부를 가능한 범위에서 판별한다."""
+        values = [
+            getattr(event, "button", None),
+            getattr(event, "name", None),
+            getattr(event, "event", None),
+            getattr(event, "event_name", None),
+            getattr(event, "eventName", None),
+        ]
+        for value in values:
+            if value is None:
+                continue
+            if isinstance(value, (int, float)) and int(value) == 3:
+                return True
+            text = str(value).lower()
+            if "right" in text or text in {"3", "rightbutton"}:
+                return True
+        return False
+
+    def _on_right_mouse_click(self, _event=None):
+        """우클릭 시 현재 선택 모드를 종료한다. 선택된 포인트는 유지한다."""
+        ended = False
+        if getattr(self, "_inspection_pick_enabled", False):
+            self._inspection_pick_enabled = False
+            self._inspection_pick_identity = None
+            ended = True
+        if getattr(self, "_chuck_mount_pick_enabled", False):
+            self._chuck_mount_pick_enabled = False
+            self._chuck_mount_pick_identity = None
+            ended = True
+        if ended:
+            self.__console.info(
+                "pick mode finished by right click: "
+                f"inspection_points={len(getattr(self, '_inspection_points', []) or [])}")
 
     def _set_inspection_point(self, point):
-        self._inspection_point = np.asarray(point, dtype=float)
+        point = np.asarray(point, dtype=float)
+        self._inspection_point = point
+        self._inspection_points = list(getattr(self, "_inspection_points", []) or [])
+        self._inspection_points.append(point)
         self._clear_ik_failure_visuals(render=False)
         self._clear_ef_pose_visuals()
-        old = getattr(self, '_inspection_marker', None)
-        if old is not None:
-            self.plotter.remove(old)
-        marker = vedo.Sphere(pos=self._inspection_point, r=0.045, c="tomato")
+        marker = vedo.Sphere(pos=point, r=0.045, c="tomato")
         marker.pickable(False)
         self._inspection_marker = marker
+        self._inspection_markers = list(getattr(self, "_inspection_markers", []) or [])
+        self._inspection_markers.append(marker)
         self.plotter.add(marker)
         self.plotter.render()
+
+    def _clear_inspection_points(self, render=True):
+        """선택된 검사 지점과 marker를 모두 초기화한다."""
+        markers = list(getattr(self, "_inspection_markers", []) or [])
+        single_marker = getattr(self, "_inspection_marker", None)
+        if single_marker is not None and single_marker not in markers:
+            markers.append(single_marker)
+        for marker in markers:
+            try:
+                self.plotter.remove(marker)
+            except Exception:
+                pass
+        self._inspection_marker = None
+        self._inspection_markers = []
+        self._inspection_point = None
+        self._inspection_points = []
+        if render:
+            self.plotter.render()
 
     def _handle_chuck_mount_pick(self, event):
         pts = self._get_spool_points()
@@ -498,53 +1005,14 @@ class Visualizer:
 
     @staticmethod
     def _rotation_between_vectors(source, target):
-        source = np.asarray(source, dtype=float)
-        target = np.asarray(target, dtype=float)
-        source_norm = np.linalg.norm(source)
-        target_norm = np.linalg.norm(target)
-        if source_norm < 1e-12 or target_norm < 1e-12:
-            return np.eye(3)
-        a = source / source_norm
-        b = target / target_norm
-        cross = np.cross(a, b)
-        dot = float(np.clip(np.dot(a, b), -1.0, 1.0))
-        if dot > 1.0 - 1e-12:
-            return np.eye(3)
-        if dot < -1.0 + 1e-12:
-            basis = np.array([1.0, 0.0, 0.0])
-            if abs(float(np.dot(a, basis))) > 0.9:
-                basis = np.array([0.0, 1.0, 0.0])
-            axis = np.cross(a, basis)
-            axis = axis / np.linalg.norm(axis)
-            return -np.eye(3) + 2.0 * np.outer(axis, axis)
-        skew = np.array([
-            [0.0, -cross[2], cross[1]],
-            [cross[2], 0.0, -cross[0]],
-            [-cross[1], cross[0], 0.0],
-        ])
-        return np.eye(3) + skew + skew @ skew * ((1.0 - dot) / (np.linalg.norm(cross) ** 2))
+        return geom_utils.rotation_between_vectors(source, target)
 
     @staticmethod
     def _unit_vector(vector):
-        vector = np.asarray(vector, dtype=float)
-        norm = np.linalg.norm(vector)
-        if norm < 1e-12:
-            return vector
-        return vector / norm
+        return geom_utils.unit_vector(vector)
 
     def _signed_angle_about_axis(self, source, target, axis):
-        axis = self._unit_vector(axis)
-        source = np.asarray(source, dtype=float)
-        target = np.asarray(target, dtype=float)
-        source = source - np.dot(source, axis) * axis
-        target = target - np.dot(target, axis) * axis
-        if np.linalg.norm(source) < 1e-12 or np.linalg.norm(target) < 1e-12:
-            return 0.0
-        source = self._unit_vector(source)
-        target = self._unit_vector(target)
-        sin_v = float(np.dot(axis, np.cross(source, target)))
-        cos_v = float(np.clip(np.dot(source, target), -1.0, 1.0))
-        return float(np.arctan2(sin_v, cos_v))
+        return geom_utils.signed_angle_about_axis(source, target, axis)
 
     def _align_spool_profile_to_chuck(self, target_point, identity=None, link_name=None, label="chuck"):
         try:
@@ -597,19 +1065,21 @@ class Visualizer:
                     self._profile_distance_threshold(target_point),
                 ), dtype=float)
 
-            R_align = self._rotation_between_vectors(pipe_axis, alignment_axis)
-            T_align = np.eye(4)
-            T_align[:3, :3] = R_align
-            T_align[:3, 3] = chuck_center - R_align @ pipe_origin
-            aligned_origin = R_align @ pipe_origin + T_align[:3, 3]
-            aligned_profile = {
-                "axis": R_align @ pipe_axis,
-                "center": aligned_origin,
-                "radius": pipe_radius,
-            }
-            aligned_profile["center_error"] = float(np.linalg.norm(aligned_origin - chuck_center))
-            aligned_profile["axis_error_deg"] = float(np.rad2deg(np.arccos(np.clip(np.dot(
-                self._unit_vector(aligned_profile["axis"]), self._unit_vector(alignment_axis)), -1.0, 1.0))))
+            T_align = pipe_alignment_utils.profile_to_chuck_transform(
+                pipe_axis,
+                pipe_origin,
+                alignment_axis,
+                chuck_center,
+            )
+            R_align = T_align[:3, :3]
+            aligned_profile = pipe_alignment_utils.transformed_profile_alignment_summary(
+                pipe_axis,
+                pipe_origin,
+                pipe_radius,
+                alignment_axis,
+                chuck_center,
+                T_align,
+            )
             self._send_chuck_mount_profile_update(label, aligned_profile, identity=identity)
 
             self._spool_world_T = T_align @ getattr(self, '_spool_world_T')
@@ -681,7 +1151,9 @@ class Visualizer:
         distance_threshold = self._profile_distance_threshold(target_point, bbox_diag=bbox_diag)
         params = self._config.get("chuck_mount_profile", {}) or {}
         min_points = int(params.get("min_points", 20))
-        print(f"PipeEndProfileAnalyzer: anchor_idx={anchor_idx}, distance_threshold={distance_threshold:.6f}, min_points={min_points}")
+        self.__console.debug(
+            "PipeEndProfileAnalyzer: "
+            f"anchor_idx={anchor_idx}, distance_threshold={distance_threshold:.6f}, min_points={min_points}")
         sample, model, debug = pipe_analyzer._sample_profile_points_from_anchor(
             points,
             anchor_idx,
@@ -1069,23 +1541,7 @@ class Visualizer:
 
     @staticmethod
     def _frame_from_primary_and_reference(primary, reference):
-        x_axis = np.asarray(primary, dtype=float)
-        x_norm = np.linalg.norm(x_axis)
-        if x_norm < 1e-12:
-            raise RuntimeError("cannot build frame from zero-length primary vector")
-        x_axis = x_axis / x_norm
-        ref = np.asarray(reference, dtype=float)
-        ref = ref - np.dot(ref, x_axis) * x_axis
-        if np.linalg.norm(ref) < 1e-12:
-            ref = np.array([0.0, 0.0, 1.0])
-            if abs(float(np.dot(ref, x_axis))) > 0.9:
-                ref = np.array([0.0, 1.0, 0.0])
-            ref = ref - np.dot(ref, x_axis) * x_axis
-        y_axis = ref / np.linalg.norm(ref)
-        z_axis = np.cross(x_axis, y_axis)
-        z_axis = z_axis / np.linalg.norm(z_axis)
-        y_axis = np.cross(z_axis, x_axis)
-        return np.column_stack([x_axis, y_axis, z_axis])
+        return geom_utils.frame_from_primary_and_reference(primary, reference)
 
     def _align_spool_profiles_to_chucks(self, target_points, identity=None):
         try:
@@ -1114,10 +1570,13 @@ class Visualizer:
             target_m = self._chuck_center_world(self.M_CHUCK_LINK_NAME, m_T)
 
             # First fixture: fix the selected f-column pipe profile to the f-column chuck.
-            R_align = self._rotation_between_vectors(f_axis, f_chuck_axis)
-            T_align = np.eye(4)
-            T_align[:3, :3] = R_align
-            T_align[:3, 3] = target_f - R_align @ source_f
+            T_align = pipe_alignment_utils.profile_to_chuck_transform(
+                f_axis,
+                source_f,
+                f_chuck_axis,
+                target_f,
+            )
+            R_align = T_align[:3, :3]
 
             self._spool_world_T = T_align @ getattr(self, '_spool_world_T')
             self._apply_spool_world_T()
@@ -1456,18 +1915,7 @@ class Visualizer:
             self.__console.warning(f"failed to log f-column joint sensitivity: {exc}")
 
     def _transformed_pipe_profile(self, profile, transform):
-        transformed = dict(profile)
-        R = np.asarray(transform[:3, :3], dtype=float)
-        t = np.asarray(transform[:3, 3], dtype=float)
-        for key in ("center", "end_center"):
-            if key in transformed and transformed[key] is not None:
-                transformed[key] = R @ np.asarray(transformed[key], dtype=float) + t
-        if "axis" in transformed and transformed["axis"] is not None:
-            transformed["axis"] = self._unit_vector(R @ np.asarray(transformed["axis"], dtype=float))
-        if "fit_points" in transformed and transformed["fit_points"] is not None:
-            pts = np.asarray(transformed["fit_points"], dtype=float)
-            transformed["fit_points"] = (R @ pts.T).T + t
-        return transformed
+        return geom_utils.transformed_pipe_profile(profile, transform)
 
     def _update_chuck_mount_points_after_transform(self, transform):
         updated_points = []
@@ -1483,48 +1931,26 @@ class Visualizer:
 
     def _add_profile_cylinder_actor(self, center, axis, radius, length, color="cyan", alpha=0.22):
         try:
-            center = np.asarray(center, dtype=float)
-            axis = self._unit_vector(axis)
-            radius = float(radius)
-            length = float(length)
-            if radius <= 0.0 or length <= 0.0 or np.linalg.norm(axis) < 1e-12:
+            actor = vedo_visual_utils.profile_cylinder_actor(
+                center,
+                axis,
+                radius,
+                length,
+                color=color,
+                alpha=alpha,
+            )
+            if actor is None:
                 return
-            ref = np.array([0.0, 0.0, 1.0])
-            if abs(float(np.dot(ref, axis))) > 0.9:
-                ref = np.array([0.0, 1.0, 0.0])
-            u = self._unit_vector(np.cross(axis, ref))
-            v = self._unit_vector(np.cross(axis, u))
-            n = 64
-            half = length * 0.5
-            verts = []
-            for z in (-half, half):
-                cap_center = center + axis * z
-                for i in range(n):
-                    theta = 2.0 * np.pi * i / n
-                    verts.append(cap_center + radius * (np.cos(theta) * u + np.sin(theta) * v))
-            faces = []
-            for i in range(n):
-                j = (i + 1) % n
-                faces.append([i, j, n + j, n + i])
-            faces.append(list(range(n - 1, -1, -1)))
-            faces.append(list(range(n, 2 * n)))
-            actor = vedo.Mesh([np.asarray(verts, dtype=float), faces])
-            actor.c(color).alpha(alpha).wireframe()
-            actor.pickable(False)
             self._chuck_profile_actors.append(actor)
             self.plotter.add(actor)
         except Exception as exc:
             self.__console.warning(f"Failed to draw profile cylinder: {exc}")
 
     def _add_profile_fit_points_actor(self, points, color="magenta"):
-        if points is None:
-            return
         try:
-            points = np.asarray(points, dtype=float)
-            if len(points) == 0:
+            actor = vedo_visual_utils.fit_points_actor(points, color=color, point_size=4)
+            if actor is None:
                 return
-            actor = vedo.Points(points).c(color).ps(4)
-            actor.pickable(False)
             self._chuck_profile_actors.append(actor)
             self.plotter.add(actor)
         except Exception as exc:
@@ -1540,40 +1966,18 @@ class Visualizer:
         far_point=None,
     ):
         try:
-            origin = np.asarray(origin, dtype=float)
-            axis = self._unit_vector(axis)
-            axis_len = float(axis_len)
-            if np.linalg.norm(axis) < 1e-12 or axis_len <= 0.0:
+            actors = vedo_visual_utils.alignment_reference_actors(
+                origin,
+                axis,
+                axis_len,
+                label=label,
+                color=color,
+                far_point=far_point,
+            )
+            if not actors:
                 raise RuntimeError("__ef_pose_collision_groups_rendered__")
-            marker = vedo.Sphere(pos=origin, r=max(axis_len * 0.07, 0.012), c=color)
-            marker.pickable(False)
-            self._chuck_profile_actors.append(marker)
-            self.plotter.add(marker)
-
-            try:
-                arrow = vedo.Arrow(origin, origin + axis * axis_len, s=0.002, c=color)
-            except Exception:
-                arrow = vedo.Line(origin, origin + axis * axis_len, c=color, lw=8)
-            arrow.pickable(False)
-            self._chuck_profile_actors.append(arrow)
-            self.plotter.add(arrow)
-
-            if far_point is not None:
-                far_point = np.asarray(far_point, dtype=float)
-                far_marker = vedo.Sphere(pos=far_point, r=max(axis_len * 0.045, 0.009), c="gray")
-                far_marker.pickable(False)
-                self._chuck_profile_actors.append(far_marker)
-                self.plotter.add(far_marker)
-                far_line = vedo.Line(origin, far_point, c=color, lw=2)
-                far_line.alpha(0.45)
-                far_line.pickable(False)
-                self._chuck_profile_actors.append(far_line)
-                self.plotter.add(far_line)
-
-            text = vedo.Text3D(label, pos=origin + axis * axis_len * 1.06, s=axis_len * 0.12, c=color)
-            text.pickable(False)
-            self._chuck_profile_actors.append(text)
-            self.plotter.add(text)
+            self._chuck_profile_actors.extend(actors)
+            self.plotter.add(*actors)
         except Exception as exc:
             self.__console.warning(f"Failed to draw alignment reference: {exc}")
 
@@ -2016,10 +2420,7 @@ class Visualizer:
         self._clear_inspection_goal_pose_visuals(render=False)
         if clear_point:
             self._clear_ef_pose_visuals()
-        if clear_point and getattr(self, '_inspection_marker', None) is not None:
-            self.plotter.remove(self._inspection_marker)
-            self._inspection_marker = None
-            self._inspection_point = None
+            self._clear_inspection_points(render=False)
         self.plotter.render()
 
     def _clear_path_playback_marker(self):
@@ -2043,6 +2444,7 @@ class Visualizer:
         if clear_poses:
             self._ef_target_poses = {}
             self._ef_pose_groups = []
+            self._inspection_target_groups = []
 
     def _clear_robot_tcp_axes(self, render=True):
         for actor in getattr(self, '_robot_tcp_axis_actors', []) or []:
@@ -2135,22 +2537,10 @@ class Visualizer:
         return self._get_robot_target_pose(robot_name)
 
     def _rpy_matrix(self, rpy):
-        roll, pitch, yaw = [float(v) for v in rpy]
-        cr, sr = np.cos(roll), np.sin(roll)
-        cp, sp = np.cos(pitch), np.sin(pitch)
-        cy, sy = np.cos(yaw), np.sin(yaw)
-        rx = np.array([[1, 0, 0], [0, cr, -sr], [0, sr, cr]], dtype=float)
-        ry = np.array([[cp, 0, sp], [0, 1, 0], [-sp, 0, cp]], dtype=float)
-        rz = np.array([[cy, -sy, 0], [sy, cy, 0], [0, 0, 1]], dtype=float)
-        return rz @ ry @ rx
+        return geom_utils.rpy_matrix(rpy)
 
     def _pose_to_T(self, pose):
-        pose = np.asarray(pose, dtype=float)
-        T = np.eye(4)
-        T[:3, 3] = pose[:3]
-        if pose.shape[0] >= 6:
-            T[:3, :3] = self._rpy_matrix(pose[3:6])
-        return T
+        return geom_utils.pose_to_T(pose)
 
     def _ef_pose_offset_T(self, frame_config):
         if not isinstance(frame_config, dict):
@@ -2171,18 +2561,7 @@ class Visualizer:
         return T
 
     def _T_to_pose(self, T):
-        T = np.asarray(T, dtype=float)
-        Rm = T[:3, :3]
-        sy = float(np.sqrt(Rm[0, 0] * Rm[0, 0] + Rm[1, 0] * Rm[1, 0]))
-        if sy > 1e-9:
-            roll = np.arctan2(Rm[2, 1], Rm[2, 2])
-            pitch = np.arctan2(-Rm[2, 0], sy)
-            yaw = np.arctan2(Rm[1, 0], Rm[0, 0])
-        else:
-            roll = np.arctan2(-Rm[1, 2], Rm[1, 1])
-            pitch = np.arctan2(-Rm[2, 0], sy)
-            yaw = 0.0
-        return np.asarray([T[0, 3], T[1, 3], T[2, 3], roll, pitch, yaw], dtype=float)
+        return geom_utils.T_to_pose(T)
 
     def _urdf_joint_origin_T(self, joint):
         T = np.eye(4)
@@ -2213,23 +2592,12 @@ class Visualizer:
             return np.eye(4) if fallback_T is None else fallback_T
 
     def _pose_frame_actors(self, pose, scale=0.18, axes=(0, 1, 2), show_origin=True):
-        pose_arr = np.asarray(pose, dtype=float)
-        T = pose_arr if pose_arr.shape == (4, 4) else self._pose_to_T(pose_arr)
-        origin = T[:3, 3]
-        actors = []
-        for axis, color in ((0, "red"), (1, "green"), (2, "blue")):
-            if axis not in axes:
-                continue
-            actor = vedo.Arrow(origin, origin + T[:3, axis] * scale, s=0.0008, c=color)
-            actor.alpha(0.35)
-            actor.pickable(False)
-            actors.append(actor)
-        if show_origin:
-            marker = vedo.Sphere(pos=origin, r=scale * 0.055, c="yellow")
-            marker.alpha(0.35)
-            marker.pickable(False)
-            actors.append(marker)
-        return actors
+        return vedo_visual_utils.pose_frame_actors(
+            pose,
+            scale=scale,
+            axes=axes,
+            show_origin=show_origin,
+        )
 
     def _ef_pose_robot_name(self, pose_name):
         return "dda_rb10_1300e" if pose_name == "DDA" else "rb20_1900es"
@@ -2285,132 +2653,47 @@ class Visualizer:
             self.plotter.add(*actors)
             self.plotter.render()
 
-    def _show_ef_ranked_candidate_target_groups(self, target_groups):
+    def _show_ef_target_groups(self, target_groups):
+        """EF pose target group들을 시각화한다.
+
+        RT 쪽 mesh/frame/connector 색으로 positioner 회전 필요 여부를 표시한다:
+        초록(limegreen) = 회전 없이 접근 가능(first), 주황(orangered) = 회전 필요(second).
+        판정은 `_inspection_group_is_reachable_now`(RT back-axis world x 부호) 기준이다.
+        DDA는 이 판정과 무관하므로 항상 gold로 표시한다.
+        """
         self._clear_ef_pose_visuals(clear_poses=False)
         actors = []
-        params = self._config.get("ef_pose", {}) or {}
-        max_groups = int(params.get("visualize_candidate_limit", 12))
-        groups_to_show = list(target_groups or [])[:max(1, max_groups)]
-        for rank, group_info in enumerate(groups_to_show):
-            alpha = 0.38 if rank == 0 else max(0.22, 0.30 - rank * 0.04)
+        for group_info in list(target_groups or []):
+            reachable = self._inspection_group_is_reachable_now(group_info)
+            rt_color = "limegreen" if reachable else "orangered"
             show_axes = True
             pair_origins = []
-            for robot_name, target_info in group_info.get("targets", {}).items():
-                pose_name = target_info.get("pose_name", robot_name)
-                target_T = np.asarray(target_info["target_T"], dtype=float)
+            self.__console.debug(
+                f"showing EF pose group: {group_info}, reachable={reachable}")
+            for robot_name, pose_name, target_T in self._inspection_group_pose_items(group_info):
                 pair_origins.append((pose_name, target_T[:3, 3].copy()))
-                if pose_name == "DDA":
-                    color = "gold" if rank == 0 else "orange"
-                else:
-                    color = "deepskyblue" if rank == 0 else "cyan"
-                actors.extend(self._target_pose_mesh_actors(robot_name, target_T, color=color, alpha=alpha))
+                color = "gold" if pose_name == "DDA" else rt_color
+                actors.extend(self._target_pose_mesh_actors(robot_name, target_T, color=color, alpha=0.3))
                 if show_axes:
                     scale = 0.22 if str(pose_name).startswith("RT") else 0.18
                     actors.extend(self._pose_frame_actors(
                         target_T,
                         scale=scale,
                         axes=(0, 1, 2),
-                        show_origin=(rank == 0),
+                        show_origin=(True),
                     ))
             if len(pair_origins) >= 2:
                 try:
-                    dda_origin = next(origin for name, origin in pair_origins if name == "DDA")
-                    rt_origin = next(origin for name, origin in pair_origins if str(name).startswith("RT"))
-                    pair_color = "black" if rank == 0 else "gray"
-                    connector = vedo.Line(dda_origin, rt_origin, c=pair_color, lw=4 if rank == 0 else 2)
-                    connector.alpha(0.75 if rank == 0 else 0.45)
+                    dda_origin  = next(origin for name, origin in pair_origins if name == "DDA")
+                    rt_origin   = next(origin for name, origin in pair_origins if str(name).startswith("RT"))
+                    connector   = vedo.Line(dda_origin, rt_origin, c=rt_color, lw=4)
+                    connector.alpha(0.75)
                     connector.pickable(False)
                     actors.append(connector)
                 except Exception:
                     pass
-            try:
-                first_target = next(iter(group_info.get("targets", {}).values()))
-                label_T = np.asarray(first_target["target_T"], dtype=float)
-                label = f"#{rank + 1} {group_info.get('rt_name', '')}"
-                metrics = group_info.get("priority", {}) or {}
-                label += (
-                    f" y=({metrics.get('dda_y', 0.0):.2f},{metrics.get('rt_neg_y', 0.0):.2f})"
-                    f" d/u=({metrics.get('rt_view_down45', 0.0):.2f},{metrics.get('rt_view_up45', 0.0):.2f})"
-                )
-                text = vedo.Text3D(
-                    label,
-                    pos=label_T[:3, 3] + np.array([0.0, 0.0, 0.08 + 0.018 * rank]),
-                    s=0.025,
-                    c="black" if rank == 0 else "gray",
-                )
-                text.alpha(0.85 if rank == 0 else 0.45)
-                text.pickable(False)
-                actors.append(text)
-            except Exception:
-                pass
         self._ef_pose_actors = actors
-        if actors:
-            self.plotter.add(*actors)
-            self.plotter.render()
-
-    def _extract_ef_poses_from_group(self, group):
-        orientation_group = group.get("0") or group.get("90") or next(iter(group.values()), None)
-        if not orientation_group:
-            return {}
-        return self._extract_ef_poses_from_orientation_group(orientation_group)
-
-    def _extract_ef_poses_from_orientation_group(self, orientation_group):
-        poses = {}
-        if orientation_group.get("DDA") is not None:
-            poses["DDA"] = np.asarray(orientation_group["DDA"], dtype=float)
-        if orientation_group.get("RT1") is not None:
-            poses["RT1"] = np.asarray(orientation_group["RT1"], dtype=float)
-        if orientation_group.get("RT2") is not None:
-            poses["RT2"] = np.asarray(orientation_group["RT2"], dtype=float)
-        return poses
-
-    def _show_ef_collision_pose_groups(self, pose_groups, max_groups=3):
-        if not pose_groups:
-            return 0
-        actors = []
-        shown = 0
-        for group_idx, group in enumerate(list(pose_groups)[:max(1, int(max_groups))]):
-            poses = self._extract_ef_poses_from_group(group)
-            if not poses:
-                continue
-            shown += 1
-            for name, pose in poses.items():
-                robot_name = self._ef_pose_robot_name(name)
-                T = self._pose_to_T(pose)
-                color = "crimson" if name == "DDA" else "orangered"
-                alpha = 0.20 if group_idx > 0 else 0.32
-                scale = 0.22 if name.startswith("RT") else 0.18
-                actors.extend(self._target_pose_mesh_actors(robot_name, T, color=color, alpha=alpha))
-                actors.extend(self._pose_frame_actors(T, scale=scale, axes=(0, 1, 2), show_origin=False))
-                try:
-                    label = f"COLLISION_{group_idx}_{name}"
-                    text = vedo.Text3D(label, pos=T[:3, 3] + np.array([0.0, 0.0, scale * 0.35]), s=scale * 0.12, c=color)
-                    text.pickable(False)
-                    actors.append(text)
-                except Exception:
-                    pass
-        self._ef_pose_actors.extend(actors)
-        if actors:
-            self.plotter.add(*actors)
-            self.plotter.render()
-        return shown
-
-    def _candidate_x_axis_actors(self, candidate_poses, scale=0.12):
-        actors = []
-        if candidate_poses is None:
-            return actors
-        for pose in list(candidate_poses):
-            T = self._pose_to_T(pose)
-            origin = T[:3, 3]
-            actor = vedo.Arrow(origin, origin + T[:3, 0] * scale, s=0.0005, c="red")
-            actor.alpha(0.18)
-            actor.pickable(False)
-            actors.append(actor)
-        return actors
-
-    def _show_ef_pose_candidates(self, candidate_poses):
-        actors = self._candidate_x_axis_actors(candidate_poses)
-        self._ef_pose_actors.extend(actors)
+        self.__console.info(f"showing {len(actors)} EF pose actors for {len(target_groups)} target groups")
         if actors:
             self.plotter.add(*actors)
             self.plotter.render()
@@ -2432,23 +2715,20 @@ class Visualizer:
         pcd.normalize_normals()
         return pcd
 
-    def _extract_ef_poses(self, pose_groups):
-        if not pose_groups:
-            raise RuntimeError("poseDeterminator returned no valid pose group")
-        group = pose_groups[0]
-        poses = self._extract_ef_poses_from_group(group)
-        if not poses:
-            raise RuntimeError("pose group is empty")
-        return poses
-
-    def _determine_ef_pose(self, request_data):
+    def _handle_request_determine_ef_pose(self, request_data):
+        """선택된 검사 지점 여러 개를 순회해 EF pose target group 목록을 만든다."""
         identity = request_data.get("_identity")
         result = {"status": "failed"}
         total_t0 = time.perf_counter()
         try:
             self._clear_ik_failure_visuals(render=False)
-            target = getattr(self, '_inspection_point', None)
-            if target is None:
+            inspection_points = [
+                np.asarray(point, dtype=float)
+                for point in (getattr(self, "_inspection_points", []) or [])
+            ]
+            if not inspection_points and getattr(self, "_inspection_point", None) is not None:
+                inspection_points = [np.asarray(self._inspection_point, dtype=float)]
+            if not inspection_points:
                 raise RuntimeError("inspection point is not selected")
 
             pose_dir = os.path.abspath(
@@ -2456,14 +2736,24 @@ class Visualizer:
             )
             if pose_dir not in sys.path:
                 sys.path.insert(0, pose_dir)
-            from EndEffectorPoseOptimizer import EndEffectorPoseOptimizer
 
-            optimizer = EndEffectorPoseOptimizer(debug_mode=True)
+            params = self._config.get("ef_pose", {}) or {}
+            optimizer_logging = params.get("logging", {}) or {}
+            optimizer = EndEffectorPoseOptimizer(
+                debug_mode=bool(params.get("debug_mode", True)),
+                log_path=optimizer_logging.get("log_path"),
+                log_dir=optimizer_logging.get("log_dir"),
+                log_level=optimizer_logging.get("level", "DEBUG"),
+                console_level=optimizer_logging.get("console_level"),
+                file_level=optimizer_logging.get("file_level"),
+                logger_name=optimizer_logging.get("name", "flame_robotics"),
+                force_logger_config=optimizer_logging.get("force"),
+            )
             stage_t0 = time.perf_counter()
             optimizer._scan_data = self._pose_determinator_point_cloud()
             pcd_elapsed = time.perf_counter() - stage_t0
+
             stage_t0 = time.perf_counter()
-            params = self._config.get("ef_pose", {}) or {}
             frame_cfg = params.get("frames", {}) or {}
             dda_frame_cfg = frame_cfg.get("dda", {}) or {}
             rt_frame_cfg = frame_cfg.get("rt", {}) or {}
@@ -2472,36 +2762,27 @@ class Visualizer:
             rt_end_link = str(rt_frame_cfg.get("end_link", "rt_link_end"))
             rt_tcp_joint = str(rt_frame_cfg.get("tcp_joint", "rt_joint_end"))
             dda_pipe_facing_axis = np.asarray(
-                dda_frame_cfg.get("pipe_facing_axis", [1.0, 0.0, 0.0]),
-                dtype=float,
-            )
+                dda_frame_cfg.get("pipe_facing_axis", [1.0, 0.0, 0.0]), dtype=float)
             dda_pipe_parallel_axis = dda_frame_cfg.get("pipe_parallel_axis")
             optimizer.set_dda_pipe_facing_axis(
                 dda_pipe_facing_axis,
                 None if dda_pipe_parallel_axis is None else np.asarray(dda_pipe_parallel_axis, dtype=float),
             )
             rt_pipe_facing_axis = np.asarray(
-                rt_frame_cfg.get("pipe_facing_axis", [0.0, -1.0, 0.0]),
-                dtype=float,
-            )
+                rt_frame_cfg.get("pipe_facing_axis", [0.0, -1.0, 0.0]), dtype=float)
             optimizer.set_rt_pipe_facing_axis(rt_pipe_facing_axis)
+
             dda_pose_to_link = self._ef_pose_offset_T(dda_frame_cfg)
             rt_pose_to_link = self._ef_pose_offset_T(rt_frame_cfg)
             backend = getattr(self, "_robotics_backend", None)
             if backend is None:
                 raise RuntimeError("robotics backend is not initialized")
+            
             dda_mesh, dda_tcp_to_link = backend.end_effector_collision_geometry(
-                "dda_rb10_1300e",
-                dda_end_link,
-                dda_tcp_joint,
-                pose_to_link_offset=dda_pose_to_link,
-            )
+                "dda_rb10_1300e", dda_end_link, dda_tcp_joint, pose_to_link_offset=dda_pose_to_link)
             rt_mesh, rt_tcp_to_link = backend.end_effector_collision_geometry(
-                "rb20_1900es",
-                rt_end_link,
-                rt_tcp_joint,
-                pose_to_link_offset=rt_pose_to_link,
-            )
+                "rb20_1900es", rt_end_link, rt_tcp_joint, pose_to_link_offset=rt_pose_to_link)
+            
             optimizer.set_DDA_geometry(dda_mesh, dda_tcp_to_link)
             optimizer.set_RT_geometry(rt_mesh, rt_tcp_to_link)
             scan_data = optimizer._scan_data
@@ -2516,16 +2797,20 @@ class Visualizer:
                         sample_count=sample_count,
                     )
             )
+
             urdf_elapsed = time.perf_counter() - stage_t0
+
             self.__console.info(
                 "EF pose optimizer frames: "
                 "geometry_backend=robotics, "
                 f"DDA(end_link={dda_end_link}, tcp_joint={dda_tcp_joint}, "
                 f"pose_to_link_t={None if dda_pose_to_link is None else np.round(dda_pose_to_link[:3, 3], 5).tolist()}, "
-                f"pipe_facing_axis={np.round(dda_pipe_facing_axis, 5).tolist()}), "
+                f"pipe_facing_axis={np.round(dda_pipe_facing_axis, 5).tolist()}, "
+                f"pipe_parallel_axis={None if dda_pipe_parallel_axis is None else np.round(np.asarray(dda_pipe_parallel_axis, dtype=float), 5).tolist()}), "
                 f"RT(end_link={rt_end_link}, tcp_joint={rt_tcp_joint}, "
                 f"pose_to_link_t={None if rt_pose_to_link is None else np.round(rt_pose_to_link[:3, 3], 5).tolist()}, "
                 f"pipe_facing_axis={np.round(rt_pipe_facing_axis, 5).tolist()})")
+            
             for robot_name in ("dda_rb10_1300e", "rb20_1900es"):
                 rel_T = self._target_to_mesh_link_T(robot_name)
                 self.__console.info(
@@ -2535,102 +2820,133 @@ class Visualizer:
                     f"target_to_mesh_t={np.round(rel_T[:3, 3], 5).tolist()}, "
                     f"target_to_mesh_y={np.round(rel_T[:3, 1], 5).tolist()}")
 
-            target = np.asarray(target, dtype=float)
-            stage_t0 = time.perf_counter()
-            optimizer.calculate_pipe_profile(
-                target,
-                sampling_size_for_calculating_normal=float(
-                    params.get("sampling_size_for_calculating_normal", 0.01)),
-                radius_offset_for_sampling_points_in_sphere=float(
-                    params.get("radius_offset_for_sampling_points_in_sphere", 0.003)),
-            )
-            profile_elapsed = time.perf_counter() - stage_t0
-            stage_t0 = time.perf_counter()
-            _, pose_groups = optimizer.calculate_DDA_RT_pose_for_taking_xray(
-                target,
-                num_candidates=int(params.get("num_candidates", 8)),
-                distance_from_dda_to_surface=float(params.get("distance_from_dda_to_surface", 0.01)),
-                distance_from_dda_to_rt=float(params.get("distance_from_dda_to_rt", 0.3)),
-                angle_of_rt=float(params.get("angle_of_rt", 10.0)),
-            )
-            pose_elapsed = time.perf_counter() - stage_t0
-            debug_info = getattr(optimizer, "debuging_info", {}) or {}
-            self.__console.info(
-                "EF pose candidate summary: "
-                f"base={len(debug_info.get('dda_base_candidates', []))}, "
-                f"valid_base={len(debug_info.get('valid_base_dda_poses', []))}, "
-                f"base_collisions={debug_info.get('base_dda_collision_count', 'n/a')}, "
-                f"complete_groups={debug_info.get('complete_pose_group_count', 'n/a')}, "
-                f"partial_groups={debug_info.get('partial_pose_group_count', 'n/a')}, "
-                f"rotated_dda_collisions={debug_info.get('rotated_dda_collision_count', 'n/a')}, "
-                f"rejected_groups={debug_info.get('rejected_pose_group_count', 'n/a')}, "
-                f"rt1_collisions={debug_info.get('rt1_collision_count', 'n/a')}, "
-                f"rt2_collisions={debug_info.get('rt2_collision_count', 'n/a')}, "
-                f"dda_front_extent={debug_info.get('dda_mesh_front_extent_along_facing_axis', 'n/a')}, "
-                f"dda_candidate_radius={debug_info.get('dda_candidate_centerline_radius', 'n/a')}, "
-                f"rt_front_extent={debug_info.get('rt_mesh_front_extent_along_facing_axis', 'n/a')}, "
-                f"rt_adjusted_distance={debug_info.get('rt_adjusted_distance_from_dda_to_rt', 'n/a')}, "
-                f"used_partial_fallback={bool(debug_info.get('used_partial_pose_group_fallback', False))}")
-            dda_minus_y_dots = debug_info.get("dda_minus_y_dot_pipe_center", [])
-            dda_config_dots = debug_info.get("dda_configured_facing_dot_pipe_center", [])
-            if dda_minus_y_dots:
-                self.__console.info(
-                    "EF pose DDA axis check: "
-                    f"configured_axis={debug_info.get('dda_pipe_facing_axis_local')}, "
-                    f"parallel_axis={debug_info.get('dda_pipe_parallel_axis_local')}, "
-                    f"minus_y_dot_pipe_center=[{min(dda_minus_y_dots):.4f}, {max(dda_minus_y_dots):.4f}], "
-                    f"configured_dot_pipe_center=[{min(dda_config_dots):.4f}, {max(dda_config_dots):.4f}]")
-            try:
-                poses = self._extract_ef_poses(pose_groups)
-            except Exception as extract_exc:
-                collision_groups = debug_info.get("collision_pose_groups", [])
-                if not collision_groups:
-                    collision_groups = debug_info.get("rejected_pose_groups", [])
-                shown_collision_groups = self._show_ef_collision_pose_groups(collision_groups)
-                candidate_poses = debug_info.get("valid_base_dda_poses")
-                if candidate_poses is None or len(candidate_poses) == 0:
-                    candidate_poses = debug_info.get("dda_base_candidates", [])
-                self._show_ef_pose_candidates(candidate_poses)
-                self.__console.warning(
-                    "EF pose extraction failed; showing collision groups: "
-                    f"shown={shown_collision_groups}, available={len(collision_groups)}, error={extract_exc}")
-                result = {
-                    "status": "failed",
-                    "message": str(extract_exc),
-                    "candidate_count": len(candidate_poses),
-                    "collision_group_count": len(collision_groups),
-                    "shown_collision_group_count": shown_collision_groups,
-                    "elapsed": time.perf_counter() - total_t0,
-                    "timing": {
-                        "point_cloud": pcd_elapsed,
-                        "urdf": urdf_elapsed,
-                        "pipe_profile": profile_elapsed,
-                        "pose_candidates": pose_elapsed,
-                    },
-                }
-                return
-            self._ef_pose_groups = list(pose_groups or [])
-            ranked_target_groups = self._ef_pose_selected_candidate_target_groups()
-            if ranked_target_groups:
-                poses = {
-                    target_info["pose_name"]: self._T_to_pose(target_info["target_T"])
-                    for target_info in ranked_target_groups[0]["targets"].values()
-                }
-            self._ef_target_poses = poses
-            if ranked_target_groups:
-                self._show_ef_ranked_candidate_target_groups(ranked_target_groups)
-            else:
-                self._show_ef_target_poses(poses)
-            candidate_poses = debug_info.get("valid_base_dda_poses")
-            if candidate_poses is None or len(candidate_poses) == 0:
-                candidate_poses = debug_info.get("dda_base_candidates", [])
-            self._show_ef_pose_candidates(candidate_poses)
+            all_target_groups = []
+            target_failures = []
+            profile_elapsed = 0.0
+            pose_elapsed = 0.0
+
+            for point_index, target in enumerate(inspection_points):
+                try:
+                    optimizer.debuging_info = {}
+                    stage_t0 = time.perf_counter()
+                    optimizer.calculate_pipe_profile(
+                        target,
+                        sampling_size_for_calculating_normal=float(
+                            params.get("sampling_size_for_calculating_normal", 0.01)),
+                        radius_offset_for_sampling_points_in_sphere=float(
+                            params.get("radius_offset_for_sampling_points_in_sphere", 0.003)),
+                    )
+                    profile_dt = time.perf_counter() - stage_t0
+                    profile_elapsed += profile_dt
+
+                    stage_t0 = time.perf_counter()
+                    target_groups = optimizer.calculate_DDA_RT_pose_for_taking_xray(
+                        target,
+                        num_candidates=int(params.get("num_candidates", 9)),
+                        distance_from_dda_to_surface=float(params.get("distance_from_dda_to_surface", 0.01)),
+                        distance_from_dda_to_rt=float(params.get("distance_from_dda_to_rt", 0.3)),
+                        angle_of_rt=float(params.get("angle_of_rt", 10.0)),
+                        rt_pipe_facing_axis=rt_pipe_facing_axis,
+                        pose_name_to_robot_name=self._ef_pose_robot_name,
+                        force_90_fallback=bool(params.get("force_90_fallback", False)),
+                    )
+                    target_groups = list(target_groups or [])
+                    pose_dt = time.perf_counter() - stage_t0
+                    pose_elapsed += pose_dt
+
+                    debug_info = getattr(optimizer, "debuging_info", {}) or {}
+                    base_candidates = debug_info.get("dda_base_candidates")
+                    valid_base_candidates = debug_info.get("valid_base_dda_poses")
+                    base_count = "n/a" if base_candidates is None else len(base_candidates)
+                    valid_base_count = (
+                        "n/a" if valid_base_candidates is None else len(valid_base_candidates)
+                    )
+                    self.__console.info(
+                        "EF pose candidate summary: "
+                        f"point={point_index + 1}/{len(inspection_points)}, "
+                        f"target_point={np.round(target, 4).tolist()}, "
+                        f"base={base_count}, "
+                        f"valid_base_dda_poses={valid_base_count}, "
+                        f"target_groups={len(target_groups or [])}, "
+                        f"strategy={debug_info.get('selected_pose_pair_strategy', 'n/a')}, "
+                        f"angle_of_rt={debug_info.get('rt_angle_of_rt_input_deg', 'n/a')}, "
+                        f"complete_groups={debug_info.get('complete_pose_group_count', 'n/a')}, "
+                        f"partial_groups={debug_info.get('partial_pose_group_count', 'n/a')}, "
+                        f"rejected_groups={debug_info.get('rejected_pose_group_count', 'n/a')}, "
+                        f"used_partial_fallback={bool(debug_info.get('used_partial_pose_group_fallback', False))}, "
+                        f"elapsed=profile {profile_dt * 1000:.1f}ms + pose {pose_dt * 1000:.1f}ms")
+
+                    # rt60_items = []
+                    # for group in list(target_groups or []):
+                    #     priority = group.get("priority", {}) or {}
+                    #     rt_angle = priority.get("preferred_rt_angle_deg")
+                    #     if rt_angle is None:
+                    #         continue
+                    #     rt_angle    = float(rt_angle)
+                    #     # 기준 각도는 group마다 다르다(3쌍=±60, 2쌍=±45).
+                    #     direct_ref  = priority.get("direct_rt_reference_deg")
+                    #     ref_deg     = abs(float(direct_ref)) if direct_ref is not None else 60.0
+                    #     plus_dev    = abs((rt_angle - ref_deg + 180.0) % 360.0 - 180.0)
+                    #     minus_dev   = abs((rt_angle + ref_deg + 180.0) % 360.0 - 180.0)
+                    #     nearest     = ref_deg if plus_dev <= minus_dev else -ref_deg
+                    #     deviation   = min(plus_dev, minus_dev)
+                    #     rt60_items.append({
+                    #         "name": group.get("name"),
+                    #         "slot": group.get("slot_name"),
+                    #         "rt": group.get("rt_name"),
+                    #         "angle": round(rt_angle, 3),
+                    #         "nearest": nearest,
+                    #         "deviation": round(float(deviation), 3),
+                    #         "requires_positioner_rotation": bool(
+                    #             priority.get("requires_positioner_rotation", False)),
+                    #         "direct_reference": priority.get("direct_rt_reference_deg"),
+                    #         "direct_deviation": priority.get("direct_rt_deviation_deg"),
+                    #     })
+
+
+                    # if not target_groups:
+                    #     target_failures.append({
+                    #         "point_index": point_index,
+                    #         "point": target.tolist(),
+                    #         "message": "poseDeterminator returned no target group",
+                    #         "complete_group_count": debug_info.get("complete_pose_group_count"),
+                    #         "partial_group_count": debug_info.get("partial_pose_group_count"),
+                    #         "rejected_group_count": debug_info.get("rejected_pose_group_count"),
+                    #     })
+                    #     self.__console.warning(
+                    #         "EF pose target group missing for selected point: "
+                    #         f"point={point_index + 1}, "
+                    #         f"complete={debug_info.get('complete_pose_group_count', 'n/a')}, "
+                    #         f"partial={debug_info.get('partial_pose_group_count', 'n/a')}, "
+                    #         f"rejected={debug_info.get('rejected_pose_group_count', 'n/a')}")
+                    #     continue
+
+                    all_target_groups.extend(list(target_groups or []))
+
+                except Exception as point_exc:
+                    target_failures.append({
+                        "point_index": point_index,
+                        "point": target.tolist(),
+                        "message": str(point_exc),
+                    })
+                    self.__console.error(
+                        f"EF pose failed for selected point {point_index + 1}: {point_exc}")
+
+            if not all_target_groups:
+                raise RuntimeError(
+                    f"poseDeterminator returned no valid target group for "
+                    f"{len(inspection_points)} selected point(s): {target_failures}")
+
+            self._ef_pose_groups = []
+            self._inspection_target_groups = all_target_groups
+            self._show_ef_target_groups(all_target_groups)
+
             result = {
                 "status": "success",
-                "poses": {name: pose.tolist() for name, pose in poses.items()},
-                "pose_group_count": len(getattr(self, "_ef_pose_groups", []) or []),
-                "ranked_candidate_count": len(ranked_target_groups),
-                "candidate_count": len(candidate_poses),
+                "target_groups": all_target_groups,
+                "inspection_point_count": len(inspection_points),
+                "target_group_count": len(all_target_groups),
+                "target_failures": target_failures,
                 "elapsed": time.perf_counter() - total_t0,
                 "timing": {
                     "point_cloud": pcd_elapsed,
@@ -2641,15 +2957,14 @@ class Visualizer:
             }
             self.__console.info(
                 "EF pose determined: "
-                f"poses={list(poses.keys())}, candidates={len(candidate_poses)}, "
+                f"points={len(inspection_points)}, target_groups={len(all_target_groups)}, "
                 f"elapsed={result['elapsed']:.3f}s "
                 f"(pcd={pcd_elapsed:.3f}s, urdf={urdf_elapsed:.3f}s, "
                 f"profile={profile_elapsed:.3f}s, pose={pose_elapsed:.3f}s)")
         except Exception as exc:
-            if str(exc) != "__ef_pose_collision_groups_rendered__":
-                elapsed = time.perf_counter() - total_t0
-                result = {"status": "failed", "message": str(exc), "elapsed": elapsed}
-                self.__console.error(f"EF pose determination failed after {elapsed:.3f}s: {exc}")
+            elapsed = time.perf_counter() - total_t0
+            result = {"status": "failed", "message": str(exc), "elapsed": elapsed}
+            self.__console.error(f"EF pose determination failed after {elapsed:.3f}s: {exc}")
         if hasattr(self, 'zapi') and self.zapi:
             self.zapi.reply_ef_pose(result, identity=identity)
 
@@ -2662,7 +2977,7 @@ class Visualizer:
         raise RuntimeError(f"Planner plugin class not found: {module_name}")
 
     def _inspection_q_space_planner_name(self, planner_name):
-        q_space_planners = {"rrt_connect", "rrt_star"}
+        q_space_planners = {"rrt_connect", "rrt_star", "direct_path"}
         planner_name = str(planner_name or "rrt_connect")
         if planner_name in q_space_planners:
             return planner_name
@@ -2780,22 +3095,19 @@ class Visualizer:
             "pitch_min": -np.pi, "pitch_max": np.pi,
             "yaw_min": -np.pi, "yaw_max": np.pi,
         }
-        if hasattr(planner, "bounds"):
-            planner.bounds = bounds
-        if hasattr(planner, "step_size"):
-            planner.step_size = float(step_size)
-        if hasattr(planner, "max_iter"):
-            planner.max_iter = int(max_iter)
-        if hasattr(planner, "max_iterations"):
-            planner.max_iterations = int(max_iter)
-        if hasattr(planner, "pin_collision_sample_resolution"):
-            planner.pin_collision_sample_resolution = float(step_size)
+        # planner 하위 속성을 직접 건드리지 않고 추상 클래스의 configure()만 호출한다.
+        backend = None
         if robot_name is not None:
             backend = getattr(self, "_robotics_backend", None)
             if backend is None:
                 raise RuntimeError("robotics backend is not initialized")
-            planner.robotics_backend = backend
-            planner.robotics_robot_name = robot_name
+        planner.configure(
+            bounds=bounds,
+            step_size=float(step_size),
+            max_iter=int(max_iter),
+            robotics_backend=backend,
+            robotics_robot_name=robot_name,
+        )
         if timings is not None:
             timings["planner_bounds_config"] = time.perf_counter() - setup_t0
         collision_obstacle_mesh = obstacle_mesh
@@ -2805,14 +3117,14 @@ class Visualizer:
             if urdf_path:
                 try:
                     urdf_t0 = time.perf_counter()
-                    planner.pin_model = backend.robot_model(robot_name)
-                    planner.pin_data = planner.pin_model.createData()
+                    robot_backend_model = backend.robot_model(robot_name)
+                    planner.configure(robot_model=robot_backend_model)
                     if timings is not None:
                         timings["planner_robotics_model"] = time.perf_counter() - urdf_t0
-                    self._log_pinocchio_robot_model(robot_name, urdf_path, planner.pin_model)
+                    self._log_robot_backend_model(robot_name, urdf_path, robot_backend_model)
                 except Exception as exc:
                     raise RuntimeError(f"inspection path robotics model setup failed: {exc}") from exc
-            if getattr(planner, "pin_model", None) is not None and model is not None:
+            if getattr(planner, "_has_robot_q_space_model", lambda: False)() and model is not None:
                 base_T = np.asarray(getattr(model, "_base_T", np.eye(4)), dtype=float)
                 if base_T.shape == (4, 4) and not np.allclose(base_T, np.eye(4)):
                     transform_t0 = time.perf_counter()
@@ -2827,36 +3139,42 @@ class Visualizer:
         planner.add_collision_object(collision_obstacle_mesh)
         if timings is not None:
             timings["planner_obstacle_bvh"] = time.perf_counter() - obstacle_t0
-        self._log_pinocchio_collision_targets(robot_name, planner)
+        self._log_robot_collision_targets(robot_name, planner)
         return bounds
 
-    def _log_pinocchio_collision_targets(self, robot_name, planner):
+    def _log_robot_collision_targets(self, robot_name, planner):
         if planner is None or not hasattr(planner, "pinocchio_collision_geometry_summary"):
             return
-        logged = getattr(self, "_logged_pinocchio_collision_targets", set())
+        logged = getattr(self, "_logged_robot_collision_targets", set())
         geom_model = getattr(planner, "pin_geom_model", None)
         static_ids = tuple(getattr(planner, "_pin_static_object_ids", []) or [])
-        key = (robot_name, len(getattr(geom_model, "geometryObjects", []) or []), len(getattr(geom_model, "collisionPairs", []) or []), static_ids)
+        backend_name = getattr(getattr(planner, "robotics_backend", None), "name", "pinocchio")
+        geometries = planner.pinocchio_collision_geometry_summary()
+        pairs_all = planner.pinocchio_collision_pair_summary(include_robot_self=True, include_static=True)
+        key = (backend_name, robot_name, len(geometries), len(pairs_all), static_ids)
         if key in logged:
             return
         logged.add(key)
-        self._logged_pinocchio_collision_targets = logged
-        geometries = planner.pinocchio_collision_geometry_summary()
+        self._logged_robot_collision_targets = logged
         robot_geometries = [item for item in geometries if item.get("kind") == "robot"]
         static_geometries = [item for item in geometries if item.get("kind") == "static"]
         robot_self_pairs = planner.pinocchio_collision_pair_summary(include_robot_self=True, include_static=False)
         static_pairs = planner.pinocchio_collision_pair_summary(include_robot_self=False, include_static=True)
         positioner_checked = self._planner_has_positioner_collision(planner)
         self.__console.info(
-            "Pinocchio collision targets: "
-            f"robot={robot_name}, robot_geoms={len(robot_geometries)}, "
+            "robot collision targets: "
+            f"backend={backend_name}, robot={robot_name}, robot_geoms={len(robot_geometries)}, "
             f"static_geoms={len(static_geometries)}, "
             f"robot_self_pairs={len(robot_self_pairs)}, robot_static_pairs={len(static_pairs)}, "
             f"positioner_collision_checked={positioner_checked}")
         if not positioner_checked:
             self.__console.debug(
-                "Pinocchio collision targets: positioner URDF is not part of this planner collision model; "
+                "robot collision targets: positioner URDF is not part of this planner collision model; "
                 "positioner collision is skipped for this path check.")
+
+    def _log_pinocchio_collision_targets(self, robot_name, planner):
+        """Backward-compatible alias. Prefer _log_robot_collision_targets()."""
+        return self._log_robot_collision_targets(robot_name, planner)
 
     def _planner_has_positioner_collision(self, planner):
         try:
@@ -2879,30 +3197,37 @@ class Visualizer:
             for pair in pairs
         )
 
-    def _log_pinocchio_robot_model(self, robot_name, urdf_path, pin_model):
-        logged = getattr(self, "_logged_pinocchio_models", set())
+    def _log_robot_backend_model(self, robot_name, urdf_path, robot_backend_model):
+        logged = getattr(self, "_logged_robot_backend_models", set())
         try:
             urdf_mtime_ns = os.stat(urdf_path).st_mtime_ns
         except OSError:
             urdf_mtime_ns = None
         key = (robot_name, urdf_path, urdf_mtime_ns)
-        if key in logged or pin_model is None:
+        if key in logged or robot_backend_model is None:
             return
         logged.add(key)
-        self._logged_pinocchio_models = logged
-        joint_names = self._pin_joint_names(pin_model)
+        self._logged_robot_backend_models = logged
+        backend = getattr(self, "_robotics_backend", None)
+        backend_name = getattr(backend, "name", "unknown")
+        joint_names = self._robot_joint_names(robot_name, robot_backend_model)
         track_joints = [name for name in joint_names if "linear_track" in name or "carriage" in name]
-        lo = np.asarray(pin_model.lowerPositionLimit, dtype=float)
-        hi = np.asarray(pin_model.upperPositionLimit, dtype=float)
+        try:
+            lo, hi, _ = backend.joint_limits_for_metric(robot_name, normalize=True)
+        except Exception:
+            lo = np.asarray(getattr(robot_backend_model, "lowerPositionLimit", []), dtype=float)
+            hi = np.asarray(getattr(robot_backend_model, "upperPositionLimit", []), dtype=float)
+        lo = np.asarray([] if lo is None else lo, dtype=float)
+        hi = np.asarray([] if hi is None else hi, dtype=float)
         joint_limits = {
             name: [float(lo[i]), float(hi[i])]
-            for i, name in enumerate(joint_names[:len(lo)])
+            for i, name in enumerate(joint_names[:min(len(lo), len(hi))])
         }
         track_joint_placements = {}
         for name in track_joints:
             try:
-                joint_id = int(pin_model.getJointId(name))
-                placement = pin_model.jointPlacements[joint_id]
+                joint_id = int(robot_backend_model.getJointId(name))
+                placement = robot_backend_model.jointPlacements[joint_id]
                 track_joint_placements[name] = {
                     "parent_to_joint_translation": np.asarray(placement.translation, dtype=float).tolist(),
                     "parent_to_joint_rotation": np.asarray(placement.rotation, dtype=float).round(6).tolist(),
@@ -2910,10 +3235,14 @@ class Visualizer:
             except Exception:
                 continue
         self.__console.info(
-            f"Pinocchio model for {robot_name}: urdf={urdf_path}, "
+            f"robot backend model for {robot_name}: backend={backend_name}, urdf={urdf_path}, "
             f"mtime_ns={urdf_mtime_ns}, "
-            f"nq={pin_model.nq}, joints={joint_names}, track_joints={track_joints}, "
+            f"dof={self._robot_dof(robot_name, robot_backend_model)}, joints={joint_names}, track_joints={track_joints}, "
             f"limits={joint_limits}, track_joint_placements={track_joint_placements}")
+
+    def _log_pinocchio_robot_model(self, robot_name, urdf_path, pin_model):
+        """Backward-compatible alias. Prefer _log_robot_backend_model()."""
+        return self._log_robot_backend_model(robot_name, urdf_path, pin_model)
 
     def _probe_current_spool_pinocchio_collision(self, reason="spool"):
         """Add the currently loaded spool mesh to Pinocchio and check current robot q."""
@@ -2968,17 +3297,48 @@ class Visualizer:
         self._last_spool_collision_probe = results
         return results
 
-    def _pin_joint_names(self, pin_model):
-        return [str(name) for name in list(pin_model.names)[1:1 + pin_model.nq]]
+    def _robot_joint_names(self, robot_name, robot_backend_model=None):
+        backend = getattr(self, "_robotics_backend", None)
+        if backend is not None and robot_name:
+            try:
+                return [str(name) for name in backend.joint_names(robot_name)]
+            except Exception:
+                pass
+        if robot_backend_model is not None and hasattr(robot_backend_model, "names"):
+            nq = int(getattr(robot_backend_model, "nq", len(list(robot_backend_model.names)) - 1))
+            return [str(name) for name in list(robot_backend_model.names)[1:1 + nq]]
+        return []
 
-    def _current_robot_q(self, model, pin_model):
-        q = np.zeros(pin_model.nq, dtype=float)
-        for i, joint_name in enumerate(self._pin_joint_names(pin_model)):
+    def _robot_dof(self, robot_name, robot_backend_model=None):
+        backend = getattr(self, "_robotics_backend", None)
+        if backend is not None and robot_name:
+            try:
+                return int(backend.dof(robot_name))
+            except Exception:
+                pass
+        if robot_backend_model is not None and hasattr(robot_backend_model, "nq"):
+            return int(robot_backend_model.nq)
+        names = self._robot_joint_names(robot_name, robot_backend_model)
+        return len(names)
+
+    def _pin_joint_names(self, pin_model):
+        return self._robot_joint_names(None, pin_model)
+
+    def _current_robot_q(self, model, pin_model=None, robot_name=None):
+        robot_name = robot_name or getattr(model, "name", None)
+        dof = self._robot_dof(robot_name, pin_model)
+        q = np.zeros(dof, dtype=float)
+        for i, joint_name in enumerate(self._robot_joint_names(robot_name, pin_model)):
+            if i >= q.size:
+                break
             q[i] = float(model._joint_cfg.get(joint_name, 0.0))
         return q
 
-    def _apply_robot_q(self, model, pin_model, q):
-        for i, joint_name in enumerate(self._pin_joint_names(pin_model)):
+    def _apply_robot_q(self, model, pin_model, q, robot_name=None):
+        robot_name = robot_name or getattr(model, "name", None)
+        for i, joint_name in enumerate(self._robot_joint_names(robot_name, pin_model)):
+            if i >= len(q):
+                break
             model.set_joint(joint_name, float(q[i]))
         model.update_fk()
 
@@ -3020,9 +3380,7 @@ class Visualizer:
         if backend is None:
             raise RuntimeError("robotics backend is not initialized")
         try:
-            handle = backend.robot_handle(robot_name)
-            if handle.model is pin_model:
-                return backend.frame_id(robot_name, self._robot_target_link_name(robot_name))
+            return backend.frame_id(robot_name, self._robot_target_link_name(robot_name))
         except Exception:
             pass
         link_name = self._robot_target_link_name(robot_name)
@@ -3040,16 +3398,14 @@ class Visualizer:
         if backend is None:
             raise RuntimeError("robotics backend is not initialized")
         try:
-            handle = backend.robot_handle(robot_name)
-            if handle.model is pin_model:
-                return backend.frame_world_T(
-                    robot_name,
-                    q,
-                    self._robot_target_link_name(robot_name),
-                )
+            return backend.frame_world_T(
+                robot_name,
+                q,
+                self._robot_target_link_name(robot_name),
+            )
         except Exception:
             pass
-        if pin is None:
+        if pin is None or pin_model is None:
             return None
         data = pin_model.createData()
         pin.forwardKinematics(pin_model, data, q)
@@ -3120,60 +3476,7 @@ class Visualizer:
         if not trace:
             return None
         try:
-            out_dir = Path(
-                getattr(
-                    self,
-                    "_inspection_ik_experiment_dir",
-                    Path(self._config.get("experiment_dir", "experiment")) / "inspection_ik",
-                )
-            )
-            stamp = time.strftime("%Y%m%d_%H%M%S")
-            safe_robot = "".join(ch if ch.isalnum() or ch in ("_", "-") else "_" for ch in str(robot_name))
-            normalize_label = "normalized" if bool((ik_result or {}).get("normalize", False)) else "raw"
-            if bool((ik_result or {}).get("fallback", False)):
-                status_label = "fallback"
-            elif bool((ik_result or {}).get("success", False)):
-                status_label = "success"
-            else:
-                status_label = "failed"
-            if bool((ik_result or {}).get("collision", False)):
-                status_label = f"{status_label}_collision"
-            status_dir = "collision" if "collision" in status_label else status_label
-            out_dir = out_dir / status_dir
-            out_dir.mkdir(parents=True, exist_ok=True)
-            stem = f"inspection_ik_{stamp}_{safe_robot}_{normalize_label}_{status_label}"
-            csv_path = out_dir / f"{stem}.csv"
-            json_path = out_dir / f"{stem}.json"
-            joint_names = self._pin_joint_names(pin_model)
-
-            with csv_path.open("w", newline="", encoding="utf-8") as f:
-                fieldnames = [
-                    "iteration",
-                    "err_norm",
-                    "position_error",
-                    "orientation_error",
-                    "tcp_x",
-                    "tcp_y",
-                    "tcp_z",
-                ] + [f"q{i}_{name}" for i, name in enumerate(joint_names)]
-                writer = csv.DictWriter(f, fieldnames=fieldnames)
-                writer.writeheader()
-                for row in trace:
-                    q = np.asarray(row.get("q", []), dtype=float).reshape(-1)
-                    tcp = np.asarray(row.get("tcp_world", [np.nan, np.nan, np.nan]), dtype=float).reshape(-1)
-                    data = {
-                        "iteration": int(row.get("iteration", 0)),
-                        "err_norm": float(row.get("err_norm", np.nan)),
-                        "position_error": float(row.get("position_error", np.nan)),
-                        "orientation_error": float(row.get("orientation_error", np.nan)),
-                        "tcp_x": float(tcp[0]) if tcp.size > 0 else np.nan,
-                        "tcp_y": float(tcp[1]) if tcp.size > 1 else np.nan,
-                        "tcp_z": float(tcp[2]) if tcp.size > 2 else np.nan,
-                    }
-                    for i, name in enumerate(joint_names):
-                        data[f"q{i}_{name}"] = float(q[i]) if i < q.size else np.nan
-                    writer.writerow(data)
-
+            joint_names = self._robot_joint_names(robot_name, pin_model)
             target_T = self._inspection_target_world_T(
                 robot_model,
                 pin_model,
@@ -3181,22 +3484,29 @@ class Visualizer:
                 target_pose,
                 np.asarray(goal_q, dtype=float),
             )
-            meta = {
-                "robot_name": robot_name,
-                "urdf_path": os.path.abspath(getattr(robot_model, "urdf_path", "")),
-                "base_pose": list(getattr(robot_model, "base_pose", [0, 0, 0, 0, 0, 0])),
-                "joint_names": joint_names,
-                "target_link_name": self._robot_target_link_name(robot_name),
-                "csv_path": str(csv_path),
-                "target_T": None if target_T is None else np.asarray(target_T, dtype=float).tolist(),
-                "goal_q": np.asarray(goal_q, dtype=float).reshape(-1).tolist(),
-                "ik_result": ik_result or {},
-            }
-            with json_path.open("w", encoding="utf-8") as f:
-                json.dump(meta, f, indent=2, ensure_ascii=False)
+            logger = getattr(self, "_inspection_ik_experiment_logger", None)
+            if logger is None:
+                logger = InspectionExperimentLogger(
+                    Path(self._config.get("experiment_dir", "experiment")) / "inspection_ik"
+                )
+                self._inspection_ik_experiment_logger = logger
+                self._inspection_ik_experiment_dir = logger.session_dir
+            saved = logger.save(
+                robot_name=robot_name,
+                urdf_path=getattr(robot_model, "urdf_path", ""),
+                base_pose=getattr(robot_model, "base_pose", [0, 0, 0, 0, 0, 0]),
+                joint_names=joint_names,
+                target_link_name=self._robot_target_link_name(robot_name),
+                target_T=target_T,
+                goal_q=goal_q,
+                trace=trace,
+                ik_result=ik_result or {},
+            )
+            if not saved:
+                return None
             self.__console.info(
-                f"inspection IK experiment saved: robot={robot_name}, csv={csv_path}, meta={json_path}")
-            return {"csv": str(csv_path), "meta": str(json_path)}
+                f"inspection IK experiment saved: robot={robot_name}, csv={saved['csv']}, meta={saved['meta']}")
+            return saved
         except Exception as exc:
             self.__console.warning(f"failed to save inspection IK experiment: robot={robot_name}, error={exc}")
             return None
@@ -3444,21 +3754,22 @@ class Visualizer:
         backend = getattr(self, "_robotics_backend", None)
         if backend is None:
             raise RuntimeError("robotics backend is not initialized")
-        pin_model = backend.robot_model(robot_name)
+        robot_backend_model = backend.robot_model(robot_name)
+        robot_dof = self._robot_dof(robot_name, robot_backend_model)
         timings["robotics_model_lookup"] = time.perf_counter() - stage_t0
 
         stage_t0 = time.perf_counter()
-        start_q = np.zeros(pin_model.nq, dtype=float)
+        start_q = np.zeros(robot_dof, dtype=float)
         start_overrides = request_data.get("_start_q_override_by_robot") or {}
         if robot_name in start_overrides:
             try:
                 start_q = np.asarray(start_overrides[robot_name], dtype=float)
-                if start_q.shape[0] != pin_model.nq:
-                    raise ValueError(f"expected nq={pin_model.nq}, got {start_q.shape[0]}")
+                if start_q.shape[0] != robot_dof:
+                    raise ValueError(f"expected dof={robot_dof}, got {start_q.shape[0]}")
             except Exception as exc:
                 self.__console.warning(
                     f"inspection IK check start_q override ignored: robot={robot_name}, error={exc}")
-                start_q = np.zeros(pin_model.nq, dtype=float)
+                start_q = np.zeros(robot_dof, dtype=float)
         timings["start_q_setup"] = time.perf_counter() - stage_t0
         self.__console.debug(
             f"inspection IK check input: robot={robot_name}, "
@@ -3474,7 +3785,7 @@ class Visualizer:
                 start_tcp_pose=start,
                 start_q=start_q,
                 frame_name=self._robot_target_link_name(robot_name),
-                joint_names=self._pin_joint_names(pin_model),
+                joint_names=self._robot_joint_names(robot_name, robot_backend_model),
                 planner_name=planner_name,
                 ik_config=self._inspection_ik_config(),
                 ik_solver=request_data.get("ik_solver"),
@@ -3522,7 +3833,7 @@ class Visualizer:
         ik_experiment = self._save_inspection_ik_experiment(
             robot_name,
             robot_model,
-            pin_model,
+            robot_backend_model,
             target_pose,
             goal_q,
             ik_result=ik_result,
@@ -3531,6 +3842,26 @@ class Visualizer:
         timings["total"] = time.perf_counter() - total_t0
         result["timing"] = timings
         return result
+
+    def _partition_and_sort_inspection_groups(self, target_groups):
+        """target group을 first/second로 나누고 각각 RT 위치 x오름차순·z내림차순으로 정렬한다."""
+        first_groups, second_groups = [], []
+        for group_info in list(target_groups or []):
+            reachable = self._inspection_group_is_reachable_now(group_info)
+            self.__console.info(
+                f"inspection group reachability: {group_info.get('name')} -> reachable={reachable}")
+            if reachable:
+                first_groups.append(group_info)
+            else:
+                second_groups.append(group_info)
+
+        def sort_key(group_info):
+            rt_pos = self._inspection_group_rt_position(group_info)
+            return (float(rt_pos[0]), -float(rt_pos[2]))  # x 우선 오름차순, z 내림차순
+
+        first_groups.sort(key=sort_key)
+        second_groups.sort(key=sort_key)
+        return first_groups, second_groups
 
     def _plan_inspection_path_for_robot(self, request_data, robot_name, target_pose, obstacle_mesh=None):
         """검사 목표 pose까지 한 로봇의 q-space path를 계산한다.
@@ -3553,14 +3884,14 @@ class Visualizer:
         total_t0 = time.perf_counter()
         timings = {}
         stage_t0 = time.perf_counter()
-        # 1) ?꾩옱 諛곌????μ븷臾?mesh濡?以鍮꾪븳??
+        # 1) 현재 배관을 collision obstacle mesh로 준비한다.
         if obstacle_mesh is None:
             obstacle_mesh = self._current_spool_collision_mesh()
         if obstacle_mesh is None:
             raise RuntimeError("loaded pipe is not available")
         timings["obstacle_mesh"] = time.perf_counter() - stage_t0
 
-        # 2) planner ?낅젰???쒖옉 TCP pose? 紐⑺몴 pose瑜?world 醫뚰몴怨?湲곗??쇰줈 ?뺣━?쒕떎.
+        # 2) planner 입력인 시작 TCP pose와 목표 pose를 world 좌표계 기준으로 정리한다.
         stage_t0 = time.perf_counter()
         start = self._get_robot_tcp_pose(robot_name)
         if start is None:
@@ -3577,7 +3908,7 @@ class Visualizer:
             raise RuntimeError(f"robot model not found: {robot_name}")
         timings["target_setup"] = time.perf_counter() - stage_t0
 
-        # 3) ?붿껌??q-space planner瑜?留뚮뱾怨? Pinocchio 異⑸룎 紐⑤뜽/URDF源뚯? ?ㅼ젙?쒕떎.
+        # 3) 요청된 q-space planner를 만들고 robotics backend collision scene을 설정한다.
         stage_t0 = time.perf_counter()
         planner_name = self._inspection_q_space_planner_name(request_data.get("planner", "rrt_connect"))
         planner = self._load_path_planner(planner_name)
@@ -3591,8 +3922,8 @@ class Visualizer:
             robot_name=robot_name,
             pin_cache=(getattr(self, "_pinocchio_robot_collision_cache", {}) or {}).get(robot_name),
             timings=timings)
-        if getattr(planner, "pin_model", None) is None:
-            raise RuntimeError("Pinocchio collision model is not configured")
+        if not getattr(planner, "_has_robot_q_space_model", lambda: False)():
+            raise RuntimeError("robot q-space model is not configured")
         timings["planner_setup"] = time.perf_counter() - stage_t0
         self.__console.debug(
             "inspection path planner setup timing: "
@@ -3604,17 +3935,19 @@ class Visualizer:
 
         # 4) IK solve, q-space planning, collision verification은 robotics base에 위임한다.
         stage_t0 = time.perf_counter()
-        start_q = self._current_robot_q(robot_model, planner.pin_model)
+        robot_backend_model = getattr(planner, "robot_model", None) or getattr(planner, "pin_model", None)
+        robot_dof = self._robot_dof(robot_name, robot_backend_model)
+        start_q = self._current_robot_q(robot_model, robot_backend_model, robot_name=robot_name)
         start_overrides = request_data.get("_start_q_override_by_robot") or {}
         if robot_name in start_overrides:
             try:
                 start_q = np.asarray(start_overrides[robot_name], dtype=float)
-                if start_q.shape[0] != planner.pin_model.nq:
-                    raise ValueError(f"expected nq={planner.pin_model.nq}, got {start_q.shape[0]}")
+                if start_q.shape[0] != robot_dof:
+                    raise ValueError(f"expected dof={robot_dof}, got {start_q.shape[0]}")
             except Exception as exc:
                 self.__console.warning(
                     f"inspection path start_q override ignored: robot={robot_name}, error={exc}")
-                start_q = self._current_robot_q(robot_model, planner.pin_model)
+                start_q = self._current_robot_q(robot_model, robot_backend_model, robot_name=robot_name)
         self.__console.debug(
             f"inspection path IK input: robot={robot_name}, "
             f"start_q={np.round(start_q, 5).tolist()}, "
@@ -3634,7 +3967,7 @@ class Visualizer:
                 start_tcp_pose=start,
                 start_q=start_q,
                 frame_name=self._robot_target_link_name(robot_name),
-                joint_names=self._pin_joint_names(planner.pin_model),
+                joint_names=self._robot_joint_names(robot_name, robot_backend_model),
                 planner_name=planner_name,
                 ik_config=self._inspection_ik_config(),
                 ik_solver=request_data.get("ik_solver"),
@@ -3681,7 +4014,7 @@ class Visualizer:
         ik_experiment = self._save_inspection_ik_experiment(
             robot_name,
             robot_model,
-            planner.pin_model,
+            robot_backend_model,
             target_pose,
             goal_q,
             ik_result=ik_result,
@@ -3692,7 +4025,7 @@ class Visualizer:
         display_resolution = float(request_data.get("display_step_size", request_data.get("step_size", 0.08)))
         path = self._q_path_to_tcp_poses(
             robot_model,
-            planner.pin_model,
+            robot_backend_model,
             robot_name,
             q_path,
             sample_resolution=display_resolution)
@@ -3720,455 +4053,276 @@ class Visualizer:
         })
         return plan
 
-    def _plan_inspection_path(self, request_data):
-        identity = request_data.get("_identity")
-        result = {"status": "failed"}
-        try:
-            self._clear_ik_failure_visuals(render=False)
-            target = getattr(self, '_inspection_point', None)
-            if target is None:
-                raise RuntimeError("inspection point is not selected")
-            robot_name = request_data.get("robot", "rb20_1900es")
-            self._show_inspection_goal_pose(robot_name, target, clear=True, render=True)
-            plan = self._plan_inspection_path_for_robot(request_data, robot_name, target)
-            q_path = plan["q_path"]
-            path = plan["path"]
-            self._last_inspection_q_path = [np.asarray(q, dtype=float) for q in q_path]
-            self._last_inspection_edge_collisions = plan.get("edge_collisions", [])
-            self._last_inspection_robot = robot_name
-            self._last_inspection_path = [np.asarray(p, dtype=float) for p in path]
-            self._last_inspection_plans = {robot_name: plan}
-            self._show_inspection_ik_pose_result(
-                robot_name,
-                plan.get("ik_reached_T"),
-                plan.get("ik_target_T"),
-                success=not plan.get("ik_fallback", False),
-                fallback=plan.get("ik_fallback", False),
-            )
-            self._show_inspection_goal_robot_pose(
-                robot_name,
-                plan["q_path"][-1],
-                joint_names=plan.get("pin_joint_names"),
-                clear=False,
-                render=False,
-            )
-            self._show_inspection_path(path, robot_name=robot_name)
-            if plan.get("ik_failure"):
-                self._show_ik_failure_markers([robot_name], failure_infos={robot_name: plan["ik_failure"]})
-            result = {
-                "status": plan.get("status", "success"),
-                "planner": plan["planner"],
-                "robot": robot_name,
-                "waypoints": plan["waypoints"],
-                "init_q": np.asarray(q_path[0], dtype=float).round(6).tolist(),
-                "target_q": np.asarray(q_path[-1], dtype=float).round(6).tolist(),
-                "elapsed": plan["elapsed"],
-                "start": plan["start"],
-                "goal": plan["goal"],
-                "verification": plan["verification"],
-                "robot_links_considered": plan["robot_links_considered"],
-                "collision_preview": plan["collision_preview"],
-                "collision_preview_reason": plan.get("collision_preview_reason"),
-                "fallback_reason": plan.get("fallback_reason"),
-                "ik_fallback": plan.get("ik_fallback", False),
-                "ik_failure": plan.get("ik_failure"),
-                "ik_result": plan.get("ik_result"),
-                "timing": plan.get("timing", {}),
+    # def _inspection_target_groups_for_planning(self, request_data):
+    #     """경로 계획에 사용할 target group 목록을 반환한다.
+
+    #     입력:
+    #         request_data(dict):
+    #             - command: "plan_inspection_path".
+    #             - target_groups: 선택 사항. 이미 구성된 target group list를 직접 넘길 때 사용한다.
+    #             - use_ef_pose_targets: True이면 저장된 검사 target group을 사용한다.
+    #             - robot: 수동 검사점 계획에 사용할 로봇 이름. 기본값은 "rb20_1900es".
+    #             - pose_name: 수동 검사점 target 이름. 기본값은 "manual".
+
+    #     출력:
+    #         list[dict]:
+    #             [
+    #                 {
+    #                     "index": int,
+    #                     "name": str,
+    #                     "targets": {
+    #                         robot_name: {
+    #                             "pose_name": str,
+    #                             "target_T": np.ndarray,  # 3D point 또는 4x4 pose
+    #                             "inspection_pose_name": str,
+    #                         }
+    #                     },
+    #                 }
+    #             ]
+    #     """
+    #     if isinstance(request_data.get("target_groups"), list):
+    #         return request_data["target_groups"]
+
+    #     if bool(request_data.get("use_ef_pose_targets", False)):
+    #         target_groups = self._inspection_target_groups
+    #         if not target_groups:
+    #             raise RuntimeError("EF poses are not determined")
+    #         return target_groups
+
+    #     inspection_points = [
+    #         np.asarray(point, dtype=float)
+    #         for point in (getattr(self, "_inspection_points", []) or [])
+    #     ]
+    #     if not inspection_points and getattr(self, "_inspection_point", None) is not None:
+    #         inspection_points = [np.asarray(self._inspection_point, dtype=float)]
+    #     if not inspection_points:
+    #         raise RuntimeError("inspection point is not selected")
+    #     robot_name = request_data.get("robot", "rb20_1900es")
+    #     pose_name = request_data.get("pose_name", "manual")
+    #     target_groups = []
+    #     for index, target in enumerate(inspection_points):
+    #         group_name = f"Inspection pose {index + 1}"
+    #         target_groups.append({
+    #             "index": index,
+    #             "name": group_name,
+    #             "source_point_index": index,
+    #             "source_point": target.tolist(),
+    #             "targets": {
+    #                 robot_name: {
+    #                     "pose_name": pose_name if len(inspection_points) == 1 else f"{pose_name}_{index + 1}",
+    #                     "target_T": target,
+    #                     "inspection_pose_name": group_name,
+    #                     "source_point_index": index,
+    #                     "source_point": target.tolist(),
+    #                 }
+    #             },
+    #         })
+    #     return target_groups
+
+    def _inspection_group_pose_items(self, group_info):
+        """단순화된 target group에서 (robot_name, pose_name, target_T) 목록을 만든다.
+
+        target group 구조: {name, index, target_point, dda_pose, rt_pose}.
+        positioner 회전 필요 여부는 여기서 판단하지 않고 base planner가 rt_pose로 직접 판단한다.
+        로봇 이름은 pose_name으로 매핑한다(DDA -> dda 로봇, RT -> rt 로봇).
+        """
+        items = []
+        dda_pose = group_info.get("dda_pose")
+        if dda_pose is not None:
+            items.append((self._ef_pose_robot_name("DDA"), "DDA", np.asarray(dda_pose, dtype=float)))
+        rt_pose = group_info.get("rt_pose")
+        if rt_pose is not None:
+            items.append((self._ef_pose_robot_name("RT"), "RT", np.asarray(rt_pose, dtype=float)))
+        if not items:
+            self.__console.warning(
+                "inspection group has no dda_pose/rt_pose: "
+                f"keys={list(group_info.keys())}, name={group_info.get('name')}")
+        return items
+
+    def _rt_pipe_facing_axis_config(self):
+        """설정 파일에 정의된 RT의 pipe-facing local 축을 반환한다."""
+        frame_cfg = (self._config.get("ef_pose", {}) or {}).get("frames", {}) or {}
+        rt_frame_cfg = frame_cfg.get("rt", {}) or {}
+        return np.asarray(rt_frame_cfg.get("pipe_facing_axis", [0.0, -1.0, 0.0]), dtype=float)
+
+    def _inspection_group_is_reachable_now(self, group_info):
+        """group이 positioner 회전 없이 지금 바로 접근 가능한지 여부.
+
+        RT source가 배관을 바라보는 방향의 반대(=상위 링크와 연결되는 방향, back-axis)를
+        world로 변환해 x,y 평면에 투영했을 때 x가 음수이면 회전 없이 접근 가능(first),
+        아니면 positioner를 돌려야 한다(second).
+        """
+        rt_pose = group_info.get("rt_pose")
+        if rt_pose is None:
+            return False
+        rt_T = np.asarray(rt_pose, dtype=float)
+        back_axis_local = -self._rt_pipe_facing_axis_config()
+        back_axis_world_y = float((rt_T[:3, :3] @ back_axis_local)[1])
+        return back_axis_world_y < 0.0
+
+    def _inspection_group_rt_position(self, group_info):
+        """정렬 기준으로 쓸 RT endeffector target 위치(world)를 반환한다."""
+        rt_pose = group_info.get("rt_pose")
+        if rt_pose is not None:
+            return np.asarray(rt_pose, dtype=float)[:3, 3]
+        return np.zeros(3, dtype=float)
+
+
+
+    def _positioner_r_rotation_transform(self, delta_r_deg):
+        """포지셔너 r축(=m-chuck 축) 기준 delta_r_deg 회전 world transform(4x4)을 만든다.
+
+        실제 포지셔너/spool을 움직이지 않고 second group 계획용 가상 변환으로만 쓴다.
+        회전 축/중심/부호는 실제 r-axis 이동(_sync_fixed_spool_after_positioner_move)과 동일하게 맞춘다.
+        """
+        m_T = self._chuck_link_world_T(self.M_CHUCK_LINK_NAME)
+        m_cfg = self._chuck_frame_config(self.M_CHUCK_LINK_NAME)
+        r_rotation_sign = float(m_cfg.get("r_rotation_sign", -1.0))
+        if m_T is not None:
+            center = self._chuck_center_world(self.M_CHUCK_LINK_NAME, m_T)
+            axis_w = self._chuck_axis_world(self.M_CHUCK_LINK_NAME, m_T)
+        else:
+            Tc = self._chuck_world_T()
+            if Tc is None:
+                raise RuntimeError("positioner chuck transform is not available")
+            center = Tc[:3, 3]
+            axis_w = Tc[:3, :3] @ np.array([1.0, 0.0, 0.0])
+        return self._rot_about_axis(axis_w, center, float(delta_r_deg) * r_rotation_sign)
+
+    @staticmethod
+    def _transform_target_pose(target_T, transform):
+        """target pose(4x4)에 world 변환을 적용한다. transform이 None이면 원본을 그대로 쓴다."""
+        target_T = np.asarray(target_T, dtype=float)
+        if transform is None:
+            return target_T
+        return np.asarray(transform, dtype=float) @ target_T
+
+    def _plan_inspection_group_sequence(
+        self,
+        groups,
+        obstacle_mesh,
+        request_data,
+        *,
+        start_q_overrides,
+        failures,
+        ik_failures,
+        planning_timeout,
+        future_timeout,
+        group_offset=0,
+        pose_transform=None,
+    ):
+        """group 목록을 순차 계획한다. 이전 group의 마지막 q를 다음 group start q로 넘긴다.
+
+        pose_transform이 주어지면(예: 포지셔너 가상 회전) 각 target pose에 적용한 뒤 계획한다.
+        start_q_overrides/failures/ik_failures는 in-place로 갱신하며, group_sequence 항목 list를 반환한다.
+        """
+        group_sequence = []
+        for sequence_index, group_info in enumerate(groups):
+            seq_i = group_offset + sequence_index
+            group_index = int(group_info.get("index", seq_i))
+            group_name = str(group_info.get("name", f"Inspection pose {seq_i + 1}"))
+            pose_items = self._inspection_group_pose_items(group_info)
+            plans = {}
+            group_failures = {}
+            group_ik_failures = {}
+            group_request = dict(request_data)
+            group_request["_start_q_override_by_robot"] = {
+                name: np.asarray(q, dtype=float).tolist()
+                for name, q in start_q_overrides.items()
             }
-            if plan["collision_preview"]:
-                self.__console.warning(
-                    f"inspection q path kept for collision preview: {plan['planner']}, "
-                    f"{len(q_path)} waypoints, {plan['elapsed']:.2f}s")
-            else:
-                self.__console.info(
-                    f"inspection q path OK: {plan['planner']}, {len(q_path)} waypoints, {plan['elapsed']:.2f}s")
-        except InspectionIKFailure as e:
-            result = {
-                "status": "failed",
-                "message": str(e),
-                "ik_failure": e.failure_info,
+            max_workers = min(len(pose_items), int(request_data.get("max_workers", len(pose_items))))
+            start_source = "previous inspection pose" if start_q_overrides else "current robot pose"
+            self.__console.info(
+                f"inspection path planning: {group_name} ({len(pose_items)} robots), "
+                f"start={start_source}, start_overrides={list(start_q_overrides.keys())}, "
+                f"pose_transform={'yes' if pose_transform is not None else 'no'}")
+            executor = ThreadPoolExecutor(max_workers=max(1, max_workers))
+            futures = {
+                executor.submit(
+                    self._plan_inspection_path_for_robot,
+                    group_request,
+                    robot_name,
+                    self._transform_target_pose(target_T, pose_transform),
+                    obstacle_mesh,
+                ): (robot_name, pose_name)
+                for robot_name, pose_name, target_T in pose_items
             }
-            robot_name = request_data.get("robot", "rb20_1900es")
-            self._show_ik_failure_markers([robot_name], failure_infos={robot_name: e.failure_info})
-            self.__console.error(f"inspection path failed: {e}")
-        except Exception as e:
-            result = {"status": "failed", "message": str(e)}
-            robot_name = request_data.get("robot", "rb20_1900es")
-            self._show_ik_failure_markers([robot_name])
-            self.__console.error(f"inspection path failed: {e}")
-        if hasattr(self, 'zapi') and self.zapi and identity:
-            self.zapi.reply_inspection_path(result, identity=identity)
-
-    def _ef_pose_plan_targets(self):
-        poses = getattr(self, '_ef_target_poses', {}) or {}
-        targets = {}
-        for pose_name, pose in poses.items():
-            robot_name = self._ef_pose_robot_name(pose_name)
-            target_T = self._pose_to_T(pose)
-            targets[robot_name] = {
-                "pose_name": pose_name,
-                "target_T": target_T,
-            }
-        return targets
-
-    def _ef_pose_plan_target_groups(self):
-        groups = getattr(self, "_ef_pose_groups", []) or []
-        target_groups = []
-        for group_idx, group in enumerate(groups):
-            poses = self._extract_ef_poses_from_group(group)
-            targets = {}
-            for pose_name, pose in poses.items():
-                robot_name = self._ef_pose_robot_name(pose_name)
-                target_T = self._pose_to_T(pose)
-                targets[robot_name] = {
-                    "pose_name": pose_name,
-                    "target_T": target_T,
-                    "group_index": group_idx,
-                    "inspection_pose_name": f"寃???먯꽭 {group_idx + 1}",
-                }
-            if targets:
-                target_groups.append({
-                    "index": group_idx,
-                    "name": f"寃???먯꽭 {group_idx + 1}",
-                    "targets": targets,
-                })
-        if target_groups:
-            return target_groups
-        targets = self._ef_pose_plan_targets()
-        if targets:
-            return [{"index": 0, "name": "寃???먯꽭 1", "targets": targets}]
-        return []
-
-    def _ef_pose_target_origin(self):
-        target = getattr(self, "_inspection_point", None)
-        if target is None:
-            return np.zeros(3, dtype=float)
-        return np.asarray(target, dtype=float).reshape(3)
-
-    def _ef_pose_direction_from_target(self, pose, target_origin):
-        T = self._pose_to_T(pose)
-        direction = T[:3, 3] - np.asarray(target_origin, dtype=float).reshape(3)
-        norm = float(np.linalg.norm(direction))
-        if norm < 1e-9:
-            return np.zeros(3, dtype=float), T
-        return direction / norm, T
-
-    def _ef_pose_rt_pipe_facing_axis(self):
-        frame_cfg = ((self._config.get("ef_pose", {}) or {}).get("frames", {}) or {}).get("rt", {}) or {}
-        axis = np.asarray(frame_cfg.get("pipe_facing_axis", [0.0, -1.0, 0.0]), dtype=float).reshape(3)
-        norm = float(np.linalg.norm(axis))
-        if norm < 1e-9:
-            return np.asarray([0.0, -1.0, 0.0], dtype=float)
-        return axis / norm
-
-    def _ef_pose_slot_priority(self, slot_data, target_origin):
-        poses = self._extract_ef_poses_from_orientation_group(slot_data)
-        dda_pose = poses.get("DDA")
-        rt_items = [(name, pose) for name, pose in poses.items() if name.startswith("RT")]
-        if dda_pose is None or not rt_items:
-            return None
-
-        dda_dir, _ = self._ef_pose_direction_from_target(dda_pose, target_origin)
-        world_pos_y = np.asarray([0.0, 1.0, 0.0], dtype=float)
-        world_neg_y = np.asarray([0.0, -1.0, 0.0], dtype=float)
-        world_z = np.asarray([0.0, 0.0, 1.0], dtype=float)
-        ideal_dda = np.asarray([1.0, 1.0, 0.0], dtype=float)
-        ideal_dda /= np.linalg.norm(ideal_dda)
-        ideal_rt_position = np.asarray([0.0, -1.0, 1.0], dtype=float)
-        ideal_rt_position /= np.linalg.norm(ideal_rt_position)
-        ideal_rt_view = np.asarray([0.0, 1.0, -1.0], dtype=float)
-        ideal_rt_view /= np.linalg.norm(ideal_rt_view)
-        ideal_rt_view_up = np.asarray([0.0, 1.0, 1.0], dtype=float)
-        ideal_rt_view_up /= np.linalg.norm(ideal_rt_view_up)
-        rt_local_facing = self._ef_pose_rt_pipe_facing_axis()
-
-        dda_y = float(np.dot(dda_dir, world_pos_y))
-        dda_ideal = float(np.dot(dda_dir, ideal_dda))
-        dda_vertical = abs(float(np.dot(dda_dir, world_z)))
-        best = None
-        all_items = []
-        for rt_name, rt_pose in rt_items:
-            rt_dir, rt_T = self._ef_pose_direction_from_target(rt_pose, target_origin)
-            rt_view = rt_T[:3, :3] @ rt_local_facing
-            rt_view_norm = float(np.linalg.norm(rt_view))
-            if rt_view_norm > 1e-9:
-                rt_view = rt_view / rt_view_norm
-            rt_neg_y = float(np.dot(rt_dir, world_neg_y))
-            rt_ideal = float(np.dot(rt_dir, ideal_rt_position))
-            rt_vertical = abs(float(np.dot(rt_dir, world_z)))
-            rt_view_down45 = float(np.dot(rt_view, ideal_rt_view))
-            rt_view_up45 = float(np.dot(rt_view, ideal_rt_view_up))
-            rt_view_down = float(np.dot(rt_view, -world_z))
-            rt_view_up = float(np.dot(rt_view, world_z))
-            rt_view_to_pipe = float(np.dot(rt_view, -rt_dir))
-            y_score = (1.0 - dda_y) + (1.0 - rt_neg_y)
-            ideal_score = (
-                1.4 * (1.0 - rt_view_down45)
-                + 0.8 * (1.0 - rt_view_to_pipe)
-                + 0.7 * (1.0 - dda_ideal)
-                + 0.4 * (1.0 - rt_ideal)
-            )
-            vertical_score = -(dda_vertical + rt_vertical)
-            preferred_y_side = dda_y > 0.25 and rt_neg_y > 0.25 and rt_view_down > 0.25
-            sort_key = (
-                0 if preferred_y_side else 1,
-                ideal_score if preferred_y_side else vertical_score,
-                y_score,
-            )
-            item = {
-                "rt_name": rt_name,
-                "rt_pose": rt_pose,
-                "poses": {
-                    "DDA": dda_pose,
-                    rt_name: rt_pose,
-                },
-                "sort_key": sort_key,
-                "metrics": {
-                    "dda_y": dda_y,
-                    "rt_neg_y": rt_neg_y,
-                    "dda_ideal": dda_ideal,
-                    "rt_ideal": rt_ideal,
-                    "dda_vertical": dda_vertical,
-                    "rt_vertical": rt_vertical,
-                    "rt_view_down45": rt_view_down45,
-                    "rt_view_up45": rt_view_up45,
-                    "rt_view_down": rt_view_down,
-                    "rt_view_up": rt_view_up,
-                    "rt_view_to_pipe": rt_view_to_pipe,
-                    "rt_view_x": float(rt_view[0]),
-                    "rt_view_y": float(rt_view[1]),
-                    "rt_view_z": float(rt_view[2]),
-                },
-            }
-            all_items.append(item)
-            if best is None or item["sort_key"] < best["sort_key"]:
-                best = item
-        if best is None:
-            return None
-        return {
-            "poses": best["poses"],
-            "rt_name": best["rt_name"],
-            "sort_key": best["sort_key"],
-            "metrics": best["metrics"],
-            "alternatives": [
-                {
-                    "poses": item["poses"],
-                    "rt_name": item["rt_name"],
-                    "sort_key": item["sort_key"],
-                    "metrics": item["metrics"],
-                }
-                for item in sorted(all_items, key=lambda item: item["sort_key"])
-            ],
-        }
-
-    def _select_ef_pose_candidate_sets(self, ranked_slots, selected_limit):
-        if not ranked_slots:
-            return []
-        limit = max(1, int(selected_limit))
-        if limit == 1 or len(ranked_slots) == 1:
-            return ranked_slots[:1]
-
-        def _metric(item, key):
-            return float((item.get("priority", {}).get("metrics", {}) or {}).get(key, 0.0))
-
-        def _rt_view(item):
-            metrics = item.get("priority", {}).get("metrics", {}) or {}
-            return np.asarray([
-                float(metrics.get("rt_view_x", 0.0)),
-                float(metrics.get("rt_view_y", 0.0)),
-                float(metrics.get("rt_view_z", 0.0)),
-            ], dtype=float)
-
-        def _same_candidate(a, b):
-            return (
-                int(a.get("group_index", -1)) == int(b.get("group_index", -2))
-                and str(a.get("slot_name")) == str(b.get("slot_name"))
-                and str(a.get("priority", {}).get("rt_name")) == str(b.get("priority", {}).get("rt_name"))
-            )
-
-        down_candidates = sorted(
-            ranked_slots,
-            key=lambda item: (
-                -_metric(item, "rt_view_down45"),
-                -_metric(item, "rt_view_to_pipe"),
-                item["priority"]["sort_key"],
-            ),
-        )
-        up_candidates = sorted(
-            ranked_slots,
-            key=lambda item: (
-                -_metric(item, "rt_view_up45"),
-                -_metric(item, "rt_view_to_pipe"),
-                item["priority"]["sort_key"],
-            ),
-        )
-
-        down = next((item for item in down_candidates if _metric(item, "rt_view_down45") > 0.25), None)
-        up = next(
-            (
-                item for item in up_candidates
-                if _metric(item, "rt_view_up45") > 0.25
-                and (down is None or not _same_candidate(item, down))
-            ),
-            None,
-        )
-        if down is not None and up is not None:
-            return [down, up][:limit]
-
-        best_pair = None
-        best_score = -float("inf")
-        for i, first in enumerate(ranked_slots):
-            for second in ranked_slots[i + 1:]:
-                if _same_candidate(first, second):
-                    continue
-                v1 = _rt_view(first)
-                v2 = _rt_view(second)
-                dot = float(np.clip(np.dot(v1, v2), -1.0, 1.0))
-                vertical_separation = abs(_metric(first, "rt_view_z") - _metric(second, "rt_view_z"))
-                opposite_vertical = (
-                    1.0 if _metric(first, "rt_view_z") * _metric(second, "rt_view_z") < 0.0 else 0.0
-                )
-                side_separation = abs(_metric(first, "rt_neg_y") - _metric(second, "rt_neg_y"))
-                score = 2.0 * opposite_vertical + vertical_separation + 0.5 * (1.0 - dot) + 0.2 * side_separation
-                if score > best_score:
-                    best_score = score
-                    best_pair = (first, second)
-        if best_pair is not None:
-            return list(best_pair)[:limit]
-        return ranked_slots[:limit]
-
-    def _ef_pose_selected_candidate_target_groups(self):
-        groups = getattr(self, "_ef_pose_groups", []) or []
-        selected_group = groups[0] if groups else None
-        target_groups = []
-        if groups:
-            target_origin = self._ef_pose_target_origin()
-            ranked_slots = []
-
-            def _rank_slot_sort_key(item):
-                key, value = item
-                try:
-                    return (0, float(value.get("_actual_deg")))
-                except Exception:
+            try:
+                for future in as_completed(futures, timeout=future_timeout):
+                    robot_name, pose_name = futures[future]
+                    failure_key = f"{group_name}:{robot_name}"
                     try:
-                        return (0, float(key))
-                    except Exception:
-                        return (1, str(key))
-
-            for group_idx, group in enumerate(groups):
-                if not isinstance(group, dict):
-                    continue
-                slot_items = [
-                    (slot_name, slot_data)
-                    for slot_name, slot_data in sorted(group.items(), key=_rank_slot_sort_key)
-                    if isinstance(slot_data, dict)
-                ]
-                for slot_name, slot_data in slot_items:
-                    priority = self._ef_pose_slot_priority(slot_data, target_origin)
-                    if priority is None:
+                        plan = future.result()
+                        plan["pose_name"] = pose_name
+                        plan["inspection_pose_name"] = group_name
+                        plan["inspection_pose_index"] = group_index
+                        plans[robot_name] = plan
+                        if plan.get("q_path"):
+                            start_q_overrides[robot_name] = np.asarray(plan["q_path"][-1], dtype=float)
+                        if plan.get("ik_failure"):
+                            group_ik_failures[robot_name] = plan["ik_failure"]
+                            ik_failures[failure_key] = plan["ik_failure"]
+                            self._last_ik_failure = getattr(self, "_last_ik_failure", {})
+                            self._last_ik_failure[robot_name] = plan["ik_failure"]
+                    except InspectionIKFailure as exc:
+                        group_failures[robot_name] = str(exc)
+                        failures[failure_key] = str(exc)
+                        if exc.failure_info:
+                            group_ik_failures[robot_name] = exc.failure_info
+                            ik_failures[failure_key] = exc.failure_info
+                            self._last_ik_failure = getattr(self, "_last_ik_failure", {})
+                            self._last_ik_failure[robot_name] = exc.failure_info
+                        self.__console.error(f"inspection path failed for {failure_key}: {exc}")
+                    except Exception as exc:
+                        group_failures[robot_name] = str(exc)
+                        failures[failure_key] = str(exc)
+                        self.__console.error(f"inspection path failed for {failure_key}: {exc}")
+            except FuturesTimeoutError:
+                for future, (robot_name, _pose_name) in futures.items():
+                    if future.done():
                         continue
-                    for candidate_priority in priority.get("alternatives", [priority]):
-                        ranked_slots.append({
-                            "group_index": group_idx,
-                            "slot_name": str(slot_name),
-                            "actual_deg": slot_data.get("_actual_deg"),
-                            "priority": candidate_priority,
-                        })
+                    future.cancel()
+                    failure_key = f"{group_name}:{robot_name}"
+                    group_failures[robot_name] = f"path planning timeout ({planning_timeout:.1f}s)"
+                    failures[failure_key] = group_failures[robot_name]
+                    self.__console.error(f"inspection path timeout for {failure_key}: {planning_timeout:.1f}s")
+            finally:
+                executor.shutdown(wait=False, cancel_futures=True)
 
-            ranked_slots.sort(key=lambda item: (
-                item["priority"]["sort_key"],
-                int(item["group_index"]),
-                str(item["slot_name"]),
-            ))
+            group_sequence.append({
+                "index": group_index,
+                "name": group_name,
+                "plans": plans,
+                "failures": group_failures,
+                "ik_failures": group_ik_failures,
+            })
+        return group_sequence
 
-            params = self._config.get("ef_pose", {}) or {}
-            selected_limit = int(params.get("selected_candidate_limit", 2))
-            selected_slots = self._select_ef_pose_candidate_sets(ranked_slots, selected_limit)
+    def _handle_request_plan_inspection_path(self, request_data):
+        """검사 target group 하나 이상에 대해 로봇 경로를 순차 계획한다.
 
-            for slot_idx, item in enumerate(selected_slots):
-                priority = item["priority"]
-                targets = {}
-                for pose_name, pose in priority["poses"].items():
-                    robot_name = self._ef_pose_robot_name(pose_name)
-                    targets[robot_name] = {
-                        "pose_name": pose_name,
-                        "target_T": self._pose_to_T(pose),
-                        "group_index": int(item["group_index"]),
-                        "slot_name": str(item["slot_name"]),
-                        "inspection_pose_name": f"野꺜???癒?쉭 {slot_idx + 1}",
-                        "priority": priority["metrics"],
-                    }
-                if targets:
-                    actual_deg = item.get("actual_deg")
-                    suffix = f" ({actual_deg} deg)" if actual_deg is not None else f" ({item['slot_name']})"
-                    target_groups.append({
-                        "index": slot_idx,
-                        "group_index": int(item["group_index"]),
-                        "slot_name": str(item["slot_name"]),
-                        "rt_name": priority["rt_name"],
-                        "priority": priority["metrics"],
-                        "name": f"野꺜???癒?쉭 {slot_idx + 1}{suffix}",
-                        "targets": targets,
-                    })
+        입력:
+            request_data(dict):
+                - command: "plan_inspection_path".
+                - planner: 사용할 path planner 이름.
+                - robot: 수동 검사점 계획 시 사용할 단일 로봇 이름.
+                - target_groups: 선택 사항. 여러 검사 자세를 직접 지정할 때 사용한다.
+                - use_ef_pose_targets: True이면 determine_ef_pose에서 저장한 여러 검사 자세를 사용한다.
+                - planning_timeout: 선택 사항. group별 future timeout.
+                - max_workers: 선택 사항. 같은 group 안에서 병렬 계획할 로봇 수.
+                - _identity: ZApi 응답 식별자.
 
-            if target_groups:
-                preview = []
-                for group in target_groups[:8]:
-                    metrics = group.get("priority", {})
-                    preview.append(
-                        f"{group['name']}:group={group.get('group_index')},slot={group.get('slot_name')},"
-                        f"rt={group.get('rt_name')},dda_y={metrics.get('dda_y', 0.0):.3f},"
-                        f"rt_-y={metrics.get('rt_neg_y', 0.0):.3f},"
-                        f"rt_down45={metrics.get('rt_view_down45', 0.0):.3f},"
-                        f"rt_up45={metrics.get('rt_view_up45', 0.0):.3f}"
-                    )
-                self.__console.info("EF pose candidate priority: " + " | ".join(preview))
-                return target_groups
-        if selected_group:
-            def _slot_sort_key(item):
-                key, value = item
-                try:
-                    return (0, float(key))
-                except Exception:
-                    try:
-                        return (0, float(value.get("_actual_deg")))
-                    except Exception:
-                        return (1, str(key))
+        출력:
+            ZApi reply_inspection_path(result):
+                result(dict)는 status/planner/inspection_groups/robots/failures/
+                ik_failures/timing을 포함한다.
 
-            slot_items = [
-                (slot_name, slot_data)
-                for slot_name, slot_data in sorted(selected_group.items(), key=_slot_sort_key)
-                if isinstance(slot_data, dict)
-            ]
-            for slot_idx, (slot_name, slot_data) in enumerate(slot_items):
-                poses = self._extract_ef_poses_from_orientation_group(slot_data)
-                targets = {}
-                for pose_name, pose in poses.items():
-                    robot_name = self._ef_pose_robot_name(pose_name)
-                    targets[robot_name] = {
-                        "pose_name": pose_name,
-                        "target_T": self._pose_to_T(pose),
-                        "group_index": 0,
-                        "slot_name": str(slot_name),
-                        "inspection_pose_name": f"寃???먯꽭 {slot_idx + 1}",
-                    }
-                if targets:
-                    actual_deg = slot_data.get("_actual_deg")
-                    suffix = f" ({actual_deg} deg)" if actual_deg is not None else f" ({slot_name})"
-                    target_groups.append({
-                        "index": slot_idx,
-                        "slot_name": str(slot_name),
-                        "name": f"寃???먯꽭 {slot_idx + 1}{suffix}",
-                        "targets": targets,
-                    })
-        if target_groups:
-            return target_groups
-        targets = self._ef_pose_plan_targets()
-        if targets:
-            return [{"index": 0, "name": "寃???먯꽭 1", "targets": targets}]
-        return []
-
-    def _check_ef_pose_ik(self, request_data):
+        연산:
+            1. 수동 pick point 또는 EF pose 결과를 동일한 target group 구조로 변환한다.
+            2. 각 group 안의 로봇들은 병렬로 계획한다.
+            3. 다음 group은 이전 group에서 계산된 각 로봇의 마지막 q를 start q로 사용한다.
+            4. viewer playback 상태와 path/goal pose 시각화를 갱신한다.
+        """
         identity = request_data.get("_identity")
         result = {"status": "failed"}
         total_t0 = time.perf_counter()
@@ -4176,15 +4330,240 @@ class Visualizer:
         ik_failures = {}
         try:
             self._clear_inspection_visuals(clear_point=False)
-            target_groups = self._ef_pose_selected_candidate_target_groups()
+            # target group을 접근 가능(first)/불가(second)로 나누고 각각 정렬한다.
+            # 현재 로봇 위치는 base 위치로 가정한다. first를 계획한 뒤 포지셔너를
+            # 룰베이스로 가상 회전하고 second를 이어서 계획한다.
+            first_groups, second_groups = self._partition_and_sort_inspection_groups(
+                self._inspection_target_groups
+            )
+            
+            self._inspection_second_groups = second_groups
+            self.__console.info(
+                "inspection groups partitioned: "
+                f"first(reachable)={len(first_groups)}, second(deferred)={len(second_groups)}, "
+                f"first_order={[g.get('name') for g in first_groups]}")
+            if not first_groups:
+                raise RuntimeError(
+                    f"no reachable inspection group now (deferred={len(second_groups)})")
+            self._clear_inspection_goal_pose_visuals(render=False)
+            for group_info in first_groups:
+                for robot_name, _pose_name, target_T in self._inspection_group_pose_items(group_info):
+                    self._show_inspection_goal_pose(
+                        robot_name,
+                        target_T,
+                        clear=False,
+                        render=False,
+                    )
+            self.plotter.render()
+
+            stage_t0 = time.perf_counter()
+            obstacle_mesh = self._current_spool_collision_mesh()
+            if obstacle_mesh is None:
+                raise RuntimeError("loaded pipe is not available")
+            obstacle_elapsed = time.perf_counter() - stage_t0
+
+            start_q_overrides = {}
+            planning_timeout = float(request_data.get(
+                "planning_timeout",
+                (self._config.get("path_planning", {}) or {}).get("planning_timeout", 0.0),
+            ))
+            future_timeout = None if planning_timeout <= 0 else planning_timeout + 2.0
+
+            # 1) first group(현재 접근 가능) 경로 계획.
+            group_sequence = self._plan_inspection_group_sequence(
+                first_groups,
+                obstacle_mesh,
+                request_data,
+                start_q_overrides=start_q_overrides,
+                failures=failures,
+                ik_failures=ik_failures,
+                planning_timeout=planning_timeout,
+                future_timeout=future_timeout,
+            )
+
+            # 2) first -> second 전환: 룰베이스 고정각으로 포지셔너 r축을 가상 회전한다.
+            #    실제 포지셔너/spool은 움직이지 않고, second pose와 collision mesh만 회전시켜 계획한다.
+            if second_groups:
+                delta_r_deg = float(request_data.get(
+                    "positioner_second_group_r_deg",
+                    (self._config.get("path_planning", {}) or {}).get(
+                        "positioner_second_group_r_deg", 180.0),
+                ))
+                rotation_T = self._positioner_r_rotation_transform(delta_r_deg)
+                rotated_obstacle_mesh = copy.deepcopy(obstacle_mesh)
+                rotated_obstacle_mesh.transform(rotation_T)
+                self.__console.info(
+                    "positioner rule-based virtual rotation for second group: "
+                    f"delta_r={delta_r_deg:.1f}deg, groups={len(second_groups)}")
+                # 3) second group 경로 계획 (회전된 pose/mesh 기준, first의 마지막 q에서 이어서).
+                group_sequence += self._plan_inspection_group_sequence(
+                    second_groups,
+                    rotated_obstacle_mesh,
+                    request_data,
+                    start_q_overrides=start_q_overrides,
+                    failures=failures,
+                    ik_failures=ik_failures,
+                    planning_timeout=planning_timeout,
+                    future_timeout=future_timeout,
+                    group_offset=len(first_groups),
+                    pose_transform=rotation_T,
+                )
+
+            if ik_failures:
+                plain_ik_failures = {
+                    key.split(":")[-1]: value
+                    for key, value in ik_failures.items()
+                }
+                self._show_ik_failure_markers(plain_ik_failures.keys(), failure_infos=plain_ik_failures)
+            elif failures:
+                self._show_ik_failure_markers([key.split(":")[-1] for key in failures.keys()])
+
+            all_plans = {
+                f"{group['name']}:{robot_name}": plan
+                for group in group_sequence
+                for robot_name, plan in group["plans"].items()
+            }
+            if not all_plans:
+                raise RuntimeError(f"all inspection path plans failed: {failures}")
+            plan_wall_elapsed = time.perf_counter() - total_t0
+
+            self._last_inspection_plan_sequence = [
+                {"name": group["name"], "plans": group["plans"]}
+                for group in group_sequence
+                if group["plans"]
+            ]
+            first_group = next(group for group in group_sequence if group["plans"])
+            self._last_inspection_plans = first_group["plans"]
+            for group in group_sequence:
+                for robot_name, plan in group["plans"].items():
+                    self._show_inspection_ik_pose_result(
+                        robot_name,
+                        plan.get("ik_reached_T"),
+                        plan.get("ik_target_T"),
+                        success=not plan.get("ik_fallback", False),
+                        fallback=plan.get("ik_fallback", False),
+                    )
+                    self._show_inspection_goal_robot_pose(
+                        robot_name,
+                        plan["q_path"][-1],
+                        joint_names=plan.get("pin_joint_names"),
+                        clear=False,
+                        render=False,
+                    )
+                    self._show_inspection_path(plan["path"], robot_name=robot_name, clear=False)
+                    if plan.get("planning_error") and plan.get("reached_T") is not None:
+                        self._show_ik_failure_reached_pose(robot_name, plan.get("reached_T"), None)
+
+            first_robot, first_plan = next(iter(first_group["plans"].items()))
+            self._last_inspection_q_path = first_plan["q_path"]
+            self._last_inspection_edge_collisions = first_plan.get("edge_collisions", [])
+            self._last_inspection_robot = first_robot
+            self._last_inspection_path = first_plan["path"]
+
+            has_partial_plan = any(plan.get("status") != "success" for plan in all_plans.values())
+            result = {
+                "status": "success" if not failures and not ik_failures and not has_partial_plan else "partial",
+                "planner": request_data.get("planner", "rrt_connect"),
+                "inspection_groups": [
+                    {
+                        "name": group["name"],
+                        "index": group["index"],
+                        "robots": {
+                            robot_name: self._inspection_plan_result_for_robot(plan)
+                            for robot_name, plan in group["plans"].items()
+                        },
+                        "failures": group["failures"],
+                    }
+                    for group in group_sequence
+                ],
+                "robots": {
+                    robot_name: self._inspection_plan_result_for_robot(plan)
+                    for robot_name, plan in first_group["plans"].items()
+                },
+                "failures": failures,
+                "ik_failures": ik_failures,
+                "total_elapsed": float(sum(plan["elapsed"] for plan in all_plans.values())),
+                "wall_elapsed": plan_wall_elapsed,
+                "timing": {
+                    "obstacle_mesh": obstacle_elapsed,
+                    "planning_wall": plan_wall_elapsed,
+                    "planning_sum": float(sum(plan["elapsed"] for plan in all_plans.values())),
+                },
+            }
+            self.__console.info(
+                "inspection paths planned by target group: "
+                + " | ".join(
+                    f"{group['name']}["
+                    + ", ".join(
+                        f"{robot}({plan['waypoints']} wp, {plan['elapsed']:.3f}s)"
+                        for robot, plan in group["plans"].items())
+                    + "]"
+                    for group in group_sequence if group["plans"])
+                + f", wall={plan_wall_elapsed:.3f}s, obstacle={obstacle_elapsed:.3f}s")
+        except Exception as e:
+            elapsed = time.perf_counter() - total_t0
+            result = {
+                "status": "failed",
+                "message": str(e),
+                "elapsed": elapsed,
+                "failures": failures,
+                "ik_failures": ik_failures,
+            }
+            self.__console.error(f"inspection path planning failed after {elapsed:.3f}s: {e}")
+        if hasattr(self, 'zapi') and self.zapi and identity:
+            self.zapi.reply_inspection_path(result, identity=identity)
+
+    def _inspection_plan_result_for_robot(self, plan):
+        """단일 로봇 plan dict를 ZApi 응답용 요약 dict로 변환한다.
+
+        입력:
+            plan(dict): _plan_inspection_path_for_robot() 결과.
+                필수 키: q_path, waypoints, elapsed, verification, collision_preview.
+                선택 키: pose_name, fallback_reason, ik_result, planning_error, timing.
+
+        출력:
+            dict:
+                pose_name, waypoints, init_q, target_q, elapsed, verification,
+                collision_preview, ik_result, timing 등을 포함한다.
+        """
+        return {
+            "pose_name": plan.get("pose_name"),
+            "waypoints": plan["waypoints"],
+            "init_q": np.asarray(plan["q_path"][0], dtype=float).round(6).tolist(),
+            "target_q": np.asarray(plan["q_path"][-1], dtype=float).round(6).tolist(),
+            "elapsed": plan["elapsed"],
+            "verification": plan["verification"],
+            "collision_preview": plan["collision_preview"],
+            "collision_preview_reason": plan.get("collision_preview_reason"),
+            "fallback_reason": plan.get("fallback_reason"),
+            "ik_fallback": plan.get("ik_fallback", False),
+            "ik_result": plan.get("ik_result"),
+            "ik_solver": plan.get("ik_solver"),
+            "ik_normalize": plan.get("ik_normalize"),
+            "planning_error": plan.get("planning_error"),
+            "timing": plan.get("timing", {}),
+        }
+
+
+    def _handle_request_check_ef_pose_ik(self, request_data):
+        """저장된 EF pose target group들에 대해 IK 가능 여부를 검사하고 goal pose를 표시한다."""
+        identity = request_data.get("_identity")
+        result = {"status": "failed"}
+        total_t0 = time.perf_counter()
+        failures = {}
+        ik_failures = {}
+        try:
+            self._clear_inspection_visuals(clear_point=False)
+            # target_groups = self._inspection_target_groups_for_planning
+            target_groups = self._inspection_target_groups
             if not target_groups:
                 raise RuntimeError("EF poses are not determined")
             self._clear_inspection_goal_pose_visuals(render=False)
             for group_info in target_groups:
-                for robot_name, target_info in group_info["targets"].items():
+                for robot_name, _pose_name, target_T in self._inspection_group_pose_items(group_info):
                     self._show_inspection_goal_pose(
                         robot_name,
-                        target_info["target_T"],
+                        target_T,
                         clear=False,
                         render=False,
                     )
@@ -4197,29 +4576,30 @@ class Visualizer:
             obstacle_elapsed = time.perf_counter() - stage_t0
 
             group_sequence = []
-            for group_info in target_groups:
-                group_name = group_info["name"]
-                targets = group_info["targets"]
+            for sequence_index, group_info in enumerate(target_groups):
+                group_index = int(group_info.get("index", sequence_index))
+                group_name = str(group_info.get("name", f"Inspection pose {sequence_index + 1}"))
+                pose_items = self._inspection_group_pose_items(group_info)
                 checks = {}
                 group_failures = {}
                 group_ik_failures = {}
                 group_request = dict(request_data)
                 group_request["_start_q_override_by_robot"] = {}
                 self.__console.info(
-                    f"EF pose IK check: {group_name} ({len(targets)} robots), "
+                    f"EF pose IK check: {group_name} ({len(pose_items)} robots), "
                     "start_q=zeros")
-                for robot_name, target_info in targets.items():
+                for robot_name, pose_name, target_T in pose_items:
                     failure_key = f"{group_name}:{robot_name}"
                     try:
                         check = self._check_inspection_ik_for_robot(
                             group_request,
                             robot_name,
-                            target_info["target_T"],
+                            target_T,
                             obstacle_mesh,
                         )
-                        check["pose_name"] = target_info["pose_name"]
+                        check["pose_name"] = pose_name
                         check["inspection_pose_name"] = group_name
-                        check["inspection_pose_index"] = int(group_info["index"])
+                        check["inspection_pose_index"] = group_index
                         checks[robot_name] = check
                         if check.get("ik_failure"):
                             group_ik_failures[robot_name] = check["ik_failure"]
@@ -4240,7 +4620,7 @@ class Visualizer:
                         failures[failure_key] = str(exc)
                         self.__console.error(f"EF pose IK check failed for {failure_key}: {exc}")
                 group_sequence.append({
-                    "index": int(group_info["index"]),
+                    "index": group_index,
                     "name": group_name,
                     "checks": checks,
                     "failures": group_failures,
@@ -4360,259 +4740,6 @@ class Visualizer:
         if hasattr(self, 'zapi') and self.zapi and identity:
             self.zapi.reply_inspection_path(result, identity=identity)
 
-    def _plan_ef_pose_paths(self, request_data):
-        identity = request_data.get("_identity")
-        result = {"status": "failed"}
-        total_t0 = time.perf_counter()
-        failures = {}
-        ik_failures = {}
-        try:
-            self._clear_inspection_visuals(clear_point=False)
-            target_groups = self._ef_pose_selected_candidate_target_groups()
-            if not target_groups:
-                raise RuntimeError("EF poses are not determined")
-            self._clear_inspection_goal_pose_visuals(render=False)
-            for group_info in target_groups:
-                for robot_name, target_info in group_info["targets"].items():
-                    self._show_inspection_goal_pose(
-                        robot_name,
-                        target_info["target_T"],
-                        clear=False,
-                        render=False,
-                    )
-            self.plotter.render()
-            stage_t0 = time.perf_counter()
-            obstacle_mesh = self._current_spool_collision_mesh()
-            if obstacle_mesh is None:
-                raise RuntimeError("loaded pipe is not available")
-            obstacle_elapsed = time.perf_counter() - stage_t0
-
-            group_sequence = []
-            start_q_overrides = {}
-            planning_timeout = float(request_data.get(
-                "planning_timeout",
-                (self._config.get("path_planning", {}) or {}).get("planning_timeout", 0.0),
-            ))
-            future_timeout = None if planning_timeout <= 0 else planning_timeout + 2.0
-
-            for group_info in target_groups:
-                group_name = group_info["name"]
-                targets = group_info["targets"]
-                plans = {}
-                group_failures = {}
-                group_ik_failures = {}
-                group_request = dict(request_data)
-                group_request["_start_q_override_by_robot"] = {
-                    name: np.asarray(q, dtype=float).tolist()
-                    for name, q in start_q_overrides.items()
-                }
-                max_workers = min(len(targets), int(request_data.get("max_workers", len(targets))))
-                start_source = "previous inspection pose" if start_q_overrides else "current robot pose"
-                self.__console.info(
-                    f"EF pose path planning: {group_name} ({len(targets)} robots), "
-                    f"start={start_source}, start_overrides={list(start_q_overrides.keys())}")
-                executor = ThreadPoolExecutor(max_workers=max(1, max_workers))
-                futures = {
-                    executor.submit(
-                        self._plan_inspection_path_for_robot,
-                        group_request,
-                        robot_name,
-                        target_info["target_T"],
-                        obstacle_mesh,
-                    ): (robot_name, target_info)
-                    for robot_name, target_info in targets.items()
-                }
-                try:
-                    for future in as_completed(futures, timeout=future_timeout):
-                        robot_name, target_info = futures[future]
-                        failure_key = f"{group_name}:{robot_name}"
-                        try:
-                            plan = future.result()
-                            plan["pose_name"] = target_info["pose_name"]
-                            plan["inspection_pose_name"] = group_name
-                            plan["inspection_pose_index"] = int(group_info["index"])
-                            plans[robot_name] = plan
-                            if plan.get("q_path"):
-                                start_q_overrides[robot_name] = np.asarray(plan["q_path"][-1], dtype=float)
-                            if plan.get("ik_failure"):
-                                group_ik_failures[robot_name] = plan["ik_failure"]
-                                ik_failures[failure_key] = plan["ik_failure"]
-                                self._last_ik_failure = getattr(self, "_last_ik_failure", {})
-                                self._last_ik_failure[robot_name] = plan["ik_failure"]
-                        except InspectionIKFailure as exc:
-                            group_failures[robot_name] = str(exc)
-                            failures[failure_key] = str(exc)
-                            if exc.failure_info:
-                                group_ik_failures[robot_name] = exc.failure_info
-                                ik_failures[failure_key] = exc.failure_info
-                                self._last_ik_failure = getattr(self, "_last_ik_failure", {})
-                                self._last_ik_failure[robot_name] = exc.failure_info
-                            self.__console.error(f"EF pose path failed for {failure_key}: {exc}")
-                        except Exception as exc:
-                            group_failures[robot_name] = str(exc)
-                            failures[failure_key] = str(exc)
-                            self.__console.error(f"EF pose path failed for {failure_key}: {exc}")
-                except FuturesTimeoutError:
-                    for future, (robot_name, _target_info) in futures.items():
-                        if future.done():
-                            continue
-                        future.cancel()
-                        failure_key = f"{group_name}:{robot_name}"
-                        group_failures[robot_name] = f"path planning timeout ({planning_timeout:.1f}s)"
-                        failures[failure_key] = group_failures[robot_name]
-                        self.__console.error(f"EF pose path timeout for {failure_key}: {planning_timeout:.1f}s")
-                finally:
-                    executor.shutdown(wait=False, cancel_futures=True)
-
-                group_sequence.append({
-                    "index": int(group_info["index"]),
-                    "name": group_name,
-                    "plans": plans,
-                    "failures": group_failures,
-                    "ik_failures": group_ik_failures,
-                })
-
-            if ik_failures:
-                plain_ik_failures = {
-                    key.split(":")[-1]: value
-                    for key, value in ik_failures.items()
-                }
-                self._show_ik_failure_markers(plain_ik_failures.keys(), failure_infos=plain_ik_failures)
-            elif failures:
-                self._show_ik_failure_markers([key.split(":")[-1] for key in failures.keys()])
-
-            all_plans = {
-                f"{group['name']}:{robot_name}": plan
-                for group in group_sequence
-                for robot_name, plan in group["plans"].items()
-            }
-            if not all_plans:
-                raise RuntimeError(f"all EF pose path plans failed: {failures}")
-            plan_wall_elapsed = time.perf_counter() - total_t0
-
-            self._last_inspection_plan_sequence = [
-                {"name": group["name"], "plans": group["plans"]}
-                for group in group_sequence
-                if group["plans"]
-            ]
-            first_group = next(group for group in group_sequence if group["plans"])
-            self._last_inspection_plans = first_group["plans"]
-            for group in group_sequence:
-                for robot_name, plan in group["plans"].items():
-                    self._show_inspection_ik_pose_result(
-                        robot_name,
-                        plan.get("ik_reached_T"),
-                        plan.get("ik_target_T"),
-                        success=not plan.get("ik_fallback", False),
-                        fallback=plan.get("ik_fallback", False),
-                    )
-                    self._show_inspection_goal_robot_pose(
-                        robot_name,
-                        plan["q_path"][-1],
-                        joint_names=plan.get("pin_joint_names"),
-                        clear=False,
-                        render=False,
-                    )
-                    self._show_inspection_path(plan["path"], robot_name=robot_name, clear=False)
-                    if plan.get("planning_error") and plan.get("reached_T") is not None:
-                        self._show_ik_failure_reached_pose(
-                            robot_name,
-                            plan.get("reached_T"),
-                            None,
-                        )
-
-            # Keep one path as the legacy playback target; start simulation uses all plans.
-            first_robot, first_plan = next(iter(first_group["plans"].items()))
-            self._last_inspection_q_path = first_plan["q_path"]
-            self._last_inspection_edge_collisions = first_plan.get("edge_collisions", [])
-            self._last_inspection_robot = first_robot
-            self._last_inspection_path = first_plan["path"]
-
-            has_partial_plan = any(plan.get("status") != "success" for plan in all_plans.values())
-            result = {
-                "status": "success" if not failures and not ik_failures and not has_partial_plan else "partial",
-                "planner": request_data.get("planner", "rrt_connect"),
-                "inspection_groups": [
-                    {
-                        "name": group["name"],
-                        "index": group["index"],
-                        "robots": {
-                            robot_name: {
-                                "pose_name": plan.get("pose_name"),
-                                "waypoints": plan["waypoints"],
-                                "init_q": np.asarray(plan["q_path"][0], dtype=float).round(6).tolist(),
-                                "target_q": np.asarray(plan["q_path"][-1], dtype=float).round(6).tolist(),
-                                "elapsed": plan["elapsed"],
-                                "verification": plan["verification"],
-                                "collision_preview": plan["collision_preview"],
-                                "collision_preview_reason": plan.get("collision_preview_reason"),
-                                "fallback_reason": plan.get("fallback_reason"),
-                                "ik_fallback": plan.get("ik_fallback", False),
-                                "ik_result": plan.get("ik_result"),
-                                "ik_solver": plan.get("ik_solver"),
-                                "ik_normalize": plan.get("ik_normalize"),
-                                "planning_error": plan.get("planning_error"),
-                                "timing": plan.get("timing", {}),
-                            }
-                            for robot_name, plan in group["plans"].items()
-                        },
-                        "failures": group["failures"],
-                    }
-                    for group in group_sequence
-                ],
-                "robots": {
-                    robot_name: {
-                        "pose_name": plan.get("pose_name"),
-                        "waypoints": plan["waypoints"],
-                        "init_q": np.asarray(plan["q_path"][0], dtype=float).round(6).tolist(),
-                        "target_q": np.asarray(plan["q_path"][-1], dtype=float).round(6).tolist(),
-                        "elapsed": plan["elapsed"],
-                        "verification": plan["verification"],
-                        "collision_preview": plan["collision_preview"],
-                        "collision_preview_reason": plan.get("collision_preview_reason"),
-                        "fallback_reason": plan.get("fallback_reason"),
-                        "ik_fallback": plan.get("ik_fallback", False),
-                        "ik_result": plan.get("ik_result"),
-                        "ik_solver": plan.get("ik_solver"),
-                        "ik_normalize": plan.get("ik_normalize"),
-                        "planning_error": plan.get("planning_error"),
-                        "timing": plan.get("timing", {}),
-                    }
-                    for robot_name, plan in first_group["plans"].items()
-                },
-                "failures": failures,
-                "ik_failures": ik_failures,
-                "total_elapsed": float(sum(plan["elapsed"] for plan in all_plans.values())),
-                "wall_elapsed": plan_wall_elapsed,
-                "timing": {
-                    "obstacle_mesh": obstacle_elapsed,
-                    "planning_wall": plan_wall_elapsed,
-                    "planning_sum": float(sum(plan["elapsed"] for plan in all_plans.values())),
-                },
-            }
-            self.__console.info(
-                "EF pose paths planned by inspection pose: "
-                + " | ".join(
-                    f"{group['name']}["
-                    + ", ".join(
-                        f"{robot}({plan['waypoints']} wp, {plan['elapsed']:.3f}s)"
-                        for robot, plan in group["plans"].items())
-                    + "]"
-                    for group in group_sequence if group["plans"])
-                + f", wall={plan_wall_elapsed:.3f}s, obstacle={obstacle_elapsed:.3f}s")
-        except Exception as e:
-            elapsed = time.perf_counter() - total_t0
-            result = {
-                "status": "failed",
-                "message": str(e),
-                "elapsed": elapsed,
-                "failures": failures,
-                "ik_failures": ik_failures,
-            }
-            self.__console.error(f"EF pose path planning failed after {elapsed:.3f}s: {e}")
-        if hasattr(self, 'zapi') and self.zapi and identity:
-            self.zapi.reply_inspection_path(result, identity=identity)
-
     def run(self, frequency_hz: int):
         self.target_frequency_hz = frequency_hz
         self.__console.debug(f"Starting Vedo GUI loop (target: {frequency_hz} Hz)")
@@ -4675,12 +4802,12 @@ class Visualizer:
             self._process_request(request_data)
             processed_count += 1
 
-        # 3. Step manipulator joint animations (蹂닿컙 ?대룞)
+        # 3. Step manipulator joint animations (interpolated motion)
         now = time.time()
         dt = 0.0 if self._last_anim_time is None else (now - self._last_anim_time)
         self._last_anim_time = now
         if self._joint_animations and dt > 0:
-            self._step_joint_animations(min(dt, 0.1))   # ??dt???대옩??
+            self._step_joint_animations(min(dt, 0.1))   # dt가 너무 커지는 것을 방지
         if (getattr(self, '_path_playback', None) is not None
                 or getattr(self, '_robot_path_playback', None) is not None) and dt > 0:
             self._step_path_playback(min(dt, 0.1))
@@ -4707,8 +4834,8 @@ class Visualizer:
         raise RuntimeError(f"URDF path is not configured: {name}")
 
     def _step_joint_animations(self, dt):
-        """?쒖꽦 議곗씤???좊땲硫붿씠?섏쓣 ?щ떎由ш섦 ?띾룄 ?꾨줈?뚯씪濡????ㅽ뀦 吏꾪뻾.
-        媛??accel)?쇰줈 max_speed源뚯? ?щ┛ ???쒗빆, target ?꾨떖 ??媛먯냽???뺤?.
+        """활성 조인트 애니메이션을 사다리꼴 속도 프로파일로 한 스텝 진행한다.
+        가속(accel)으로 max_speed까지 올린 뒤 등속, target 도달 시 감속/정지한다.
         """
         still = []
         changed = False
@@ -4724,21 +4851,21 @@ class Visualizer:
             dist = abs(d_rem)
             direction = np.sign(d_rem) if d_rem != 0 else 0.0
 
-            # ?뺤? ?꾨컯: ?⑥? 嫄곕━쨌?띾룄媛 異⑸텇???묒쑝硫??ㅻ깄
+            # 정지 판정: 남은 거리와 속도가 충분히 작으면 종료
             if dist <= 1e-6 and vel <= accel * dt:
                 model.set_joint(jn, tgt); model.update_fk()
                 changed = True
                 continue
 
-            # 媛먯냽???꾩슂??嫄곕━ = v짼 / (2a). 洹몃낫??媛源뚯슦硫?媛먯냽, ?꾨땲硫?媛???쒗빆
+            # 감속에 필요한 거리 = v^2 / (2a). 그보다 가까우면 감속, 아니면 가속/등속
             stop_dist = (vel * vel) / (2.0 * accel)
             if dist <= stop_dist:
-                vel = max(0.0, vel - accel * dt)      # 媛먯냽
+                vel = max(0.0, vel - accel * dt)      # 감속
             else:
-                vel = min(vmax, vel + accel * dt)     # 媛????vmax ?쒗빆
+                vel = min(vmax, vel + accel * dt)     # 가속 후 vmax 제한
 
             new_cur = cur + direction * vel * dt
-            # target??吏?섏튂硫??ㅻ깄?섍퀬 醫낅즺
+            # target을 지나치면 target으로 스냅하고 종료
             if (tgt - new_cur) * direction <= 0:
                 model.set_joint(jn, tgt); model.update_fk()
                 changed = True
@@ -4755,19 +4882,19 @@ class Visualizer:
             self.plotter.render()
 
     def _set_joint_animation(self, robot_name, joint_name, target, speed, accel=None, identity=None):
-        """?대떦 濡쒕큸/議곗씤?몄쓽 湲곗〈 ?좊땲硫붿씠?섏쓣 援먯껜?섍퀬 ?щ떎由ш섦 ?꾨줈?뚯씪濡??대룞 ?쒖옉.
-        accel 誘몄?????speed??2諛???0.5s 媛??濡?湲곕낯 ?ㅼ젙.
+        """해당 로봇/조인트의 기존 애니메이션을 교체하고 사다리꼴 프로파일로 이동을 시작한다.
+        accel 미지정 시 speed의 2배 또는 0.5s 가속 기준으로 기본 설정한다.
         """
         model = self._find_robot(robot_name)
         if model is None or model._urdf is None:
-            self.__console.warning(f"move_manipulator: 濡쒕큸 ?놁쓬 '{robot_name}'")
+            self.__console.warning(f"move_manipulator: robot not found '{robot_name}'")
             return
         if joint_name not in model._urdf._joint_map:
-            self.__console.warning(f"move_manipulator: 議곗씤???놁쓬 '{joint_name}'")
+            self.__console.warning(f"move_manipulator: joint not found '{joint_name}'")
             return
         spd = float(speed)
         acc = float(accel) if accel is not None else max(spd * 2.0, 1e-6)
-        # 媛숈? (robot, joint)???꾩옱 ?띾룄???댁뼱諛쏆븘 遺?쒕읇寃??ы?寃뚰똿
+        # 같은 (robot, joint)의 현재 속도를 이어받아 부드럽게 재타게팅한다.
         prev_vel = 0.0
         for a in self._joint_animations:
             if a["model"] is model and a["joint"] == joint_name:
@@ -4783,10 +4910,10 @@ class Visualizer:
         if identity is not None:
             self._robot_joint_state_identity = identity
         self.__console.info(
-            f"move_manipulator: {robot_name}.{joint_name} ??{target} (vmax={spd}, accel={acc})")
+            f"move_manipulator: {robot_name}.{joint_name} -> {target} (vmax={spd}, accel={acc})")
 
     def _stop_joint_animation(self, robot_name, joint_name=None):
-        """?대떦 濡쒕큸(?먮뒗 ?뱀젙 議곗씤?????좊땲硫붿씠?섏쓣 利됱떆 以묒?."""
+        """해당 로봇 또는 특정 조인트의 애니메이션을 즉시 중지한다."""
         model = self._find_robot(robot_name)
         self._joint_animations = [
             a for a in self._joint_animations
@@ -4888,7 +5015,7 @@ class Visualizer:
         robot_name = getattr(self, '_last_inspection_robot', None)
         model = self._find_robot(robot_name) if robot_name else None
         if q_path is None or len(q_path) < 2 or model is None:
-            self.__console.warning("execute_inspection_path: planned path媛 ?놁뒿?덈떎")
+            self.__console.warning("execute_inspection_path: planned path is not available")
             return False
 
         if getattr(self, '_last_inspection_edge_collisions', []):
@@ -4903,7 +5030,7 @@ class Visualizer:
 
         pin_model = self._build_pin_model_for_robot(model)
         if pin_model is None:
-            self.__console.warning("execute_inspection_path: Pinocchio model ?앹꽦 ?ㅽ뙣")
+            self.__console.warning("execute_inspection_path: failed to create Pinocchio model")
             return False
 
         self._clear_collision_highlights()
@@ -5036,7 +5163,7 @@ class Visualizer:
             self._apply_robot_q(model, pin_model, q_pts[0])
 
         if not playback_robots:
-            self.__console.warning("execute_inspection_path: planned path媛 ?놁뒿?덈떎")
+            self.__console.warning("execute_inspection_path: planned path is not available")
             return False
         self._path_playback_marker = markers
         self._robot_path_playback = playback_robots
@@ -5273,7 +5400,7 @@ class Visualizer:
         return center + rotated
 
     def _get_spool_pose_payload(self):
-        # ?ㅽ? ?ъ쫰 = chuck 湲곗? ?ㅽ봽??(?ъ??붾꼫媛 ?吏곸뿬??媛믪? 洹몃?濡?
+        # spool pose = chuck 기준 spool offset. 사용자가 UI에서 조정한 값을 그대로 내보낸다.
         self._sync_spool_offset_from_world_T()
         x, y, z = getattr(self, '_spool_offset_xyz', (0.0, 0.0, 0.0))
         return {
@@ -5452,7 +5579,7 @@ class Visualizer:
         return np.vstack(all_verts)
 
     def _replace_spool_points(self, new_pts):
-        """?ㅽ? actor瑜????먭뎔?쇰줈 援먯껜 (?꾪꽣 寃곌낵 諛섏쁺)."""
+        """spool actor를 새 점군으로 교체한다. 필터 결과 반영에 사용한다."""
         old = getattr(self, '_loaded_spool_mesh', None)
         if old is not None:
             self.plotter.remove(old)
@@ -5464,18 +5591,18 @@ class Visualizer:
         new_actor = vedo.Points(new_pts)
         self.plotter.add(new_actor)
         self._loaded_spool_mesh = new_actor
-        # ?ㅽ봽??紐⑤뜽 ?쇨??? world ?먯쓣 ?꾩옱 chuck@offset 湲곗? local濡??섏궛
+        # spool 모델 일관성을 위해 world point를 현재 chuck@offset 기준 local로 환산한다.
         Tc = self._chuck_world_T()
         if Tc is not None and getattr(self, '_spool_local_verts', None) is not None:
             Tinv = np.linalg.inv(Tc @ self._spool_offset_T())
             self._spool_local_verts = (Tinv[:3, :3] @ new_pts.T).T + Tinv[:3, 3]
         self.plotter.render()
 
-    def _filter_loaded_spool(self, request_data):
-        """?꾩옱 濡쒕뱶???ㅽ???吏곸젒 ?몄씠利??꾪꽣(SOR/CCL)瑜??곸슜."""
+    def _handle_request_filter_spool(self, request_data):
+        """현재 로드된 spool에 직접 노이즈 필터(SOR/CCL)를 적용한다."""
         pts = self._get_spool_points()
         if pts is None:
-            self.__console.warning("filter_spool: 濡쒕뱶???ㅽ????놁뒿?덈떎")
+            self.__console.warning("filter_spool: loaded spool is not available")
             return
         method = (request_data.get("method") or "").lower()
         params = request_data.get("params", {}) or {}
@@ -5497,23 +5624,23 @@ class Visualizer:
                 _, labels = voxel_ccl(pts, voxel, min_points=min_points, connectivity=26)
                 valid = labels[labels >= 0]
                 if len(valid) == 0:
-                    self.__console.warning("filter_spool(ccl): ?곌껐?붿냼 ?놁쓬")
+                    self.__console.warning("filter_spool(ccl): no connected component found")
                     return
                 uniq, cnts = np.unique(valid, return_counts=True)
                 kept = pts[labels == uniq[np.argmax(cnts)]]
             else:
-                self.__console.warning(f"filter_spool: ?????녿뒗 method '{method}'")
+                self.__console.warning(f"filter_spool: unknown method '{method}'")
                 return
             self._replace_spool_points(kept)
-            self.__console.info(f"filter_spool({method}): {n0} ??{len(kept)} ??(?쒓굅 {n0 - len(kept)})")
+            self.__console.info(f"filter_spool({method}): {n0} -> {len(kept)} points (removed {n0 - len(kept)})")
         except Exception as e:
-            self.__console.error(f"filter_spool ?ㅽ뙣: {e}")
+            self.__console.error(f"filter_spool failed: {e}")
 
-    def _reconstruct_loaded_spool_mesh(self, request_data):
-        """?꾩옱 濡쒕뱶???ㅽ? ?먭뎔?쇰줈 硫붿떆 ?ш굔(Marching Cubes) ???쒖떆."""
+    def _handle_request_reconstruct_mesh(self, request_data):
+        """현재 로드된 spool 점군으로 mesh를 재구성(Marching Cubes)해 표시한다."""
         pts = self._get_spool_points()
         if pts is None:
-            self.__console.warning("reconstruct_mesh: 濡쒕뱶???ㅽ????놁뒿?덈떎")
+            self.__console.warning("reconstruct_mesh: loaded spool is not available")
             return
         params = request_data.get("params", {}) or {}
         try:
@@ -5528,11 +5655,11 @@ class Visualizer:
             verts = np.asarray(mesh_o3d.vertices)
             faces = np.asarray(mesh_o3d.triangles)
             if len(verts) == 0 or len(faces) == 0:
-                self.__console.warning("reconstruct_mesh: 鍮?硫붿떆")
+                self.__console.warning("reconstruct_mesh: empty mesh")
                 return
             vmesh = vedo.Mesh([verts, faces]).c("gray")
 
-            # 湲곗〈 pcd ?ㅽ? + ?댁쟾 ?ш굔 硫붿떆 ?쒓굅
+            # 기존 pcd spool과 이전 재구성 mesh 제거
             old_pcd = getattr(self, '_loaded_spool_mesh', None)
             if old_pcd is not None:
                 self.plotter.remove(old_pcd)
@@ -5541,7 +5668,7 @@ class Visualizer:
                 self.plotter.remove(old_recon)
 
             self.plotter.add(vmesh)
-            # ?ш굔 硫붿떆瑜????ㅽ?濡??쇱븘 ?ㅽ봽??紐⑤뜽???곌껐 ???ъ??붾꼫 異붿쥌(媛숈씠 ?대룞)
+            # 재구성 mesh를 spool로 사용해 positioner/chuck 추종 시 같이 움직이도록 한다.
             self._loaded_spool_mesh = vmesh
             self._spool_recon_mesh = vmesh
             Tc = self._chuck_world_T()
@@ -5549,27 +5676,27 @@ class Visualizer:
                  if getattr(self, '_spool_world_T', None) is not None
                  else ((Tc @ self._spool_offset_T()) if Tc is not None else np.eye(4)))
             Tinv = np.linalg.inv(T)
-            # verts(?붾뱶) ??local 濡??섏궛??world = T @ local ?좎? (?꾩옱 ?꾩튂 蹂댁〈 + 異붿쥌 媛??
+            # verts(world)를 local로 환산해 world = T @ local 관계를 유지한다.
             self._spool_local_verts = (Tinv[:3, :3] @ verts.T).T + Tinv[:3, 3]
             self._spool_world_T = T
             if Tc is not None:
                 self._chuck_prev_T = Tc
             self.plotter.render()
             self._probe_current_spool_pinocchio_collision("reconstruct_mesh")
-            self.__console.info(f"reconstruct_mesh: ?뺤젏 {len(verts)}, 硫?{len(faces)} (pcd ?쒓굅, 硫붿떆媛 ?ㅽ?濡??꾪솚)")
+            self.__console.info(f"reconstruct_mesh: vertices={len(verts)}, faces={len(faces)} (pcd replaced by mesh)")
         except Exception as e:
-            self.__console.error(f"reconstruct_mesh ?ㅽ뙣: {e}")
+            self.__console.error(f"reconstruct_mesh failed: {e}")
 
-    def _save_loaded_spool(self, request_data):
-        """?꾩옱 寃곌낵瑜???? ?ш굔 硫붿떆媛 ?덉쑝硫?硫붿떆瑜? ?놁쑝硫??먭뎔?????"""
+    def _handle_request_save_spool(self, request_data):
+        """현재 spool 결과를 저장한다. 재구성 mesh가 있으면 mesh, 없으면 point cloud를 저장한다."""
         path = request_data.get("path")
         if not path:
             return
         try:
             recon = getattr(self, '_spool_recon_mesh', None)
             if recon is not None and hasattr(recon, "vertices") and hasattr(recon, "cells"):
-                # ???mesh??spool local frame?쇰줈 湲곕줉?쒕떎. ??JSON??chuck 湲곗? offset??
-                # ?ㅼ떆 ?곸슜?섎㈃ load ???숈씪??pose濡??뚯븘媛????덈떎.
+                # 저장 mesh는 spool local frame으로 기록한다. JSON의 chuck 기준 offset을 다시
+                # 적용하면 load 후 동일한 pose로 복원할 수 있다.
                 verts = getattr(self, '_spool_local_verts', None)
                 if verts is None:
                     verts = np.asarray(recon.vertices)
@@ -5578,61 +5705,43 @@ class Visualizer:
                 m.triangles = _o3d.utility.Vector3iVector(np.asarray(recon.cells, dtype=np.int32))
                 m.compute_vertex_normals()
                 _o3d.io.write_triangle_mesh(path, m)
-                self.__console.info(f"save_spool: local-frame 硫붿떆 ???{path}")
+                self.__console.info(f"save_spool: saved local-frame mesh {path}")
             else:
                 pts = self._get_spool_points()
                 if pts is None:
-                    self.__console.warning("save_spool: ??ν븷 ?ㅽ????놁뒿?덈떎")
+                    self.__console.warning("save_spool: no spool data to save")
                     return
                 pcd = _o3d.geometry.PointCloud()
                 pcd.points = _o3d.utility.Vector3dVector(pts)
                 _o3d.io.write_point_cloud(path, pcd)
-                self.__console.info(f"save_spool: ?먭뎔 ???{path} ({len(pts)} ??")
+                self.__console.info(f"save_spool: saved point cloud {path} ({len(pts)} points)")
         except Exception as e:
-            self.__console.error(f"save_spool ?ㅽ뙣: {e}")
+            self.__console.error(f"save_spool failed: {e}")
 
-    # --- ?ㅽ? ?꾨젅??怨좎젙(媛뺤껜 遺李? ?좏떥 ---
+    # --- spool frame fixation (rigid mount assumption) ---
     F_CHUCK_LINK_NAME = "f_column_passive_clamp"
     M_CHUCK_LINK_NAME = "m_column_passive_r"
     CHUCK_LINK_NAME = M_CHUCK_LINK_NAME
 
     @staticmethod
     def _rotz(deg):
-        r = np.deg2rad(deg); c, s = np.cos(r), np.sin(r)
-        T = np.eye(4); T[0, 0] = c; T[0, 1] = -s; T[1, 0] = s; T[1, 1] = c
-        return T
+        return geom_utils.rotz(deg)
 
     @staticmethod
     def _rotx(deg):
-        r = np.deg2rad(deg); c, s = np.cos(r), np.sin(r)
-        T = np.eye(4); T[1, 1] = c; T[1, 2] = -s; T[2, 1] = s; T[2, 2] = c
-        return T
+        return geom_utils.rotx(deg)
 
     @staticmethod
     def _transl(v):
-        T = np.eye(4); T[:3, 3] = np.asarray(v, dtype=float)
-        return T
+        return geom_utils.transl(v)
 
     @staticmethod
     def _rot_about_axis(axis, center, deg):
-        """center瑜?吏?섎뒗 axis ?섎젅濡?deg???뚯쟾?섎뒗 4x4 (?붾뱶)."""
-        axis = np.asarray(axis, dtype=float)
-        n = np.linalg.norm(axis)
-        if n < 1e-9:
-            return np.eye(4)
-        x, y, z = axis / n
-        th = np.deg2rad(deg); c, s = np.cos(th), np.sin(th); C = 1 - c
-        R = np.array([
-            [c + x*x*C,   x*y*C - z*s, x*z*C + y*s],
-            [y*x*C + z*s, c + y*y*C,   y*z*C - x*s],
-            [z*x*C - y*s, z*y*C + x*s, c + z*z*C],
-        ])
-        center = np.asarray(center, dtype=float)
-        T = np.eye(4); T[:3, :3] = R; T[:3, 3] = center - R @ center
-        return T
+        """center를 지나는 axis 둘레로 deg만큼 회전하는 4x4 변환을 만든다."""
+        return geom_utils.rot_about_axis(axis, center, deg)
 
     def _chuck_world_T(self):
-        """column m chuck joint(m_column_passive_r) 留곹겕??4x4 ?붾뱶 蹂??"""
+        """m-column chuck joint(m_column_passive_r) link의 4x4 world transform을 반환한다."""
         for model in getattr(self, '_robot_models', []):
             if hasattr(model, 'get_link_world_T'):
                 T = model.get_link_world_T(self.CHUCK_LINK_NAME)
@@ -5641,7 +5750,7 @@ class Visualizer:
         return None
 
     def _spool_offset_T(self):
-        """UI(=chuck 湲곗?) ?ㅽ봽???ъ쫰瑜?4x4 蹂?섏쑝濡? spool_world = T_chuck @ T_offset @ local"""
+        """UI의 chuck 기준 spool pose를 4x4 transform으로 변환한다."""
         x, y, z = getattr(self, '_spool_offset_xyz', (0.0, 0.0, 0.0))
         xrot = getattr(self, '_spool_offset_xrot', 0.0)
         zrot = getattr(self, '_spool_offset_zrot', 0.0)
@@ -5667,7 +5776,7 @@ class Visualizer:
             return False
 
     def _apply_spool_world_T(self):
-        """?꾩옱 _spool_world_T 濡??ㅽ? actor ?뺤젏 媛깆떊 (world = T @ local)."""
+        """현재 _spool_world_T로 spool actor 정점을 갱신한다. world = T @ local."""
         local = getattr(self, '_spool_local_verts', None)
         spool = getattr(self, '_loaded_spool_mesh', None)
         T = getattr(self, '_spool_world_T', None)
@@ -5682,8 +5791,8 @@ class Visualizer:
 
     def _ensure_spool_frame_from_actor(self):
         """
-        Mesh濡?濡쒕뱶???ㅽ?泥섎읆 local frame???녿뒗 寃쎌슦, ?꾩옱 ?붾㈃ 醫뚰몴瑜?
-        ?꾩옱 chuck@offset 湲곗? local frame?쇰줈 ?섏궛???댄썑 fixation ?대룞??媛?ν븯寃??쒕떎.
+        mesh로 로드된 spool처럼 local frame이 없는 경우, 현재 화면 좌표를
+        현재 chuck@offset 기준 local frame으로 환산해 이후 fixation 이동이 가능하게 한다.
         """
         if getattr(self, '_spool_local_verts', None) is not None and getattr(self, '_spool_world_T', None) is not None:
             return True
@@ -5701,7 +5810,7 @@ class Visualizer:
         return True
 
     def _render_spool_offset(self):
-        """?섎룞 諛곗튂: ?꾩옱 chuck 湲곗??쇰줈 ?ㅽ????덈? 諛곗튂 (spool_world = T_chuck @ T_offset)."""
+        """수동 배치: 현재 chuck 기준으로 spool을 배치한다. spool_world = T_chuck @ T_offset."""
         local = getattr(self, '_spool_local_verts', None)
         spool = getattr(self, '_loaded_spool_mesh', None)
         if local is None or spool is None:
@@ -5815,387 +5924,6 @@ class Visualizer:
 
         return vedo.load(path), "mesh", None, None
 
-    def _process_request(self, request_data):
-        """Process a request from the ZApi queue."""
-        try:
-            # Handle dictionary payload from zapi_* handlers
-            if isinstance(request_data, dict):
-                command = request_data.get("command")
-                if command == "load_spool":
-                    path = request_data.get("path")
-                    if path:
-                        self.__console.info(f"Loading Spool: {path}")
-                        try:
-                            identity = request_data.get("_identity")
-                            self._clear_collision_highlights()
-                            import pathlib as _pl
-                            mesh, _geom_kind, _mesh_o3d, _pcd = self._load_spool_geometry_with_normals(path)
-                            if mesh is not None:
-                                # ?ㅽ? ?꾩튂??chuck 議곗씤??m_column_passive_r)瑜??먯젏?쇰줈 蹂몃떎.
-                                # spool_world = T_chuck @ T_offset @ local
-                                #  - local: ?먭뎔??centroid濡?以묒떖??+ 湲곕낯?뺣젹(chuck 湲곗? ?곸닔)
-                                #    ???ъ??붾꼫 ?꾩튂? 臾닿??섍쾶 reload ????긽 ?꾩옱 chuck 湲곗??쇰줈 諛곗튂
-                                #  - T_offset: UI(chuck 湲곗?) ?꾩튂/?뚯쟾, 泥섏쓬??0
-                                _is_pcd = _pl.Path(path).suffix.lower() == ".pcd"
-                                _is_point_cloud = _geom_kind == "point_cloud"
-                                _default_x = -0.442  # 泥?湲몄씠留뚰겮 x濡?(chuck 湲곗?)
-
-                                # 湲곗〈??濡쒕뱶???ㅽ?/?ш굔 硫붿떆 紐⑤몢 ?쒓굅 (???뚯씠?꾨줈 援먯껜)
-                                _old_sp = getattr(self, '_loaded_spool_mesh', None)
-                                if _old_sp is not None:
-                                    self.plotter.remove(_old_sp)
-                                    self._loaded_spool_mesh = None
-                                _old_rc = getattr(self, '_spool_recon_mesh', None)
-                                if _old_rc is not None:
-                                    if _old_rc is not _old_sp:
-                                        self.plotter.remove(_old_rc)
-                                    self._spool_recon_mesh = None
-
-                                self._spool_offset_xyz = [0.0, 0.0, 0.0]
-                                self._spool_offset_xrot = 0.0
-                                self._spool_offset_zrot = 0.0
-                                self._spool_fix_r = False
-                                self._positioner_r_deg = 0.0
-                                self._spool_world_T = None
-                                self._chuck_prev_T = None
-                                self._loaded_spool_x_flipped = False
-                                self._loaded_spool_point_cloud = _pcd
-                                self._loaded_spool_open3d_mesh = _mesh_o3d
-                                self._spool_full_local_points = None
-                                self._spool_source_path = path
-
-                                if _is_pcd:
-                                    _pts = np.asarray(_pcd.points, dtype=np.float64)
-                                    _visual_pts = np.asarray(mesh.vertices, dtype=np.float64)
-                                    scaled = _pts
-                                    visual_scaled = _visual_pts
-                                    centroid = scaled.mean(axis=0)
-                                    Rz = self._rotz(-90)[:3, :3]
-                                    # centroid 以묒떖????-90???뺣젹 ??chuck 湲곗? x ?ㅽ봽???곸닔)
-                                    self._spool_full_local_points = (
-                                        (Rz @ (scaled - centroid).T).T + np.array([_default_x, 0.0, 0.0]))
-                                    self._spool_local_verts = (
-                                        (Rz @ (visual_scaled - centroid).T).T + np.array([_default_x, 0.0, 0.0]))
-                                    self.plotter.add(mesh)
-                                    self._loaded_spool_mesh = mesh
-                                    self._render_spool_offset()
-                                elif _is_point_cloud:
-                                    self._spool_full_local_points = np.asarray(_pcd.points, dtype=float).copy()
-                                    self._spool_local_verts = np.asarray(mesh.vertices, dtype=float).copy()
-                                    self.plotter.add(mesh)
-                                    self._loaded_spool_mesh = mesh
-                                    self._render_spool_offset()
-                                else:
-                                    # ??λ맂 PLY/mesh??spool local frame(m)?쇰줈 媛꾩＜?쒕떎.
-                                    # ??JSON??chuck 湲곗? offset???곸슜?섎㈃ ?????pose濡?蹂듭썝?쒕떎.
-                                    if hasattr(mesh, "vertices"):
-                                        self._spool_local_verts = np.asarray(mesh.vertices, dtype=float).copy()
-                                        self._spool_full_local_points = self._spool_local_verts.copy()
-                                    else:
-                                        self._spool_local_verts = None
-                                        self._spool_full_local_points = None
-                                    self.plotter.add(mesh)
-                                    self._loaded_spool_mesh = mesh
-                                    if hasattr(mesh, "cells"):
-                                        self._spool_recon_mesh = mesh
-                                    self._render_spool_offset()
-
-                                self.plotter.render()
-                                self._load_spool_alignment_state(path, identity=identity)
-                                self._probe_current_spool_pinocchio_collision("load_spool")
-                                self.__console.info(f"Successfully loaded {path}")
-                                
-                                # Send reply
-                                if hasattr(self, 'zapi') and self.zapi:
-                                    self.zapi.reply_load_spool(path, True, identity=identity)
-                            else:
-                                self.__console.error(f"Failed to load mesh from {path}")
-                                if hasattr(self, 'zapi') and self.zapi:
-                                    identity = request_data.get("_identity")
-                                    self.zapi.reply_load_spool(path, False, identity=identity)
-                        except Exception as e:
-                            self.__console.error(f"Exception loading mesh: {e}")
-                            if hasattr(self, 'zapi') and self.zapi:
-                                identity = request_data.get("_identity")
-                                self.zapi.reply_load_spool(path, False, identity=identity)
-                elif command == "flip_spool_x":
-                    spool = getattr(self, '_loaded_spool_mesh', None)
-                    if spool is None or (isinstance(spool, (list, tuple)) and len(spool) == 0):
-                        self.__console.warning("Cannot flip spool X direction: no spool loaded")
-                        return True
-
-                    actors = spool if isinstance(spool, (list, tuple)) else [spool]
-
-                    # ?ㅽ????꾩옱 bounding box 以묒떖??mirror origin?쇰줈 ?ъ슜
-                    bounds_list = [a.bounds() for a in actors if hasattr(a, "bounds")]
-                    if bounds_list:
-                        x_min = min(b[0] for b in bounds_list)
-                        x_max = max(b[1] for b in bounds_list)
-                        y_min = min(b[2] for b in bounds_list)
-                        y_max = max(b[3] for b in bounds_list)
-                        z_min = min(b[4] for b in bounds_list)
-                        z_max = max(b[5] for b in bounds_list)
-                        center = [(x_min + x_max) / 2, (y_min + y_max) / 2, (z_min + z_max) / 2]
-                    else:
-                        center = [0, 0, 0]
-
-                    for actor in actors:
-                        if hasattr(actor, "mirror"):
-                            actor.mirror(axis="x", origin=center)
-                    if self._ensure_spool_frame_from_actor():
-                        T = getattr(self, '_spool_world_T', None)
-                        pts = self._get_spool_points()
-                        if T is not None and pts is not None:
-                            Tinv = np.linalg.inv(T)
-                            self._spool_local_verts = (Tinv[:3, :3] @ pts.T).T + Tinv[:3, 3]
-
-                    self._loaded_spool_x_flipped = not getattr(self, '_loaded_spool_x_flipped', False)
-                    self.plotter.render()
-                    self.__console.info(
-                        f"Flipped spool X direction: {self._loaded_spool_x_flipped}")
-                elif command == "move_spool":
-                    # ?ㅽ? ?꾩튂/?뚯쟾??chuck 湲곗? ?ㅽ봽?뗭쑝濡??ㅼ젙 (x,y,z,x_rot,z_rot)
-                    spool = getattr(self, '_loaded_spool_mesh', None)
-                    if spool is None:
-                        self.__console.warning("move_spool: 濡쒕뱶???ㅽ?(PCD)???놁뒿?덈떎")
-                        return True
-                    new_xyz = [
-                        float(request_data.get("x", 0.0)),
-                        float(request_data.get("y", 0.0)),
-                        float(request_data.get("z", 0.0)),
-                    ]
-                    new_xrot = float(request_data.get("x_rotation", 0.0))
-                    new_zrot = float(request_data.get("z_rotation", 0.0))
-
-                    # ??λ맂 mesh/ply泥섎읆 world 醫뚰몴濡?濡쒕뱶?섏뼱 local frame???녿뒗 寃쎌슦:
-                    # ?붿껌??offset 湲곗??쇰줈 local????궛???꾩옱 ?붾㈃ ?꾩튂瑜?蹂댁〈??梨?
-                    # ?댄썑 offset/positioner 異붿쥌 紐⑤뜽???몄엯?쒕떎.
-                    if getattr(self, '_spool_local_verts', None) is None:
-                        pts = self._get_spool_points()
-                        Tc = self._chuck_world_T()
-                        if pts is None or Tc is None:
-                            self.__console.warning("move_spool: ?ㅽ? local frame 珥덇린???ㅽ뙣")
-                            return True
-                        old_xyz = getattr(self, '_spool_offset_xyz', [0.0, 0.0, 0.0])
-                        old_xrot = getattr(self, '_spool_offset_xrot', 0.0)
-                        old_zrot = getattr(self, '_spool_offset_zrot', 0.0)
-                        self._spool_offset_xyz = new_xyz
-                        self._spool_offset_xrot = new_xrot
-                        self._spool_offset_zrot = new_zrot
-                        Tnew = Tc @ self._spool_offset_T()
-                        Tinv = np.linalg.inv(Tnew)
-                        self._spool_local_verts = (Tinv[:3, :3] @ pts.T).T + Tinv[:3, 3]
-                        self._spool_world_T = Tnew
-                        self._spool_offset_xyz = old_xyz
-                        self._spool_offset_xrot = old_xrot
-                        self._spool_offset_zrot = old_zrot
-
-                    self._spool_offset_xyz = new_xyz
-                    self._spool_offset_xrot = new_xrot
-                    self._spool_offset_zrot = new_zrot
-                    self._render_spool_offset()
-                    self.plotter.render()
-                    self._probe_current_spool_pinocchio_collision("move_spool")
-                    self.__console.info(
-                        f"Spool offset set to xyz={self._spool_offset_xyz}, "
-                        f"x_rot={self._spool_offset_xrot}, z_rot={self._spool_offset_zrot}")
-                elif command == "set_spool_fixation":
-                    fix_m_column_z = bool(request_data.get("fix_m_column_z", False))
-                    fix_f_column_r = bool(request_data.get("fix_f_column_r", False))
-                    self._spool_fix_r = fix_f_column_r
-                    self._spool_fix_m_column_z = fix_m_column_z
-                    self._spool_positioner_fixed = fix_m_column_z or fix_f_column_r
-                    if fix_m_column_z or fix_f_column_r:
-                        self._ensure_spool_frame_from_actor()
-                        self._clear_chuck_profile_visuals(render=False)
-                        self._clear_chuck_frame_visuals(render=False)
-                    Tc_now = self._chuck_world_T()
-                    if Tc_now is not None:
-                        self._chuck_prev_T = Tc_now
-                    if self._spool_positioner_fixed:
-                        self.plotter.render()
-                    self._save_spool_alignment_state(reason="fixation")
-                    self.__console.info(
-                        "Spool-positioner fixation set: "
-                        f"fixed={self._spool_positioner_fixed}, "
-                        f"fix_f={fix_f_column_r}, fix_z={fix_m_column_z}")
-                elif command == "move_positioner":
-                    import math
-                    axis = request_data.get("axis")
-                    position = float(request_data.get("position", 0.0))
-                    velocity = float(request_data.get("velocity", 0.0))
-                    fix_m_column_z = bool(request_data.get("fix_m_column_z", False))
-                    fix_f_column_r = bool(request_data.get("fix_f_column_r", False))
-                    self._spool_fix_r = fix_f_column_r
-                    self._spool_fix_m_column_z = fix_m_column_z
-                    self._spool_positioner_fixed = fix_m_column_z or fix_f_column_r
-                    if fix_m_column_z or fix_f_column_r:
-                        self._ensure_spool_frame_from_actor()
-                    if self._spool_positioner_fixed and axis not in ("r", "z"):
-                        self.__console.warning(
-                            f"Positioner {axis} move rejected: mount is fixed; only r/z axes can move")
-                        self._send_positioner_pose_update(identity=request_data.get("_identity"))
-                        return
-                    prev_positioner_r = float(getattr(self, '_positioner_r_deg', 0.0))
-                    if axis == "x":
-                        self._positioner_x = position
-                    elif axis == "z":
-                        self._positioner_z = position
-                    elif axis == "r":
-                        self._positioner_r_deg = position
-                    elif axis == "clamp":
-                        self._positioner_clamp = position
-
-                    for model in getattr(self, '_robot_models', []):
-                        joint_map = model._urdf._joint_map if model._urdf else {}
-                        if axis == "x" and "base_to_m_column" in joint_map:
-                            model.set_joint("base_to_m_column", -position)
-                        elif axis == "z" and "base_to_f_column_z" in joint_map:
-                            model.set_joint("base_to_f_column_z", position)
-                            model.set_joint("m_column_to_m_column_z", position)
-                        elif axis == "r" and "f_column_z_to_f_column_r" in joint_map:
-                            model.set_joint("f_column_z_to_f_column_r", math.radians(position))
-                        elif axis == "clamp" and "f_column_r_to_f_column_passive_clamp" in joint_map:
-                            # prismatic y-axis, range -0.9~0; UI value 0~0.9 ??joint = -position
-                            model.set_joint("f_column_r_to_f_column_passive_clamp", -position)
-                        else:
-                            continue
-                        model.update_fk()
-
-                    # ?ㅽ? 異붿쥌? "怨좎젙??異?????댁꽌留? (泥댄겕 ???섎㈃ ???곕씪媛?
-                    Tc_now = self._chuck_world_T()
-                    has_frame = (getattr(self, '_spool_world_T', None) is not None
-                                 and getattr(self, '_spool_local_verts', None) is not None)
-                    if has_frame and Tc_now is not None:
-                        if axis in ("x", "z") and fix_m_column_z and getattr(self, '_chuck_prev_T', None) is not None:
-                            # column m 怨좎젙: chuck 蹂묒쭊?됰쭔???ㅽ? ?됲뻾?대룞
-                            dt = Tc_now[:3, 3] - self._chuck_prev_T[:3, 3]
-                            T = np.eye(4); T[:3, 3] = dt
-                            self._spool_world_T = T @ self._spool_world_T
-                            self._apply_spool_world_T()
-                            self._update_chuck_mount_points_after_transform(T)
-                            self._send_spool_pose_update(identity=request_data.get("_identity"))
-                        elif axis == "r" and fix_f_column_r:
-                            # column r 怨좎젙: chuck joint 以묒떖쨌異?chuck x異? 湲곗??쇰줈 ?ㅽ? ?뚯쟾
-                            delta_r = position - prev_positioner_r
-                            m_T = self._chuck_link_world_T(self.M_CHUCK_LINK_NAME)
-                            m_cfg = self._chuck_frame_config(self.M_CHUCK_LINK_NAME)
-                            r_rotation_sign = float(m_cfg.get("r_rotation_sign", -1.0))
-                            if m_T is not None:
-                                center = self._chuck_center_world(self.M_CHUCK_LINK_NAME, m_T)
-                                axis_w = self._chuck_axis_world(self.M_CHUCK_LINK_NAME, m_T)
-                            else:
-                                center = Tc_now[:3, 3]
-                                axis_w = Tc_now[:3, :3] @ np.array([1.0, 0.0, 0.0])
-                            Rm = self._rot_about_axis(axis_w, center, delta_r * r_rotation_sign)
-                            self._spool_world_T = Rm @ self._spool_world_T
-                            self._apply_spool_world_T()
-                            self._update_chuck_mount_points_after_transform(Rm)
-                            self._send_spool_pose_update(identity=request_data.get("_identity"))
-                    if Tc_now is not None:
-                        self._chuck_prev_T = Tc_now
-                    if axis == "r":
-                        self._positioner_r_deg = position
-
-                    self._show_chuck_frames(render=False)
-                    self.plotter.render()
-                    if self._spool_positioner_fixed:
-                        self._save_spool_alignment_state(reason=f"fixed move {axis}")
-                    self.__console.info(f"Positioner {axis} moved to {position} (vel={velocity})")
-                elif command == "move_manipulator":
-                    self._set_joint_animation(
-                        request_data.get("robot"),
-                        request_data.get("joint"),
-                        request_data.get("target", 0.0),
-                        request_data.get("speed", 1.0),
-                        request_data.get("accel"),
-                        identity=request_data.get("_identity"))
-                elif command == "stop_manipulator":
-                    self._stop_joint_animation(
-                        request_data.get("robot"),
-                        request_data.get("joint"))
-                elif command == "reset_robot_base_pose":
-                    self._reset_robot_base_pose(
-                        request_data.get("robot"),
-                        identity=request_data.get("_identity"))
-                elif command == "filter_spool":
-                    self._filter_loaded_spool(request_data)
-                elif command == "reconstruct_mesh":
-                    self._reconstruct_loaded_spool_mesh(request_data)
-                elif command == "save_spool":
-                    self._save_loaded_spool(request_data)
-                elif command == "pick_inspection_point":
-                    self._inspection_pick_enabled = bool(request_data.get("enabled", True))
-                    self._inspection_pick_identity = request_data.get("_identity")
-                    if self._inspection_pick_enabled:
-                        self._chuck_mount_pick_enabled = False
-                        self._clear_ik_failure_visuals(render=False)
-                    self.__console.info(
-                        "inspection pick mode enabled" if self._inspection_pick_enabled
-                        else "inspection pick mode disabled")
-                elif command == "pick_chuck_mount_points":
-                    enabled = bool(request_data.get("enabled", True))
-                    self._chuck_mount_pick_enabled = enabled
-                    self._chuck_mount_pick_identity = request_data.get("_identity")
-                    self._chuck_mount_align_on_pick = bool(request_data.get("align_on_pick", False))
-                    self._chuck_mount_align_target = str(request_data.get("align_target", "f")).lower()
-                    if enabled:
-                        self._inspection_pick_enabled = False
-                        if bool(request_data.get("clear", True)):
-                            self._clear_chuck_mount_points()
-                    self.__console.info(
-                        (f"chuck mount align mode enabled: click {self._chuck_mount_align_target}-column mount point"
-                         if self._chuck_mount_align_on_pick
-                         else "chuck mount pick mode enabled: click fixed-side point, then moving-side point")
-                        if enabled else "chuck mount pick mode disabled")
-                elif command == "set_chuck_mount_points":
-                    self._set_chuck_mount_points(
-                        request_data.get("points", []),
-                        request_data.get("local_points"))
-                elif command == "set_chuck_mount_config":
-                    self._set_chuck_mount_config(request_data.get("chuck_mount", {}))
-                elif command == "clear_chuck_mount_points":
-                    self._chuck_mount_pick_enabled = False
-                    self._clear_chuck_mount_points()
-                elif command == "plan_inspection_path":
-                    self._plan_inspection_path(request_data)
-                elif command == "plan_ef_pose_paths":
-                    self._plan_ef_pose_paths(request_data)
-                elif command == "check_ef_pose_ik":
-                    self._check_ef_pose_ik(request_data)
-                elif command == "determine_ef_pose":
-                    self._determine_ef_pose(request_data)
-                elif command == "clear_inspection_path":
-                    self._inspection_pick_enabled = False
-                    self._path_playback = None
-                    self._robot_path_playback = None
-                    self._clear_collision_highlights()
-                    self._clear_inspection_visuals(clear_point=True)
-                    self._clear_path_playback_marker()
-                    self._last_inspection_path = None
-                    self._last_inspection_q_path = None
-                    self._last_inspection_edge_collisions = []
-                    self._last_inspection_robot = None
-                    self._last_inspection_plans = {}
-                    self._last_inspection_plan_sequence = []
-                elif command == "execute_inspection_path":
-                    self._start_path_playback(
-                        request_data.get("speed", 0.2),
-                        identity=request_data.get("_identity"))
-                elif command == "load_test_weld_point":
-                    path = request_data.get("path")
-                    if path:
-                        self.__console.info(f"Loading Test Weld Point from CSV: {path}")
-                        # We will log it for now. Actual rendering can be implemented based on CSV format.
-                        # Can be implemented further as needed.
-                        self.__console.info(f"Successfully handled test weld point CSV path: {path}")
-            
-            # Legacy/Raw handling (list/tuple)
-            elif isinstance(request_data, (list, tuple)) and len(request_data) >= 2:
-                 pass # Handle raw messages if any
-                 
-        except Exception as e:
-            self.__console.error(f"Error processing request: {e}")
 
     def set_zapi(self, zapi):
         """Set the ZApi instance for callbacks."""

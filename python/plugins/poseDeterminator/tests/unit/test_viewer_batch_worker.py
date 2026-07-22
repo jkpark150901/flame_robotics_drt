@@ -60,7 +60,10 @@ class _FakeOptimizer:
         if self._per_call_delay > 0:
             time.sleep(self._per_call_delay)
         self.calls.append(("xray", tuple(kwargs["target_point"])))
-        return self._next_scenario()
+        scenario = self._next_scenario()
+        if isinstance(scenario, tuple) and len(scenario) == 2:
+            return scenario[1]
+        return scenario
 
     def calculate_DDA_RT_pose_for_taking_xray_3pair_120(self, **kwargs):  # noqa: D401
         if self._per_call_delay > 0:

@@ -74,7 +74,7 @@ def test_inspection_point_index_1_does_not_raise(pipe_no_3_optimizer) -> None:
 
     optimizer.calculate_pipe_profile(detection_points[inspection_index])
 
-    json_str, dda_rt_pairs = optimizer.calculate_DDA_RT_pose_for_taking_xray(
+    target_groups = optimizer.calculate_DDA_RT_pose_for_taking_xray(
         inspection_points[inspection_index],
         num_candidates=8,
         distance_from_dda_to_surface=0.01,
@@ -82,7 +82,6 @@ def test_inspection_point_index_1_does_not_raise(pipe_no_3_optimizer) -> None:
         angle_of_rt=10,
     )
 
-    assert isinstance(dda_rt_pairs, list)
-    assert isinstance(json_str, str)
+    assert isinstance(target_groups, list)
     # 결과가 0개여도 raise 만 없으면 회귀 방지 목표는 달성. 추가 정합성 검증은
     # 단위 테스트 영역. 만약 0개라면 collision_pose_groups 까지 검토 필요(디버그 모드).

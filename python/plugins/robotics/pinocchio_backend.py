@@ -85,6 +85,9 @@ class PinocchioRoboticsBackend(RoboticsBackend):
     def robot_handle(self, robot_name: str) -> PinocchioRobotHandle:
         return self._handle(robot_name)
 
+    def dof(self, robot_name: str) -> int:
+        return int(self._handle(robot_name).model.nq)
+
     def joint_names(self, robot_name: str) -> List[str]:
         model = self._handle(robot_name).model
         return [str(model.names[i]) for i in range(1, model.njoints)]
@@ -588,6 +591,57 @@ class PinocchioRoboticsBackend(RoboticsBackend):
             "pin_geom_model": copy.deepcopy(handle.geom_model) if handle.geom_model is not None else None,
             "robot_geom_ids": list(handle.robot_geom_ids),
         }
+
+    def collision_geometry_summary(self, robot_name: str) -> List[Dict[str, Any]]:
+        handle = self._handle(robot_name)
+        if handle.geom_model is None:
+            return []
+        static_ids = set(handle.static_object_ids)
+        names = list(handle.model.names)
+        summary = []
+        for geom_id, geom in enumerate(handle.geom_model.geometryObjects):
+            parent_joint = int(geom.parentJoint)
+            joint_name = names[parent_joint] if 0 <= parent_joint < len(names) else str(parent_joint)
+            summary.append({
+                "id": int(geom_id),
+                "name": str(geom.name),
+                "parent_joint": parent_joint,
+                "parent_joint_name": str(joint_name),
+                "kind": "static" if geom_id in static_ids else "robot",
+            })
+        return summary
+
+    def collision_pair_summary(
+        self,
+        robot_name: str,
+        include_robot_self: bool = True,
+        include_static: bool = True,
+        limit: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        handle = self._handle(robot_name)
+        if handle.geom_model is None:
+            return []
+        static_ids = set(handle.static_object_ids)
+        pairs = []
+        for pair_id, pair in enumerate(handle.geom_model.collisionPairs):
+            first = handle.geom_model.geometryObjects[pair.first]
+            second = handle.geom_model.geometryObjects[pair.second]
+            first_static = int(pair.first) in static_ids
+            second_static = int(pair.second) in static_ids
+            is_static_pair = first_static or second_static
+            if is_static_pair and not include_static:
+                continue
+            if not is_static_pair and not include_robot_self:
+                continue
+            pairs.append({
+                "id": int(pair_id),
+                "first": str(first.name),
+                "second": str(second.name),
+                "kind": "robot_static" if is_static_pair else "robot_self",
+            })
+            if limit is not None and len(pairs) >= int(limit):
+                break
+        return pairs
 
     def _handle(self, robot_name: str) -> PinocchioRobotHandle:
         if robot_name not in self._robots:

@@ -435,7 +435,7 @@ def test_performance_pipe_no3():
 
     # 기존 90° 함수 측정 (게이트 대상 아님, 로그용)
     start = time.perf_counter()
-    _, old_groups = optimizer.calculate_DDA_RT_pose_for_taking_xray(
+    old_groups = optimizer.calculate_DDA_RT_pose_for_taking_xray(
         target_point=inspection_points[0],
         num_candidates=8,
         distance_from_dda_to_surface=0.01,

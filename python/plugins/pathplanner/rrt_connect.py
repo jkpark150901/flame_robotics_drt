@@ -31,16 +31,17 @@ class RRTConnect(PlannerBase):
         current_pose = np.array(current_pose, dtype=float)
         target_pose = np.array(target_pose, dtype=float)
 
+        dof = self._robot_dof()
         if (
-            self.pin_model is not None
-            and current_pose.shape[0] == self.pin_model.nq
-            and target_pose.shape[0] == self.pin_model.nq
+            self._has_robot_q_space_model()
+            and current_pose.shape[0] == dof
+            and target_pose.shape[0] == dof
         ):
             return self._generate_joint_space(current_pose, target_pose)
-        if self.pin_model is not None:
+        if self._has_robot_q_space_model():
             raise ValueError(
-                "RRTConnect is configured for Pinocchio collision, so generate() "
-                f"must receive q-space states with nq={self.pin_model.nq}; "
+                "RRTConnect is configured for robot q-space planning, so generate() "
+                f"must receive q-space states with dof={dof}; "
                 f"got {current_pose.shape[0]}->{target_pose.shape[0]}"
             )
         
@@ -239,10 +240,10 @@ class RRTConnect(PlannerBase):
         return path
 
     def _generate_joint_space(self, start_q, goal_q):
-        if self.check_pinocchio_collision(start_q):
+        if self.check_robot_collision(start_q):
             print("RRT-Connect failed: start configuration is in collision")
             return []
-        if self.check_pinocchio_collision(goal_q):
+        if self.check_robot_collision(goal_q):
             print("RRT-Connect failed: goal configuration is in collision")
             return []
 
@@ -255,7 +256,7 @@ class RRTConnect(PlannerBase):
         connect_node_b_idx = -1
 
         for _ in range(self.max_iter):
-            rnd_point = goal_q if np.random.random() < 0.1 else self._sample_pinocchio_configuration()
+            rnd_point = goal_q if np.random.random() < 0.1 else self._sample_robot_configuration()
             new_idx_a = self._extend_q(tree_a, parents_a, rnd_point)
             if new_idx_a is not None:
                 new_idx_b = self._connect_q(tree_b, parents_b, tree_a[new_idx_a])

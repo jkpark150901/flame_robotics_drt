@@ -9,7 +9,10 @@ from typing import Any
 import numpy as np
 import open3d as o3d
 
-from CylinderFitting import fit_cylinder
+try:
+    from .CylinderFitting import fit_cylinder
+except ImportError:
+    from CylinderFitting import fit_cylinder
 
 
 @dataclass

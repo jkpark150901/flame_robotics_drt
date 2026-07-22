@@ -217,11 +217,26 @@ class ZAPI(QObject, ZAPIBase):
         else:
             self.__console.warning("[ZAPI] Cannot send reset_robot_base_pose: Socket not connected")
 
-    def _ZAPI_request_pick_inspection_point(self, enabled: bool = True):
-        """Enable/disable one-click pipe inspection point picking in the viewer."""
+    def _ZAPI_request_pick_inspection_point(
+        self,
+        enabled: bool = True,
+        clear: bool = False,
+        multi_select: bool = True,
+    ):
+        """Enable/disable pipe inspection point picking in the viewer."""
         if self.__dealer_socket and self.__dealer_socket.is_joined:
-            self.call(self.__dealer_socket, "zapi_pick_inspection_point", {"enabled": bool(enabled)})
-            self.__console.info(f"[ZAPI] Sent pick_inspection_point: enabled={enabled}")
+            self.call(
+                self.__dealer_socket,
+                "zapi_pick_inspection_point",
+                {
+                    "enabled": bool(enabled),
+                    "clear": bool(clear),
+                    "multi_select": bool(multi_select),
+                },
+            )
+            self.__console.info(
+                f"[ZAPI] Sent pick_inspection_point: "
+                f"enabled={enabled}, clear={clear}, multi_select={multi_select}")
         else:
             self.__console.warning("[ZAPI] Cannot send pick_inspection_point: Socket not connected")
 
@@ -275,43 +290,26 @@ class ZAPI(QObject, ZAPIBase):
 
     def _ZAPI_request_plan_inspection_path(self, planner: str, robot: str = "rb20_1900es",
                                            step_size: float = 0.08, max_iter: int = 3000,
+                                           max_workers: int = 2,
                                            ik_solver: str = "normalized_dls",
-                                           ik_normalize: bool = True):
-        """Request EF-only path planning to the currently picked pipe inspection point."""
+                                           ik_normalize: bool = True,
+                                           use_ef_pose_targets: bool = False):
+        """Request unified inspection path planning."""
         if self.__dealer_socket and self.__dealer_socket.is_joined:
             kwargs = {
                 "planner": planner,
                 "robot": robot,
                 "step_size": step_size,
                 "max_iter": max_iter,
+                "max_workers": max_workers,
                 "ik_solver": ik_solver,
                 "ik_normalize": bool(ik_normalize),
+                "use_ef_pose_targets": bool(use_ef_pose_targets),
             }
             self.call(self.__dealer_socket, "zapi_plan_inspection_path", kwargs)
             self.__console.info(f"[ZAPI] Sent plan_inspection_path: {kwargs}")
         else:
             self.__console.warning("[ZAPI] Cannot send plan_inspection_path: Socket not connected")
-
-    def _ZAPI_request_plan_ef_pose_paths(self, planner: str,
-                                         step_size: float = 0.08,
-                                         max_iter: int = 3000,
-                                         max_workers: int = 2,
-                                         ik_solver: str = "normalized_dls",
-                                         ik_normalize: bool = True):
-        """Request simultaneous path planning to the determined DDA/RT EF poses."""
-        if self.__dealer_socket and self.__dealer_socket.is_joined:
-            kwargs = {
-                "planner": planner,
-                "step_size": step_size,
-                "max_iter": max_iter,
-                "max_workers": max_workers,
-                "ik_solver": ik_solver,
-                "ik_normalize": bool(ik_normalize),
-            }
-            self.call(self.__dealer_socket, "zapi_plan_ef_pose_paths", kwargs)
-            self.__console.info(f"[ZAPI] Sent plan_ef_pose_paths: {kwargs}")
-        else:
-            self.__console.warning("[ZAPI] Cannot send plan_ef_pose_paths: Socket not connected")
 
     def _ZAPI_request_check_ef_pose_ik(self, planner: str,
                                        step_size: float = 0.08,

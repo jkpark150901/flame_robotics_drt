@@ -50,6 +50,57 @@ class PlannerBase(ABC):
         if deadline is not None and time.monotonic() > float(deadline):
             raise TimeoutError("path planning timeout")
 
+    def configure(
+        self,
+        *,
+        bounds=None,
+        step_size=None,
+        max_iter=None,
+        collision_sample_resolution=None,
+        robotics_backend=None,
+        robotics_robot_name=None,
+        robot_model=None,
+    ):
+        """Planner 공통 설정 진입점.
+
+        외부(viewer 등)가 planner의 하위 클래스 속성을 직접 건드리지 않고
+        이 추상 클래스 메서드만 호출해 설정하도록 한다. 하위 클래스가 특정
+        속성(bounds/step_size/max_iter 등)을 노출하지 않으면 조용히 건너뛴다.
+
+        Args:
+            bounds: workspace planner의 sampling bounds dict.
+            step_size: 확장/샘플링 step 크기. collision 샘플 해상도 기본값으로도 쓰인다.
+            max_iter: 최대 반복 수. step 이름이 다른 planner를 위해 두 속성 모두 설정한다.
+            collision_sample_resolution: edge collision 샘플 해상도. 미지정 시 step_size를 쓴다.
+            robotics_backend: 충돌/모델 조회에 쓰는 robotics backend.
+            robotics_robot_name: backend에서 사용할 로봇 이름.
+            robot_model: q-space 모델. nq/createData가 있으면 pin_model/pin_data로도 연결한다.
+        """
+        if bounds is not None and hasattr(self, "bounds"):
+            self.bounds = bounds
+        if step_size is not None:
+            if hasattr(self, "step_size"):
+                self.step_size = float(step_size)
+            if collision_sample_resolution is None:
+                self.pin_collision_sample_resolution = float(step_size)
+        if max_iter is not None:
+            if hasattr(self, "max_iter"):
+                self.max_iter = int(max_iter)
+            if hasattr(self, "max_iterations"):
+                self.max_iterations = int(max_iter)
+        if collision_sample_resolution is not None:
+            self.pin_collision_sample_resolution = float(collision_sample_resolution)
+        if robotics_backend is not None:
+            self.robotics_backend = robotics_backend
+        if robotics_robot_name is not None:
+            self.robotics_robot_name = robotics_robot_name
+        if robot_model is not None:
+            self.robot_model = robot_model
+            if hasattr(robot_model, "nq"):
+                self.pin_model = robot_model
+            if hasattr(robot_model, "createData"):
+                self.pin_data = robot_model.createData()
+
     def configure_collision(self, config: dict, default_sample_resolution: float = 1.0):
         self.pin_collision_sample_resolution = float(
             config.get("pinocchio_collision_sample_resolution", default_sample_resolution)
@@ -59,6 +110,8 @@ class PlannerBase(ABC):
                 config.get("robot_urdf"),
                 config.get("package_dirs"),
             )
+
+
 
     def generate(self, current_pose: Union[List[float], np.ndarray], target_pose: Union[List[float], np.ndarray], step_callback: Optional[callable] = None) -> List[np.ndarray]:
         """경로 생성을 위한 공통 진입점.
@@ -85,11 +138,12 @@ class PlannerBase(ABC):
         current_pose = np.asarray(current_pose, dtype=float)
         target_pose = np.asarray(target_pose, dtype=float)
 
-        if getattr(self, "use_joint_space_planning", False) and self.pin_model is not None:
-            if current_pose.shape[0] != self.pin_model.nq or target_pose.shape[0] != self.pin_model.nq:
+        if getattr(self, "use_joint_space_planning", False) and self._has_robot_q_space_model():
+            dof = self._robot_dof()
+            if current_pose.shape[0] != dof or target_pose.shape[0] != dof:
                 raise ValueError(
                     f"{self.__class__.__name__} is configured for joint-space planning, "
-                    f"so generate() must receive q-space states with nq={self.pin_model.nq}; "
+                    f"so generate() must receive q-space states with dof={dof}; "
                     f"got {current_pose.shape[0]}->{target_pose.shape[0]}"
                 )
             return self._generate_joint_space(current_pose, target_pose, step_callback=step_callback)
@@ -149,6 +203,22 @@ class PlannerBase(ABC):
         if backend is None or not robot_name:
             return None, None
         return backend, robot_name
+
+    def _robot_dof(self):
+        """Return q dimension from robotics backend first, then legacy Pinocchio model."""
+        backend, robot_name = self._robotics_collision_backend()
+        if backend is not None:
+            try:
+                return int(backend.dof(robot_name))
+            except Exception:
+                pass
+        if self.pin_model is not None:
+            return int(self.pin_model.nq)
+        return None
+
+    def _has_robot_q_space_model(self):
+        """Whether this planner has enough robot information for q-space planning."""
+        return self._robot_dof() is not None
 
     def add_collision_object(self, object_model):
         """
@@ -309,6 +379,9 @@ class PlannerBase(ABC):
 
     def pinocchio_collision_geometry_summary(self):
         """Return the collision geometries currently registered in Pinocchio."""
+        backend, robot_name = self._robotics_collision_backend()
+        if backend is not None:
+            return list(backend.collision_geometry_summary(robot_name))
         if self.pin_model is None or self.pin_geom_model is None:
             return []
         static_ids = set(getattr(self, "_pin_static_object_ids", []))
@@ -328,6 +401,14 @@ class PlannerBase(ABC):
 
     def pinocchio_collision_pair_summary(self, include_robot_self=True, include_static=True, limit=None):
         """Return the collision pairs checked by Pinocchio."""
+        backend, robot_name = self._robotics_collision_backend()
+        if backend is not None:
+            return list(backend.collision_pair_summary(
+                robot_name,
+                include_robot_self=include_robot_self,
+                include_static=include_static,
+                limit=limit,
+            ))
         if self.pin_model is None or self.pin_geom_model is None:
             return []
         static_ids = set(getattr(self, "_pin_static_object_ids", []))
@@ -352,7 +433,7 @@ class PlannerBase(ABC):
                 break
         return pairs
 
-    def check_pinocchio_collision(self, q, return_pairs=False):
+    def check_robot_collision(self, q, return_pairs=False):
         self._check_planning_deadline()
         backend, robot_name = self._robotics_collision_backend()
         if backend is not None:
@@ -382,7 +463,11 @@ class PlannerBase(ABC):
             ))
         return bool(has_collision), pairs
 
-    def _check_pinocchio_collision(self, p1, p2):
+    def check_pinocchio_collision(self, q, return_pairs=False):
+        """Backward-compatible alias. Prefer check_robot_collision()."""
+        return self.check_robot_collision(q, return_pairs=return_pairs)
+
+    def _check_robot_edge_collision(self, p1, p2):
         backend, robot_name = self._robotics_collision_backend()
         if backend is not None:
             return bool(backend.check_edge_collision(robot_name, p1, p2, return_pairs=False).collision)
@@ -411,6 +496,10 @@ class PlannerBase(ABC):
                 return True
         return False
 
+    def _check_pinocchio_collision(self, p1, p2):
+        """Backward-compatible alias. Prefer _check_robot_edge_collision()."""
+        return self._check_robot_edge_collision(p1, p2)
+
     def collision_pairs_along_edge(self, p1, p2):
         self._check_planning_deadline()
         backend, robot_name = self._robotics_collision_backend()
@@ -434,7 +523,7 @@ class PlannerBase(ABC):
             self._check_planning_deadline()
             alpha = i / steps
             q = (1.0 - alpha) * q1 + alpha * q2
-            hit, hit_pairs = self.check_pinocchio_collision(q, return_pairs=True)
+            hit, hit_pairs = self.check_robot_collision(q, return_pairs=True)
             if not hit:
                 continue
             for pair in hit_pairs:
@@ -447,9 +536,9 @@ class PlannerBase(ABC):
 
     def _check_collision(self, p1, p2):
         self._check_planning_deadline()
-        pin_collision = self._check_pinocchio_collision(p1, p2)
-        if pin_collision is not None:
-            return pin_collision
+        robot_collision = self._check_robot_edge_collision(p1, p2)
+        if robot_collision is not None:
+            return robot_collision
         return False
 
     @staticmethod
@@ -557,7 +646,7 @@ class PlannerBase(ABC):
             self._check_planning_deadline()
             alpha = i / steps
             q = (1.0 - alpha) * q1 + alpha * q2
-            hit, pairs = self.check_pinocchio_collision(q, return_pairs=True)
+            hit, pairs = self.check_robot_collision(q, return_pairs=True)
             if hit:
                 return q.copy(), float(alpha), pairs
         return None, None, []
@@ -589,7 +678,7 @@ class PlannerBase(ABC):
 
         for waypoint_idx, q in enumerate(poses):
             try:
-                hit, pairs = self.check_pinocchio_collision(q, return_pairs=True)
+                hit, pairs = self.check_robot_collision(q, return_pairs=True)
             except Exception:
                 hit, pairs = False, []
             if hit:
@@ -1174,7 +1263,7 @@ class PlannerBase(ABC):
         plt.close(fig)
         return plot_path
 
-    def _sample_pinocchio_configuration(self):
+    def _sample_robot_configuration(self):
         self._check_planning_deadline()
         backend = getattr(self, "robotics_backend", None)
         robot_name = getattr(self, "robotics_robot_name", None)
@@ -1192,6 +1281,10 @@ class PlannerBase(ABC):
         lo[invalid] = -np.pi
         hi[invalid] = np.pi
         return np.random.uniform(lo, hi)
+
+    def _sample_pinocchio_configuration(self):
+        """Backward-compatible alias. Prefer _sample_robot_configuration()."""
+        return self._sample_robot_configuration()
 
     def _steer_state(self, from_state, to_state, step_size):
         direction = np.asarray(to_state, dtype=float) - np.asarray(from_state, dtype=float)

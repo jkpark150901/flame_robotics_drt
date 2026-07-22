@@ -1003,8 +1003,8 @@ class AppWindow(QMainWindow):
             if not self.zapi:
                 self.__set_path_plan_status("[!] ZAPI not available")
                 return
-            self.zapi._ZAPI_request_pick_inspection_point(True)
-            self.__set_path_plan_status("Pick mode: click pipe surface in viewer")
+            self.zapi._ZAPI_request_pick_inspection_point(True, clear=False, multi_select=True)
+            self.__set_path_plan_status("Pick mode: click one or more pipe surfaces in viewer")
         except Exception as e:
             self.__console.error(f"Error requesting inspection point pick: {e}")
             self.__set_path_plan_status(f"[!] {e}")
@@ -1106,13 +1106,14 @@ class AppWindow(QMainWindow):
                 return
             planner = self.__current_planner_module_name()
             ik_solver, ik_normalize = self.__current_ik_request_options()
-            self.zapi._ZAPI_request_plan_ef_pose_paths(
+            self.zapi._ZAPI_request_plan_inspection_path(
                 planner=planner,
                 step_size=0.08,
                 max_iter=3000,
                 max_workers=2,
                 ik_solver=ik_solver,
-                ik_normalize=ik_normalize)
+                ik_normalize=ik_normalize,
+                use_ef_pose_targets=True)
             self.__set_path_plan_status(f"EF pose path planning requested: {planner}, solver={ik_solver}, normalize={ik_normalize}")
         except Exception as e:
             self.__console.error(f"Error requesting inspection path plan: {e}")
@@ -1260,10 +1261,12 @@ class AppWindow(QMainWindow):
                 try:
                     point = json.loads(msg)
                     xyz = point.get("point", point)
+                    points = point.get("points", []) if isinstance(point, dict) else []
                     if hasattr(self, 'edit_inspection_point'):
                         self.edit_inspection_point.setText(
+                            f"{len(points) or 1} pts | "
                             f"{float(xyz[0]):.4f}, {float(xyz[1]):.4f}, {float(xyz[2]):.4f}")
-                    self.__set_path_plan_status("Inspection point selected")
+                    self.__set_path_plan_status(f"Inspection point selected ({len(points) or 1})")
                 except Exception:
                     pass
 

@@ -212,7 +212,7 @@ class RRTStar(PlannerBase):
         start_goal_dist = self._joint_distance(start_q, goal_q)
         start_goal_raw_dist = float(np.linalg.norm(goal_q - start_q))
 
-        if self.check_pinocchio_collision(start_q):
+        if self.check_robot_collision(start_q):
             self._record_exploration(
                 exploration_rows,
                 iteration=-1,
@@ -231,7 +231,7 @@ class RRTStar(PlannerBase):
             )
             return []
 
-        if self.check_pinocchio_collision(goal_q):
+        if self.check_robot_collision(goal_q):
             self._record_exploration(
                 exploration_rows,
                 iteration=-1,
@@ -675,7 +675,7 @@ class RRTStar(PlannerBase):
         os.makedirs(out_dir, exist_ok=True)
         robot_name = "robot"
         try:
-            robot_name = str(getattr(self.pin_model, "name", "") or "robot")
+            robot_name = str(getattr(self, "robotics_robot_name", "") or getattr(self.pin_model, "name", "") or "robot")
         except Exception:
             pass
         stamp = time.strftime("%Y%m%d_%H%M%S")
@@ -717,7 +717,7 @@ class RRTStar(PlannerBase):
             stats["goal_bias_samples"] += 1
             return np.asarray(goal_q, dtype=float), "goal_bias"
         stats["random_samples"] += 1
-        return self._sample_pinocchio_configuration(), "random"
+        return self._sample_robot_configuration(), "random"
 
     def _nearest_joint_node(self, nodes, sample_q):
         """샘플 q와 가장 가까운 tree 노드 index를 찾는다.

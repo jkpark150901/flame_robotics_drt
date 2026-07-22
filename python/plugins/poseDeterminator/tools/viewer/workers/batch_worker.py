@@ -91,7 +91,7 @@ class BatchWorker(QThread):
             return pose_groups
 
         # 기본/명시: 2-쌍 90°
-        _, pose_groups = self._optimizer.calculate_DDA_RT_pose_for_taking_xray(
+        pose_groups = self._optimizer.calculate_DDA_RT_pose_for_taking_xray(
             target_point=target_point,
             num_candidates=self._num_candidates,
             distance_from_dda_to_surface=self._distance_from_dda_to_surface,

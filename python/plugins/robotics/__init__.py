@@ -8,10 +8,12 @@ from plugins.robotics.backend import (
     RobotDescription,
     RoboticsBackend,
 )
+from plugins.robotics.inspection_experiment_logger import InspectionExperimentLogger
 from plugins.robotics.inspection_planning_base import InspectionIKRequest, InspectionPlanningBase
 
 __all__ = [
     "CollisionResult",
+    "InspectionExperimentLogger",
     "InspectionIKRequest",
     "InspectionPlanningBase",
     "IKOptions",

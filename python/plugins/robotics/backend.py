@@ -91,6 +91,15 @@ class RoboticsBackend(ABC):
     def joint_names(self, robot_name: str) -> List[str]:
         """Return actuated joint names in q order."""
 
+    def dof(self, robot_name: str) -> int:
+        """Return q dimension for the robot.
+
+        Concrete backends can override this when q dimension differs from the
+        number of reported actuated joint names. The default keeps older
+        backends usable by deriving the value from ``joint_names``.
+        """
+        return len(self.joint_names(robot_name))
+
     @abstractmethod
     def neutral_q(self, robot_name: str) -> np.ndarray:
         """Return a neutral q vector for the robot."""
@@ -215,6 +224,20 @@ class RoboticsBackend(ABC):
         return_pairs: bool = False,
     ) -> CollisionResult:
         """Check collision along a q-space edge."""
+
+    def collision_geometry_summary(self, robot_name: str) -> List[Dict[str, Any]]:
+        """Return backend-neutral collision geometry summary for diagnostics."""
+        return []
+
+    def collision_pair_summary(
+        self,
+        robot_name: str,
+        include_robot_self: bool = True,
+        include_static: bool = True,
+        limit: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return backend-neutral collision pair summary for diagnostics."""
+        return []
 
     @abstractmethod
     def check_mesh_point_cloud_overlap(

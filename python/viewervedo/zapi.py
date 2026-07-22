@@ -537,7 +537,7 @@ class ZAPI(ZAPIBase):
                 json.dumps(result).encode('utf-8')
             ]
             self.__router_socket.dispatch(reply_parts)
-            self.__console.info(f"[ZAPI_VIEWERVEDO] Sent EF pose result: {result}")
+            self.__console.debug(f"[ZAPI_VIEWERVEDO] Sent EF pose result: {result}")
 
     def zapi_flip_spool_x(self, kwargs=None):
         """Handle request to flip the currently loaded spool in X direction."""
@@ -701,6 +701,8 @@ class ZAPI(ZAPIBase):
         request_payload = {
             "command": "pick_inspection_point",
             "enabled": (kwargs or {}).get("enabled", True),
+            "clear": bool((kwargs or {}).get("clear", False)),
+            "multi_select": bool((kwargs or {}).get("multi_select", True)),
             "_identity": (kwargs or {}).get("_identity"),
         }
         if self._visualizer:
@@ -709,7 +711,11 @@ class ZAPI(ZAPIBase):
             self.push_to_queue(request_payload)
 
     def zapi_plan_inspection_path(self, kwargs=None):
-        """Handle EF-only path planning request to the picked inspection point."""
+        """통합 검사 경로 계획 요청을 처리한다.
+
+        use_ef_pose_targets=True이면 저장된 검사 target group 여러 개를 순차 계획하고,
+        False이면 수동으로 선택한 검사점 하나를 계획한다.
+        """
         self.__console.info(f"Received zapi_plan_inspection_path with kwargs: {kwargs}")
         request_payload = {
             "command": "plan_inspection_path",
@@ -717,28 +723,14 @@ class ZAPI(ZAPIBase):
             "robot": (kwargs or {}).get("robot", "rb20_1900es"),
             "step_size": (kwargs or {}).get("step_size", 0.08),
             "max_iter": (kwargs or {}).get("max_iter", 3000),
-            "ik_solver": (kwargs or {}).get("ik_solver", "normalized_dls"),
-            "ik_normalize": (kwargs or {}).get("ik_normalize", True),
-            "_identity": (kwargs or {}).get("_identity"),
-        }
-        if self._visualizer:
-            self._visualizer.push_request(request_payload)
-        else:
-            self.push_to_queue(request_payload)
-
-    def zapi_plan_ef_pose_paths(self, kwargs=None):
-        """Handle simultaneous path planning to the determined EF poses."""
-        self.__console.info(f"Received zapi_plan_ef_pose_paths with kwargs: {kwargs}")
-        request_payload = {
-            "command": "plan_ef_pose_paths",
-            "planner": (kwargs or {}).get("planner", "rrt_connect"),
-            "step_size": (kwargs or {}).get("step_size", 0.08),
-            "max_iter": (kwargs or {}).get("max_iter", 3000),
             "max_workers": (kwargs or {}).get("max_workers", 2),
+            "use_ef_pose_targets": bool((kwargs or {}).get("use_ef_pose_targets", False)),
             "ik_solver": (kwargs or {}).get("ik_solver", "normalized_dls"),
             "ik_normalize": (kwargs or {}).get("ik_normalize", True),
             "_identity": (kwargs or {}).get("_identity"),
         }
+        if isinstance((kwargs or {}).get("target_groups"), list):
+            request_payload["target_groups"] = (kwargs or {}).get("target_groups")
         if self._visualizer:
             self._visualizer.push_request(request_payload)
         else:
