@@ -113,12 +113,18 @@ class InspectionExperimentLogger:
                 "tcp_x",
                 "tcp_y",
                 "tcp_z",
-            ] + [f"q{i}_{name}" for i, name in enumerate(joint_names)]
+            ] + [f"q{i}_{name}" for i, name in enumerate(joint_names)] \
+              + [f"dq{i}_{name}" for i, name in enumerate(joint_names)]
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
+            # dq는 별도로 다시 계산하지 않고, 이미 기록된 q의 iteration간 차분(gradient)으로
+            # 남긴다. 첫 iteration은 이전 값이 없으니 0으로 둔다.
+            prev_q = None
             for row in trace:
                 q = np.asarray(row.get("q", []), dtype=float).reshape(-1)
                 tcp = np.asarray(row.get("tcp_world", [np.nan, np.nan, np.nan]), dtype=float).reshape(-1)
+                dq = np.zeros_like(q) if prev_q is None or prev_q.shape != q.shape else q - prev_q
+                prev_q = q
                 data = {
                     "iteration": int(row.get("iteration", 0)),
                     "err_norm": float(row.get("err_norm", np.nan)),
@@ -130,7 +136,20 @@ class InspectionExperimentLogger:
                 }
                 for i, name in enumerate(joint_names):
                     data[f"q{i}_{name}"] = float(q[i]) if i < q.size else np.nan
+                    data[f"dq{i}_{name}"] = float(dq[i]) if i < dq.size else np.nan
                 writer.writerow(data)
+
+        # 성공한 pose는 굳이 그래프까지 안 남겨도 되지만, 실패(fallback/failed/collision)한
+        # 경우는 왜 수렴 안 됐는지(err_norm이 정체됐는지, 발산했는지 등) 한눈에 보이게
+        # RRTStar의 exploration plot과 같은 방식으로 PNG를 같이 남긴다.
+        plot_path = None
+        if status_label != "success":
+            try:
+                plot_path = self._save_trace_plot(
+                    trace, out_dir / f"{stem}.png", status_label, joint_names
+                )
+            except Exception as exc:
+                print(f"InspectionExperimentLogger: trace plot failed: {exc}")
 
         meta = {
             "robot_name": robot_name,
@@ -139,6 +158,7 @@ class InspectionExperimentLogger:
             "joint_names": joint_names,
             "target_link_name": target_link_name,
             "csv_path": str(csv_path),
+            "plot_path": None if plot_path is None else str(plot_path),
             "target_T": None if target_T is None else np.asarray(target_T, dtype=float).tolist(),
             "goal_q": np.asarray(goal_q, dtype=float).reshape(-1).tolist(),
             "ik_result": ik_result or {},
@@ -146,4 +166,66 @@ class InspectionExperimentLogger:
         with json_path.open("w", encoding="utf-8") as f:
             json.dump(meta, f, indent=2, ensure_ascii=False)
 
-        return {"csv": str(csv_path), "meta": str(json_path)}
+        result = {"csv": str(csv_path), "meta": str(json_path)}
+        if plot_path is not None:
+            result["plot"] = str(plot_path)
+        return result
+
+    @staticmethod
+    def _save_trace_plot(trace, plot_path, status_label, joint_names=None):
+        """IK trace를 iteration별 err_norm/position_error/orientation_error/joint q/dq PNG로 남긴다.
+
+        Args:
+            trace: iteration별 err_norm/position_error/orientation_error/q를 담은 row list.
+            plot_path: 저장할 PNG 경로.
+            status_label: 그래프 제목에 넣을 상태 문자열(failed/fallback/collision 등).
+            joint_names: q vector 각 항목의 joint 이름. None이면 q0, q1, ...로 표시한다.
+
+        Returns:
+            성공 시 plot_path, matplotlib이 없으면 None.
+        """
+        try:
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+        except Exception as exc:
+            print(f"InspectionExperimentLogger: trace plot skipped, matplotlib unavailable ({exc})")
+            return None
+
+        iterations = [int(row.get("iteration", 0)) for row in trace]
+        err_norm = [float(row.get("err_norm", np.nan)) for row in trace]
+        position_error = [float(row.get("position_error", np.nan)) for row in trace]
+        orientation_error = [float(row.get("orientation_error", np.nan)) for row in trace]
+        q_series = np.asarray(
+            [np.asarray(row.get("q", []), dtype=float).reshape(-1) for row in trace]
+        )
+        dof = q_series.shape[1] if q_series.ndim == 2 else 0
+        joint_names = list(joint_names) if joint_names else [f"q{i}" for i in range(dof)]
+        # dq(gradient)는 CSV와 같은 정의: iteration간 q 차분. 첫 행은 0.
+        dq_series = np.zeros_like(q_series) if dof > 0 else q_series
+        if dof > 0 and len(q_series) > 1:
+            dq_series[1:] = np.diff(q_series, axis=0)
+
+        fig, axes = plt.subplots(5, 1, figsize=(9, 13), sharex=True)
+        axes[0].plot(iterations, err_norm, c="tab:red")
+        axes[0].set_ylabel("err_norm")
+        axes[0].set_yscale("log")
+        axes[1].plot(iterations, position_error, c="tab:blue")
+        axes[1].set_ylabel("position_error [m]")
+        axes[2].plot(iterations, orientation_error, c="tab:green")
+        axes[2].set_ylabel("orientation_error [rad]")
+        for i in range(dof):
+            axes[3].plot(iterations, q_series[:, i], label=joint_names[i] if i < len(joint_names) else f"q{i}")
+        axes[3].set_ylabel("joint q [rad]")
+        for i in range(dof):
+            axes[4].plot(iterations, dq_series[:, i], label=joint_names[i] if i < len(joint_names) else f"q{i}")
+        axes[4].set_ylabel("joint dq (gradient)")
+        axes[4].set_xlabel("iteration")
+        if dof > 0:
+            axes[3].legend(fontsize=7, ncol=2, loc="best")
+            axes[4].legend(fontsize=7, ncol=2, loc="best")
+        fig.suptitle(f"IK trace ({status_label})")
+        fig.tight_layout()
+        fig.savefig(plot_path, dpi=140)
+        plt.close(fig)
+        return plot_path

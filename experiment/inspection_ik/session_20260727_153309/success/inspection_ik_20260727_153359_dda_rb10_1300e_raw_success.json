@@ -1,0 +1,76 @@
+{
+  "robot_name": "dda_rb10_1300e",
+  "urdf_path": "D:\\flame_robotics_drt\\urdf\\rb10_1300e_DDA.urdf",
+  "base_pose": [
+    0.0,
+    3.75,
+    0.0,
+    0,
+    0,
+    0
+  ],
+  "joint_names": [
+    "dda_joint_linear_track",
+    "dda_joint_carriage",
+    "dda_joint_base",
+    "dda_joint_shoulder",
+    "dda_joint_elbow",
+    "dda_joint_wrist1",
+    "dda_joint_wrist2",
+    "dda_joint_wrist3"
+  ],
+  "target_link_name": "dda_link_end",
+  "csv_path": "experiment\\inspection_ik\\session_20260727_153309\\success\\inspection_ik_20260727_153359_dda_rb10_1300e_raw_success.csv",
+  "plot_path": null,
+  "target_T": [
+    [
+      0.0,
+      0.0,
+      1.0,
+      6.029984892329928
+    ],
+    [
+      -0.866025403784439,
+      0.49999999999999956,
+      -3.3990776836172276e-33,
+      1.9413342694984868
+    ],
+    [
+      -0.4999999999999996,
+      -0.866025403784439,
+      -2.7755575615628914e-17,
+      1.643347486122819
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "goal_q": [
+    5.297481595209128,
+    -0.8945486381528132,
+    0.4008924531969762,
+    -1.8442060250312955,
+    0.7392175711697282,
+    2.1871982269991124,
+    -1.7671762304552883,
+    1.9225887283605108
+  ],
+  "ik_result": {
+    "success": true,
+    "fallback": false,
+    "position_error": 1.9117697952702358e-08,
+    "orientation_error": 0.0,
+    "collision": false,
+    "collision_check_error": null,
+    "collision_pairs": [],
+    "collision_pair_count": 0,
+    "iterations": 100000,
+    "elapsed": 0.0004197999951429665,
+    "max_iter": 100000,
+    "solver": "pybullet",
+    "normalize": false
+  }
+}

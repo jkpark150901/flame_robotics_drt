@@ -1,11 +1,15 @@
 ﻿from abc import ABC
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, List, Literal, Optional, Sequence, Union
 import numpy as np
+import logging
 import os
+import threading
 import time
 import csv
 import json
 from pathlib import Path
-from typing import List, Union, Optional
 try:
     import pinocchio as pin
 except ImportError:
@@ -17,6 +21,81 @@ except ImportError:
         import coal as hppfcl
     except ImportError:
         hppfcl = None
+
+@dataclass
+class PlanningTarget:
+    """계획할 단일 target pose. 하나의 로봇 job 안에서 순서대로 계획된다."""
+    name: str
+    target_pose: Any
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class InspectionGroup:
+    """여러 로봇의 target을 함께 묶은 검사 그룹. Visualizer가 만들어 넘긴다."""
+    name: str
+    targets_by_robot: Dict[str, List[PlanningTarget]]
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class RobotPlanningJob:
+    """한 로봇이 순서대로 계획해야 할 target 목록."""
+    robot_name: str
+    start_q: Optional[np.ndarray]
+    targets: List[PlanningTarget]
+    obstacle_mesh: Any = None
+    planner_name: str = "rrt_connect"
+    options: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class TargetPlanningResult:
+    """target 하나의 계획 결과."""
+    target_name: str
+    success: bool
+    q_path: List[np.ndarray] = field(default_factory=list)
+    tcp_path: List[np.ndarray] = field(default_factory=list)
+    goal_q: Optional[np.ndarray] = None
+    error: Optional[str] = None
+    ik_failure: Optional[Dict[str, Any]] = None
+    verification: Dict[str, Any] = field(default_factory=dict)
+    timing: Dict[str, float] = field(default_factory=dict)
+    # 표준 필드 외에 소비자(Visualizer)가 렌더링/응답용으로 쓰는 원본 데이터를
+    # 담아두는 확장 슬롯. plan 문서에는 없지만, IK/렌더링 세부정보를 잃지 않기 위해 추가했다.
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class RobotPlanningResult:
+    """한 로봇 job 전체(순차 target 목록)의 계획 결과."""
+    robot_name: str
+    success: bool
+    target_results: List[TargetPlanningResult]
+    final_q: Optional[np.ndarray]
+    error: Optional[str] = None
+    timing: Dict[str, float] = field(default_factory=dict)
+
+
+@dataclass
+class BatchPlanningResult:
+    """여러 로봇 job을 병렬로 계획한 전체 결과."""
+    success: bool
+    robot_results: Dict[str, RobotPlanningResult]
+    failures: Dict[str, str]
+    ik_failures: Dict[str, Dict[str, Any]]
+    wall_elapsed: float
+    cancelled: bool = False
+    timing: Dict[str, float] = field(default_factory=dict)
+
+
+@dataclass
+class GroupPartitionResult:
+    """검사 그룹을 접근 가능/유예로 나눈 결과."""
+    reachable: List[Any]
+    deferred: List[Any]
+    evaluation_errors: Dict[str, str] = field(default_factory=dict)
+
 
 class PlannerBase(ABC):
     """
@@ -44,6 +123,56 @@ class PlannerBase(ABC):
         self.debug_output_dir = os.path.join(os.getcwd(), "debug", "planner")
         self.last_exploration_csv = None
         self.last_exploration_plot = None
+        # 어떤 검사 지점/자세/로봇에 대한 계획인지 로그에서 바로 구분할 수 있게 호출부
+        # (viewer)가 채워주는 식별 라벨. 예: "Point 2 - Inspection pose 2 / dda_rb10_1300e".
+        self.debug_context = None
+        # q-space(joint-space) 계획에서 world-space workspace 제한을 적용하고 싶을 때
+        # 쓰는 FK 기준 frame 이름. None이면(기본) workspace 체크를 하지 않는다 - bounds는
+        # 있지만 이 이름이 없으면 기존 동작 그대로다.
+        self.workspace_check_frame_name = None
+
+    def _debug_prefix(self):
+        context = getattr(self, "debug_context", None)
+        return f"[{context}] " if context else ""
+
+    def _debug_file_logger(self):
+        """탐색/타이밍 로그 전용 파일 logger. 콘솔/메인 로그와 섞이지 않는 별도 파일에 DEBUG로 남긴다.
+
+        이전에는 print()로 바로 stdout에 찍어서 항상 보였는데, 양이 많고 매 target마다
+        반복돼서 메인 콘솔/로그를 채웠다. 여기서는 별도 파일 handler를 가진 전용 logger를
+        만들어 DEBUG 레벨로만 남기고 root/console logger로는 전파(propagate)하지 않는다.
+        """
+        cached = getattr(self, "_debug_file_logger_instance", None)
+        if cached is not None:
+            return cached
+
+        out_dir = Path(getattr(self, "debug_output_dir", os.path.join(os.getcwd(), "debug", "planner")))
+        out_dir.mkdir(parents=True, exist_ok=True)
+        log_path = out_dir / f"{self.__class__.__name__.lower()}_debug.log"
+
+        logger_name = f"flame_robotics.{self.__class__.__name__.lower()}_debug"
+        logger = logging.getLogger(logger_name)
+        logger.setLevel(logging.DEBUG)
+        logger.propagate = False  # 콘솔/메인 로그 파일로 새어나가지 않게 한다.
+        if not logger.handlers:
+            handler = logging.FileHandler(log_path, encoding="utf-8")
+            handler.setLevel(logging.DEBUG)
+            handler.setFormatter(logging.Formatter("[%(asctime)s] %(message)s"))
+            logger.addHandler(handler)
+
+        self._debug_file_logger_instance = logger
+        return logger
+
+    def _log_block(self, title, lines):
+        """탐색/타이밍 로그를 '어느 지점/자세/로봇' 표시 + 줄바꿈된 블록으로 별도 debug 파일에 남긴다.
+
+        Args:
+            title: 블록 제목(예: "joint-space summary").
+            lines: 본문에 한 줄씩 들어갈 문자열 목록.
+        """
+        header = f"{self._debug_prefix()}{self.__class__.__name__} {title}"
+        body = "\n".join(f"  {line}" for line in lines)
+        self._debug_file_logger().debug(f"{header}\n{body}" if body else header)
 
     def _check_planning_deadline(self):
         deadline = getattr(self, "planning_deadline", None)
@@ -60,6 +189,7 @@ class PlannerBase(ABC):
         robotics_backend=None,
         robotics_robot_name=None,
         robot_model=None,
+        workspace_check_frame_name=None,
     ):
         """Planner 공통 설정 진입점.
 
@@ -68,13 +198,17 @@ class PlannerBase(ABC):
         속성(bounds/step_size/max_iter 등)을 노출하지 않으면 조용히 건너뛴다.
 
         Args:
-            bounds: workspace planner의 sampling bounds dict.
+            bounds: workspace planner의 sampling bounds dict. q-space planner가
+                workspace_check_frame_name과 함께 쓰면 FK 기반 world 제한으로도 쓰인다.
             step_size: 확장/샘플링 step 크기. collision 샘플 해상도 기본값으로도 쓰인다.
             max_iter: 최대 반복 수. step 이름이 다른 planner를 위해 두 속성 모두 설정한다.
             collision_sample_resolution: edge collision 샘플 해상도. 미지정 시 step_size를 쓴다.
             robotics_backend: 충돌/모델 조회에 쓰는 robotics backend.
             robotics_robot_name: backend에서 사용할 로봇 이름.
             robot_model: q-space 모델. nq/createData가 있으면 pin_model/pin_data로도 연결한다.
+            workspace_check_frame_name: 지정하면 q-space planner가 이 frame의 FK world
+                position을 bounds로 제한한다(q-space 자체엔 world 제한이 없어서). None(기본)이면
+                기존처럼 workspace 체크를 하지 않는다.
         """
         if bounds is not None and hasattr(self, "bounds"):
             self.bounds = bounds
@@ -100,6 +234,40 @@ class PlannerBase(ABC):
                 self.pin_model = robot_model
             if hasattr(robot_model, "createData"):
                 self.pin_data = robot_model.createData()
+        if workspace_check_frame_name is not None:
+            self.workspace_check_frame_name = workspace_check_frame_name
+
+    def _workspace_position_ok(self, q):
+        """q-space q의 FK world position이 self.bounds 안에 있는지 확인한다.
+
+        Args:
+            q: raw q(joint vector).
+
+        Returns:
+            bool. workspace_check_frame_name이나 backend/bounds가 없으면(옵트인 안 됨)
+            항상 True(체크 안 함) - 기존 동작을 그대로 유지하기 위한 fail-open이다.
+
+        계산 과정:
+            backend.frame_world_T로 지정한 frame의 world position을 FK로 구하고,
+            bounds의 x/y/z min/max 안에 있는지만 본다.
+        """
+        frame_name = getattr(self, "workspace_check_frame_name", None)
+        bounds = getattr(self, "bounds", None)
+        if not frame_name or not bounds:
+            return True
+        backend, robot_name = self._robotics_collision_backend()
+        if backend is None:
+            return True
+        try:
+            T = backend.frame_world_T(robot_name, q, frame_name)
+        except Exception:
+            return True
+        pos = np.asarray(T, dtype=float)[:3, 3]
+        return (
+            bounds.get("x_min", -np.inf) <= pos[0] <= bounds.get("x_max", np.inf)
+            and bounds.get("y_min", -np.inf) <= pos[1] <= bounds.get("y_max", np.inf)
+            and bounds.get("z_min", -np.inf) <= pos[2] <= bounds.get("z_max", np.inf)
+        )
 
     def configure_collision(self, config: dict, default_sample_resolution: float = 1.0):
         self.pin_collision_sample_resolution = float(
@@ -111,7 +279,269 @@ class PlannerBase(ABC):
                 config.get("package_dirs"),
             )
 
+    def partition_and_sort_groups(
+        self,
+        groups: Sequence[Any],
+        *,
+        is_reachable: Callable[[Any], bool],
+        reachable_sort_key: Optional[Callable[[Any], Any]] = None,
+        deferred_sort_key: Optional[Callable[[Any], Any]] = None,
+        reachability_error_policy: Literal["defer", "raise"] = "defer",
+    ) -> GroupPartitionResult:
+        """검사 그룹을 접근 가능(reachable)/유예(deferred)로 나누고 각각 정렬한다.
 
+        Args:
+            groups: InspectionGroup 또는 이와 동등한 group 객체 목록.
+            is_reachable: group 하나를 받아 "지금 바로 접근 가능한지" bool을 반환하는 콜백.
+                판단 자체는 application(Visualizer)이 하고, 여기서는 그 결과로 분류만 한다.
+            reachable_sort_key: reachable 목록 정렬 키. None이면 입력 순서를 유지한다.
+            deferred_sort_key: deferred 목록 정렬 키. None이면 입력 순서를 유지한다.
+            reachability_error_policy: is_reachable이 예외를 던졌을 때 처리 방식.
+                "defer"면 해당 group을 deferred로 넘기고 에러를 기록한다. "raise"면 즉시 전파한다.
+
+        Returns:
+            GroupPartitionResult(reachable, deferred, evaluation_errors).
+
+        계산 과정:
+            입력 순서대로 순회하며 is_reachable을 평가해 reachable/deferred로 나눈 뒤,
+            각각 안정 정렬(동률은 입력 순서 유지)을 적용한다.
+        """
+        reachable: List[Any] = []
+        deferred: List[Any] = []
+        evaluation_errors: Dict[str, str] = {}
+
+        for group in groups:
+            group_name = getattr(group, "name", None)
+            if group_name is None and isinstance(group, dict):
+                group_name = group.get("name")
+            try:
+                ok = bool(is_reachable(group))
+            except Exception as exc:
+                evaluation_errors[str(group_name)] = str(exc)
+                if reachability_error_policy == "raise":
+                    raise
+                deferred.append(group)
+                continue
+            (reachable if ok else deferred).append(group)
+
+        if reachable_sort_key is not None:
+            reachable.sort(key=reachable_sort_key)
+        if deferred_sort_key is not None:
+            deferred.sort(key=deferred_sort_key)
+
+        return GroupPartitionResult(
+            reachable=reachable, deferred=deferred, evaluation_errors=evaluation_errors
+        )
+
+    def plan_target_sequence(
+        self,
+        job: RobotPlanningJob,
+        plan_target_fn: Callable[[RobotPlanningJob, PlanningTarget, Optional[np.ndarray]], TargetPlanningResult],
+        *,
+        fail_policy: Literal["stop_robot", "skip_target", "raise"] = "stop_robot",
+        timeout_sec: Optional[float] = None,
+        cancellation_event: Optional[threading.Event] = None,
+    ) -> RobotPlanningResult:
+        """한 로봇의 target들을 순서대로 계획하며 마지막 q를 다음 target의 시작 q로 넘긴다.
+
+        Args:
+            job: 계획할 target 목록과 시작 q(job.start_q)를 담은 RobotPlanningJob.
+            plan_target_fn: (job, target, start_q) -> TargetPlanningResult. 실제 IK/경로 생성은
+                이 콜백에 위임한다(로봇 backend/IK는 application 쪽 지식이라 PlannerBase가 직접 모른다).
+            fail_policy: target 실패 시 처리 방식.
+                "stop_robot": 남은 target을 건너뛰고 중단.
+                "skip_target": 실패를 기록하고 마지막 성공 q에서 다음 target을 계속 시도.
+                "raise": 첫 실패를 즉시 예외로 전파.
+            timeout_sec: 이 로봇 job 전체에 적용할 예산(초). 초과하면 남은 target은 실패 처리한다.
+            cancellation_event: 설정되면(다른 로봇의 stop_all 등) 이후 target을 즉시 중단한다.
+
+        Returns:
+            RobotPlanningResult(robot_name, success, target_results, final_q, error, timing).
+
+        계산 과정:
+            1. current_q = job.start_q로 시작한다.
+            2. target을 선언 순서대로 plan_target_fn(job, target, current_q)로 계획한다.
+            3. 성공하면 q_path[-1]을 다음 current_q로 쓴다. 실패한 target의 q는 절대 쓰지 않는다.
+            4. timeout/cancellation은 다음 target 진입 전에만 확인한다(cooperative, 강제 중단 아님).
+        """
+        wall_t0 = time.perf_counter()
+        deadline = None if timeout_sec is None else time.monotonic() + float(timeout_sec)
+        current_q = job.start_q
+        target_results: List[TargetPlanningResult] = []
+        robot_success = True
+        robot_error: Optional[str] = None
+
+        for target in job.targets:
+            if cancellation_event is not None and cancellation_event.is_set():
+                target_results.append(TargetPlanningResult(
+                    target_name=target.name, success=False, error="cancelled"))
+                robot_success = False
+                continue
+            if deadline is not None and time.monotonic() > deadline:
+                target_results.append(TargetPlanningResult(
+                    target_name=target.name, success=False, error="robot planning timeout"))
+                robot_success = False
+                if fail_policy == "raise":
+                    robot_error = "robot planning timeout"
+                    break
+                if fail_policy == "stop_robot":
+                    break
+                continue  # skip_target: 마지막 성공 q 그대로 다음 target 진행
+
+            try:
+                target_result = plan_target_fn(job, target, current_q)
+            except Exception as exc:
+                target_result = TargetPlanningResult(
+                    target_name=target.name, success=False, error=str(exc))
+
+            target_results.append(target_result)
+            if target_result.success:
+                if target_result.q_path:
+                    current_q = target_result.q_path[-1]
+                continue
+
+            robot_success = False
+            if fail_policy == "raise":
+                robot_error = target_result.error or f"target '{target.name}' failed"
+                break
+            if fail_policy == "stop_robot":
+                break
+            # skip_target: current_q(마지막 성공 상태)를 그대로 유지하고 다음 target 진행
+
+        result = RobotPlanningResult(
+            robot_name=job.robot_name,
+            success=robot_success,
+            target_results=target_results,
+            final_q=current_q,
+            error=robot_error,
+            timing={"wall": time.perf_counter() - wall_t0},
+        )
+        if fail_policy == "raise" and robot_error is not None:
+            raise RuntimeError(f"robot '{job.robot_name}' planning failed: {robot_error}")
+        return result
+
+    def plan_batch(
+        self,
+        jobs: Sequence[RobotPlanningJob],
+        plan_target_fn: Callable[[RobotPlanningJob, PlanningTarget, Optional[np.ndarray]], TargetPlanningResult],
+        *,
+        parallel: bool = True,
+        max_workers: Optional[int] = None,
+        fail_policy: Literal["stop_robot", "skip_target", "stop_all", "raise"] = "stop_robot",
+        timeout_sec: Optional[float] = None,
+        executor: Optional[ThreadPoolExecutor] = None,
+    ) -> BatchPlanningResult:
+        """서로 다른 로봇 job들을 병렬로, 각 로봇의 target들은 순차로 계획한다.
+
+        Args:
+            jobs: robot별 RobotPlanningJob 목록. 서로 다른 로봇은 독립적으로 병렬 실행된다.
+            plan_target_fn: plan_target_sequence에 그대로 전달되는 단일 target 계획 콜백.
+            parallel: False면 job을 순서대로 하나씩(디버깅용) 처리한다.
+            max_workers: 동시 작업자 수. None이면 job 개수만큼(그 이상은 의미 없음).
+            fail_policy: "stop_robot"/"skip_target"은 plan_target_sequence로 그대로 전달된다.
+                "stop_all"은 실패 발생 시 cancellation_event를 세팅해 다른 job도 협조적으로 멈추게 한다.
+                "raise"는 첫 실패를 재전파하되, 먼저 cancellation을 걸어 나머지 작업을 정리한다.
+            timeout_sec: 각 로봇 job에 적용되는 예산(초). robot-level 마감이다.
+            executor: 외부에서 준 executor. 주면 이 함수는 shutdown하지 않는다(소유권은 호출자).
+                None이면 이 함수가 만들고 끝나면 닫는다.
+
+        Returns:
+            BatchPlanningResult(success, robot_results, failures, ik_failures, wall_elapsed, cancelled).
+
+        계산 과정:
+            1. job마다 plan_target_sequence를 서로 다른 스레드에서 실행한다(로봇 간 병렬).
+            2. 실패한 target들을 "robot:target" 키로 failures/ik_failures에 모은다.
+            3. 모든 로봇이 성공해야 전체 success다.
+        """
+        wall_t0 = time.perf_counter()
+        cancellation_event = threading.Event()
+        owns_executor = executor is None
+        jobs = list(jobs)
+        worker_count = max(1, min(int(max_workers), len(jobs))) if max_workers else max(1, len(jobs))
+
+        robot_results: Dict[str, RobotPlanningResult] = {}
+
+        def _run_job(job: RobotPlanningJob) -> RobotPlanningResult:
+            return self.plan_target_sequence(
+                job,
+                plan_target_fn,
+                fail_policy="raise" if fail_policy == "raise" else (
+                    "stop_robot" if fail_policy == "stop_all" else fail_policy
+                ),
+                timeout_sec=timeout_sec,
+                cancellation_event=cancellation_event,
+            )
+
+        if parallel and len(jobs) > 1:
+            pool = executor if executor is not None else ThreadPoolExecutor(max_workers=worker_count)
+            try:
+                future_map = {pool.submit(_run_job, job): job for job in jobs}
+                for future in as_completed(future_map):
+                    job = future_map[future]
+                    try:
+                        job_result = future.result()
+                    except Exception as exc:
+                        job_result = RobotPlanningResult(
+                            robot_name=job.robot_name,
+                            success=False,
+                            target_results=[],
+                            final_q=job.start_q,
+                            error=str(exc),
+                        )
+                    robot_results[job.robot_name] = job_result
+                    if not job_result.success and fail_policy == "stop_all":
+                        cancellation_event.set()
+            finally:
+                if owns_executor:
+                    pool.shutdown(wait=True)
+        else:
+            for job in jobs:
+                if cancellation_event.is_set():
+                    robot_results[job.robot_name] = RobotPlanningResult(
+                        robot_name=job.robot_name, success=False, target_results=[],
+                        final_q=job.start_q, error="cancelled",
+                    )
+                    continue
+                try:
+                    job_result = _run_job(job)
+                except Exception as exc:
+                    job_result = RobotPlanningResult(
+                        robot_name=job.robot_name, success=False, target_results=[],
+                        final_q=job.start_q, error=str(exc),
+                    )
+                robot_results[job.robot_name] = job_result
+                if not job_result.success and fail_policy == "stop_all":
+                    cancellation_event.set()
+
+        failures: Dict[str, str] = {}
+        ik_failures: Dict[str, Dict[str, Any]] = {}
+        for robot_name, job_result in robot_results.items():
+            for target_result in job_result.target_results:
+                if target_result.success:
+                    continue
+                key = f"{robot_name}:{target_result.target_name}"
+                failures[key] = target_result.error or "planning failed"
+                if target_result.ik_failure:
+                    ik_failures[key] = target_result.ik_failure
+            if job_result.error and not job_result.target_results:
+                failures[f"{robot_name}:job"] = job_result.error
+
+        overall_success = bool(robot_results) and all(r.success for r in robot_results.values())
+        batch_result = BatchPlanningResult(
+            success=overall_success,
+            robot_results=robot_results,
+            failures=failures,
+            ik_failures=ik_failures,
+            wall_elapsed=time.perf_counter() - wall_t0,
+            cancelled=cancellation_event.is_set(),
+        )
+        if fail_policy == "raise" and not overall_success:
+            first_error = next(
+                (r.error for r in robot_results.values() if r.error),
+                next(iter(failures.values()), "batch planning failed"),
+            )
+            raise RuntimeError(str(first_error))
+        return batch_result
 
     def generate(self, current_pose: Union[List[float], np.ndarray], target_pose: Union[List[float], np.ndarray], step_callback: Optional[callable] = None) -> List[np.ndarray]:
         """경로 생성을 위한 공통 진입점.
@@ -136,7 +566,7 @@ class PlannerBase(ABC):
             단, Pinocchio model이 아직 없는 단독 알고리즘 테스트 상황에서는 workspace 구현으로 내려간다.
         """
         current_pose = np.asarray(current_pose, dtype=float)
-        target_pose = np.asarray(target_pose, dtype=float)
+        target_pose  = np.asarray(target_pose, dtype=float)
 
         if getattr(self, "use_joint_space_planning", False) and self._has_robot_q_space_model():
             dof = self._robot_dof()
@@ -1075,9 +1505,10 @@ class PlannerBase(ABC):
             print(f"{self.__class__.__name__} exploration plot failed: {exc}")
         self.last_exploration_csv = str(csv_path)
         self.last_exploration_plot = None if plot_path is None else str(plot_path)
-        print(
-            f"{self.__class__.__name__} exploration debug saved: "
-            f"csv={self.last_exploration_csv}, plot={self.last_exploration_plot}")
+        self._log_block("exploration debug saved", [
+            f"csv={self.last_exploration_csv}",
+            f"plot={self.last_exploration_plot}",
+        ])
         return self.last_exploration_csv, self.last_exploration_plot
 
     def _save_exploration_plot(self, rows, plot_path, path_waypoints=None):

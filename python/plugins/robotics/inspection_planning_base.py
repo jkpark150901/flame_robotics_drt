@@ -94,14 +94,10 @@ class InspectionPlanningBase:
             IKOptions 인스턴스.
 
         계산 과정:
-            solver 이름을 먼저 결정하고, normalize가 명시되지 않았으면 legacy DLS 계열만
-            raw joint-space로 간주한다. 나머지 수치 파라미터는 config 기본값으로 채운다.
+            solver 이름을 먼저 결정한다. 나머지 수치 파라미터는 config 기본값으로 채운다.
         """
-        solver_name = str(ik_solver or ik_config.get("solver", "normalized_dls") or "normalized_dls").lower()
-        if ik_normalize is None:
-            normalize_value = solver_name not in ("dls", "classic_dls", "legacy_dls")
-        else:
-            normalize_value = bool(ik_normalize)
+        solver_name = str(ik_solver or ik_config.get("solver", "dls") or "dls").lower()
+        normalize_value = bool(ik_normalize) if ik_normalize is not None else False
         return IKOptions(
             solver=solver_name,
             normalize=normalize_value,
@@ -157,32 +153,45 @@ class InspectionPlanningBase:
             error를 계산한다. collision model이 구성되어 있으면 현재 q collision도 함께 검사한다.
         """
         q = np.asarray(q, dtype=float)
-        reached_T = self.backend.frame_world_T(request.robot_name, q, request.frame_name)
-        target_world_T = np.asarray(target_world_T, dtype=float)
-        position_error = float(np.linalg.norm(reached_T[:3, 3] - target_world_T[:3, 3]))
+        reached_T       = self.backend.frame_world_T(request.robot_name, q, request.frame_name)
+        target_world_T  = np.asarray(target_world_T, dtype=float)
+        position_error  = float(np.linalg.norm(reached_T[:3, 3] - target_world_T[:3, 3]))
         rot_delta = reached_T[:3, :3].T @ target_world_T[:3, :3]
         cos_angle = (float(np.trace(rot_delta)) - 1.0) * 0.5
         orientation_error = float(np.arccos(np.clip(cos_angle, -1.0, 1.0)))
         collision = False
-        collision_pair_count = 0
+        collision_pairs: list = []
+        collision_check_error = None
         try:
-            collision_result = self.backend.check_collision(request.robot_name, q, return_pairs=True)
-            collision = bool(collision_result.collision)
-            collision_pair_count = len(collision_result.pairs)
-        except Exception:
-            pass
+            collision_result        = self.backend.check_collision(request.robot_name, q, return_pairs=True)
+            collision               = bool(collision_result.collision)
+            collision_pairs         = [list(pair) for pair in collision_result.pairs]
+            if collision:
+                pair_text = ", ".join(f"{a} <-> {b}" for a, b in collision_result.pairs)
+                print(f"ik_result_summary: collision for {request.robot_name}: {pair_text}")
+        except Exception as exc:
+            # 여기서 조용히 넘기면 collision check가 실제로 실패했는데도 "collision=False"로
+            # 보고돼, planner가 나중에 같은 q를 충돌로 판정해도 IK 단계 결과와 왜 다른지
+            # 알 수 없게 된다. 실패 사유를 그대로 남긴다.
+            collision_check_error = str(exc)
+            print(
+                f"ik_result_summary: collision check failed for {request.robot_name}, "
+                f"treating as unknown (not collision-free): {exc}"
+            )
         return {
-            "success": bool(ik_result.success),
-            "fallback": bool(fallback),
-            "position_error": position_error,
-            "orientation_error": orientation_error,
-            "collision": collision,
-            "collision_pair_count": int(collision_pair_count),
-            "iterations": ik_result.iterations,
-            "elapsed": ik_result.elapsed,
-            "max_iter": request.ik_config.get("max_iter"),
-            "solver": ik_result.solver,
-            "normalize": ik_result.normalize,
+            "success":              bool(ik_result.success),
+            "fallback":             bool(fallback),
+            "position_error":       position_error,
+            "orientation_error":    orientation_error,
+            "collision":            collision,
+            "collision_check_error": collision_check_error,
+            "collision_pairs":      collision_pairs,
+            "collision_pair_count": len(collision_pairs),
+            "iterations":           int(ik_result.iterations),
+            "elapsed":              float(ik_result.elapsed),
+            "max_iter":             int(request.ik_config.get("max_iter")),
+            "solver":               str(ik_result.solver),
+            "normalize":            bool(ik_result.normalize),
         }
 
     def check_inspection_ik_for_robot(self, request: InspectionIKRequest) -> Dict[str, Any]:
@@ -205,7 +214,7 @@ class InspectionPlanningBase:
         timings: Dict[str, float] = {}
 
         stage_t0 = time.perf_counter()
-        start_q = np.asarray(request.start_q, dtype=float)
+        start_q  = np.asarray(request.start_q, dtype=float)
         target_world_T = self.backend.target_world_T(
             request.robot_name,
             request.target_pose,
@@ -316,7 +325,10 @@ class InspectionPlanningBase:
         goal_q = np.asarray(result["goal_q"], dtype=float)
         planning_error = None
         forced_collision_preview = bool(result.get("ik_fallback", False))
-        fallback_reason = None
+        # "collision_preview=True인데 reason=None"으로 보이면 원인 파악이 안 된다.
+        # ik_fallback 때문에 강제된 경우 그 사실을 바로 사유에 남긴다(아래 planner 단계
+        # 분기들이 있으면 그쪽이 더 구체적이라 그대로 덮어쓴다).
+        fallback_reason = "ik_fallback" if forced_collision_preview else None
 
         if planning_timeout > 0 and hasattr(planner, "planning_deadline"):
             planner.planning_deadline = time.monotonic() + float(planning_timeout)

@@ -65,6 +65,8 @@ class RRTStar(PlannerBase):
         self.last_solution_paths_json = None
         self.last_planning_status = None
         self.last_returned_path_reaches_goal = False
+        self.last_iteration_count = -1
+        self.last_collision_pairs = None
         self.bounds = self.config.get("workspace_bounds", {
             "x_min": -10.0,
             "x_max": 10.0,
@@ -212,7 +214,8 @@ class RRTStar(PlannerBase):
         start_goal_dist = self._joint_distance(start_q, goal_q)
         start_goal_raw_dist = float(np.linalg.norm(goal_q - start_q))
 
-        if self.check_robot_collision(start_q):
+        start_in_collision, start_collision_pairs = self.check_robot_collision(start_q, return_pairs=True)
+        if start_in_collision:
             self._record_exploration(
                 exploration_rows,
                 iteration=-1,
@@ -223,12 +226,23 @@ class RRTStar(PlannerBase):
                 node_count=1,
             )
             self._save_exploration_debug(exploration_rows, "joint", "start_collision")
-            print(
-                "RRTStar joint-space summary: failed=start_collision, "
-                f"start_goal_dist={start_goal_dist:.6f}, raw_dist={start_goal_raw_dist:.6f}, "
-                f"normalized={self.normalize_joint_space}, step_size={float(self.step_size):.6f}, "
-                f"early_stop_on_goal={self.early_stop_on_goal}"
-            )
+            # 어떤 geometry pair가 충돌했는지 남겨야, 이게 실제 충돌인지(예: positioner
+            # 가상 회전 이후 로봇이 실제로 배관과 겹치는 경우) 아니면 mesh/frame 설정
+            # 버그인지 다음 재현 로그에서 바로 구분할 수 있다.
+            self.last_collision_pairs = start_collision_pairs
+            self._log_block("joint-space summary", [
+                "status=failed(start_collision)",
+                f"collision_pairs={start_collision_pairs}",
+                f"start_goal_dist={start_goal_dist:.6f}",
+                f"raw_dist={start_goal_raw_dist:.6f}",
+                f"normalized={self.normalize_joint_space}",
+                f"step_size={float(self.step_size):.6f}",
+                f"early_stop_on_goal={self.early_stop_on_goal}",
+            ])
+            # last_planning_status를 남겨두지 않으면 초기값 "running"이 그대로 밖으로
+            # 새어나가 실패 사유가 "running"처럼 뜻 없는 값으로 보인다.
+            self.last_planning_status = "start_collision"
+            self.last_returned_path_reaches_goal = False
             return []
 
         if self.check_robot_collision(goal_q):
@@ -242,12 +256,30 @@ class RRTStar(PlannerBase):
                 node_count=1,
             )
             self._save_exploration_debug(exploration_rows, "joint", "goal_collision")
-            print(
-                "RRTStar joint-space summary: failed=goal_collision, "
-                f"start_goal_dist={start_goal_dist:.6f}, raw_dist={start_goal_raw_dist:.6f}, "
-                f"normalized={self.normalize_joint_space}, step_size={float(self.step_size):.6f}, "
-                f"early_stop_on_goal={self.early_stop_on_goal}"
-            )
+            self._log_block("joint-space summary", [
+                "status=failed(goal_collision)",
+                f"start_goal_dist={start_goal_dist:.6f}",
+                f"raw_dist={start_goal_raw_dist:.6f}",
+                f"normalized={self.normalize_joint_space}",
+                f"step_size={float(self.step_size):.6f}",
+                f"early_stop_on_goal={self.early_stop_on_goal}",
+            ])
+            self.last_planning_status = "goal_collision"
+            self.last_returned_path_reaches_goal = False
+            return []
+
+        if not self._workspace_position_ok(start_q):
+            self._save_exploration_debug(exploration_rows, "joint", "start_out_of_workspace")
+            self._log_block("joint-space summary", ["status=failed(start_out_of_workspace)"])
+            self.last_planning_status = "start_out_of_workspace"
+            self.last_returned_path_reaches_goal = False
+            return []
+
+        if not self._workspace_position_ok(goal_q):
+            self._save_exploration_debug(exploration_rows, "joint", "goal_out_of_workspace")
+            self._log_block("joint-space summary", ["status=failed(goal_out_of_workspace)"])
+            self.last_planning_status = "goal_out_of_workspace"
+            self.last_returned_path_reaches_goal = False
             return []
 
         nodes = [np.asarray(start_q, dtype=float).copy()]
@@ -258,6 +290,7 @@ class RRTStar(PlannerBase):
             "random_samples": 0,
             "edge_collision_rejects": 0,
             "random_edge_collision_rejects": 0,
+            "workspace_rejects": 0,
             "parent_collision_rejects": 0,
             "rewire_collision_rejects": 0,
             "rewires": 0,
@@ -279,6 +312,7 @@ class RRTStar(PlannerBase):
         }
         total_t0 = time.perf_counter()
         last_iteration = -1
+        self.last_iteration_count = last_iteration
         last_added_idx = 0
         best_path = None
         best_cost = float("inf")
@@ -294,6 +328,27 @@ class RRTStar(PlannerBase):
             parts = [f"{key}={value:.3f}s" for key, value in timings.items() if value > 0.0]
             parts.append(f"total={total:.3f}s")
             return ", ".join(parts)
+
+        def _print_summary(status, **fields):
+            # 어느 target(point/pose/robot)에 대한 탐색인지는 _log_block이 debug_context로
+            # 맨 앞에 붙여준다. 여기서는 그 탐색의 결과 요약만 항목별로 줄바꿈해서 남긴다.
+            stats_val = fields.pop("stats", None)
+            lines = [f"status={status}"] + [f"{k}={v}" for k, v in fields.items()]
+            if stats_val is not None:
+                lines.append("stats:")
+                lines.extend(f"    {k}={v}" for k, v in stats_val.items())
+            self._log_block("joint-space summary", lines)
+
+        def _print_timing(status, extra=None):
+            extra = dict(extra or {})
+            stats_val = extra.pop("stats", None)
+            lines = [f"status={status}", f"iteration={last_iteration}"]
+            lines.extend(f"{k}={v}" for k, v in extra.items())
+            if stats_val is not None:
+                lines.append("stats:")
+                lines.extend(f"    {k}={v}" for k, v in stats_val.items())
+            lines.append(f"timings: {_timing_text()}")
+            self._log_block("joint-space timing", lines)
 
         def _try_update_solution(iteration, reason):
             nonlocal best_path, best_cost, best_iteration, last_solution_improvement_iteration
@@ -355,6 +410,7 @@ class RRTStar(PlannerBase):
         try:
             for i in range(int(self.max_iter)):
                 last_iteration = i
+                self.last_iteration_count = last_iteration
                 stage_t0 = time.perf_counter()
                 self._check_planning_deadline()
                 _add_timing("deadline", stage_t0)
@@ -396,6 +452,25 @@ class RRTStar(PlannerBase):
                         new_node_collision_count=stats.get("edge_collision_rejects", 0),
                         random_new_node_collision_count=stats.get("random_edge_collision_rejects", 0),
                         rewire_collision_count=stats.get("rewire_collision_rejects", 0),
+                    )
+                    continue
+
+                if not self._workspace_position_ok(new_point):
+                    stats["workspace_rejects"] += 1
+                    self._record_exploration(
+                        exploration_rows,
+                        iteration=i,
+                        phase="extend",
+                        sample_type=sample_type,
+                        nearest_idx=nearest_idx,
+                        from_q=nearest_node,
+                        to_q=new_point,
+                        sample_q=rnd_point,
+                        collision=False,
+                        accepted=False,
+                        reason="extend_out_of_workspace",
+                        node_count=len(nodes),
+                        elapsed_s=time.perf_counter() - total_t0,
                     )
                     continue
 
@@ -480,16 +555,13 @@ class RRTStar(PlannerBase):
                             self._save_exploration_debug(exploration_rows, "joint", "first_solution", len(path))
                             self._save_solution_paths_debug(solution_paths, "first_solution")
                             _add_timing("save_debug", stage_t0)
-                            print(
-                                "RRTStar joint-space summary: first_solution, "
-                                f"iteration={i}, nodes={len(nodes)}, close_indices={len(close_indices)}, "
-                                f"goal_idx={goal_idx}, path_waypoints={len(path)}, "
-                                f"min_total_cost={float(min_total_cost):.6f}, stats={stats}"
+                            _print_summary(
+                                "first_solution", iteration=i, nodes=len(nodes),
+                                close_indices=len(close_indices), goal_idx=goal_idx,
+                                path_waypoints=len(path), min_total_cost=f"{float(min_total_cost):.6f}",
+                                stats=stats,
                             )
-                            print(
-                                "RRTStar joint-space timing: "
-                                f"status=first_solution, iteration={last_iteration}, timings=({_timing_text()})"
-                            )
+                            _print_timing("first_solution")
                             self.last_planning_status = "first_solution"
                             self.last_returned_path_reaches_goal = True
                             return path
@@ -504,15 +576,12 @@ class RRTStar(PlannerBase):
                             self._save_exploration_debug(exploration_rows, "joint", "solution_patience", len(best_path))
                             self._save_solution_paths_debug(solution_paths, "solution_patience")
                             _add_timing("save_debug", stage_t0)
-                            print(
-                                "RRTStar joint-space summary: solution_patience, "
-                                f"iteration={i}, best_iteration={best_iteration}, nodes={len(nodes)}, "
-                                f"path_waypoints={len(best_path)}, best_cost={float(best_cost):.6f}, stats={stats}"
+                            _print_summary(
+                                "solution_patience", iteration=i, best_iteration=best_iteration,
+                                nodes=len(nodes), path_waypoints=len(best_path),
+                                best_cost=f"{float(best_cost):.6f}", stats=stats,
                             )
-                            print(
-                                "RRTStar joint-space timing: "
-                                f"status=solution_patience, iteration={last_iteration}, timings=({_timing_text()})"
-                            )
+                            _print_timing("solution_patience")
                             self.last_planning_status = "solution_patience"
                             self.last_returned_path_reaches_goal = True
                             return best_path
@@ -527,11 +596,7 @@ class RRTStar(PlannerBase):
                 stage_t0 = time.perf_counter()
                 self._save_exploration_debug(exploration_rows, "joint", "interrupted")
                 _add_timing("save_debug", stage_t0)
-                print(
-                    "RRTStar joint-space timing: "
-                    f"failed=interrupted, iteration={last_iteration}, nodes={len(nodes)}, "
-                    f"stats={stats}, timings=({_timing_text()})"
-                )
+                _print_timing("interrupted", extra={"nodes": len(nodes), "stats": stats})
                 raise
 
             path, goal_idx, min_total_cost, close_indices = _try_update_solution(
@@ -543,18 +608,14 @@ class RRTStar(PlannerBase):
                 self._save_exploration_debug(exploration_rows, "joint", "timeout_success", len(path))
                 self._save_solution_paths_debug(solution_paths, "timeout_success")
                 _add_timing("save_debug", stage_t0)
-                print(
-                    "RRTStar joint-space summary: timeout_but_goal_connected, "
-                    f"start_goal_dist={start_goal_dist:.6f}, raw_dist={start_goal_raw_dist:.6f}, "
-                    f"normalized={self.normalize_joint_space}, step_size={float(self.step_size):.6f}, "
-                    f"search_radius={float(self.search_radius):.6f}, nodes={len(nodes)}, "
-                    f"close_indices={len(close_indices)}, goal_idx={goal_idx}, "
-                    f"path_waypoints={len(path)}, min_total_cost={float(min_total_cost):.6f}, stats={stats}"
+                _print_summary(
+                    "timeout_but_goal_connected", start_goal_dist=f"{start_goal_dist:.6f}",
+                    raw_dist=f"{start_goal_raw_dist:.6f}", normalized=self.normalize_joint_space,
+                    step_size=f"{float(self.step_size):.6f}", search_radius=f"{float(self.search_radius):.6f}",
+                    nodes=len(nodes), close_indices=len(close_indices), goal_idx=goal_idx,
+                    path_waypoints=len(path), min_total_cost=f"{float(min_total_cost):.6f}", stats=stats,
                 )
-                print(
-                    "RRTStar joint-space timing: "
-                    f"status=timeout_success, iteration={last_iteration}, timings=({_timing_text()})"
-                )
+                _print_timing("timeout_success")
                 self.last_planning_status = "timeout_success"
                 self.last_returned_path_reaches_goal = True
                 return path
@@ -564,15 +625,12 @@ class RRTStar(PlannerBase):
                 self._save_exploration_debug(exploration_rows, "joint", "timeout_best_solution", len(best_path))
                 self._save_solution_paths_debug(solution_paths, "timeout_best_solution")
                 _add_timing("save_debug", stage_t0)
-                print(
-                    "RRTStar joint-space summary: timeout_return_best_solution, "
-                    f"iteration={last_iteration}, best_iteration={best_iteration}, nodes={len(nodes)}, "
-                    f"path_waypoints={len(best_path)}, best_cost={float(best_cost):.6f}, stats={stats}"
+                _print_summary(
+                    "timeout_return_best_solution", iteration=last_iteration,
+                    best_iteration=best_iteration, nodes=len(nodes),
+                    path_waypoints=len(best_path), best_cost=f"{float(best_cost):.6f}", stats=stats,
                 )
-                print(
-                    "RRTStar joint-space timing: "
-                    f"status=timeout_best_solution, iteration={last_iteration}, timings=({_timing_text()})"
-                )
+                _print_timing("timeout_best_solution")
                 self.last_planning_status = "timeout_best_solution"
                 self.last_returned_path_reaches_goal = True
                 return best_path
@@ -582,12 +640,10 @@ class RRTStar(PlannerBase):
             self._save_exploration_debug(exploration_rows, "joint", "timeout_latest_branch", len(latest_path))
             self._save_solution_paths_debug(solution_paths, "timeout_latest_branch")
             _add_timing("save_debug", stage_t0)
-            print(
-                "RRTStar joint-space timing: "
-                f"status=timeout_latest_branch, iteration={last_iteration}, nodes={len(nodes)}, "
-                f"close_indices={len(close_indices)}, latest_waypoints={len(latest_path)}, "
-                f"stats={stats}, timings=({_timing_text()})"
-            )
+            _print_timing("timeout_latest_branch", extra={
+                "nodes": len(nodes), "close_indices": len(close_indices),
+                "latest_waypoints": len(latest_path), "stats": stats,
+            })
             self.last_planning_status = "timeout_latest_branch"
             self.last_returned_path_reaches_goal = False
             return latest_path
@@ -602,18 +658,14 @@ class RRTStar(PlannerBase):
                 self._save_exploration_debug(exploration_rows, "joint", "max_iter_best_solution", len(best_path))
                 self._save_solution_paths_debug(solution_paths, "max_iter_best_solution")
                 _add_timing("save_debug", stage_t0)
-                print(
-                    "RRTStar joint-space summary: max_iter_return_best_solution, "
-                    f"start_goal_dist={start_goal_dist:.6f}, raw_dist={start_goal_raw_dist:.6f}, "
-                    f"normalized={self.normalize_joint_space}, step_size={float(self.step_size):.6f}, "
-                    f"search_radius={float(self.search_radius):.6f}, nodes={len(nodes)}, "
-                    f"best_iteration={best_iteration}, path_waypoints={len(best_path)}, "
-                    f"best_cost={float(best_cost):.6f}, stats={stats}"
+                _print_summary(
+                    "max_iter_return_best_solution", start_goal_dist=f"{start_goal_dist:.6f}",
+                    raw_dist=f"{start_goal_raw_dist:.6f}", normalized=self.normalize_joint_space,
+                    step_size=f"{float(self.step_size):.6f}", search_radius=f"{float(self.search_radius):.6f}",
+                    nodes=len(nodes), best_iteration=best_iteration, path_waypoints=len(best_path),
+                    best_cost=f"{float(best_cost):.6f}", stats=stats,
                 )
-                print(
-                    "RRTStar joint-space timing: "
-                    f"status=max_iter_best_solution, iteration={last_iteration}, timings=({_timing_text()})"
-                )
+                _print_timing("max_iter_best_solution")
                 self.last_planning_status = "max_iter_best_solution"
                 self.last_returned_path_reaches_goal = True
                 return best_path
@@ -623,17 +675,14 @@ class RRTStar(PlannerBase):
             self._save_exploration_debug(exploration_rows, "joint", "max_iter_latest_branch", len(latest_path))
             self._save_solution_paths_debug(solution_paths, "max_iter_latest_branch")
             _add_timing("save_debug", stage_t0)
-            print(
-                "RRTStar joint-space summary: max_iter_return_latest_branch, "
-                f"start_goal_dist={start_goal_dist:.6f}, raw_dist={start_goal_raw_dist:.6f}, "
-                f"normalized={self.normalize_joint_space}, step_size={float(self.step_size):.6f}, "
-                f"search_radius={float(self.search_radius):.6f}, nodes={len(nodes)}, "
-                f"close_indices={len(close_indices)}, latest_waypoints={len(latest_path)}, stats={stats}"
+            _print_summary(
+                "max_iter_return_latest_branch", start_goal_dist=f"{start_goal_dist:.6f}",
+                raw_dist=f"{start_goal_raw_dist:.6f}", normalized=self.normalize_joint_space,
+                step_size=f"{float(self.step_size):.6f}", search_radius=f"{float(self.search_radius):.6f}",
+                nodes=len(nodes), close_indices=len(close_indices),
+                latest_waypoints=len(latest_path), stats=stats,
             )
-            print(
-                "RRTStar joint-space timing: "
-                f"status=max_iter_latest_branch, iteration={last_iteration}, timings=({_timing_text()})"
-            )
+            _print_timing("max_iter_latest_branch")
             self.last_planning_status = "max_iter_latest_branch"
             self.last_returned_path_reaches_goal = False
             return latest_path
@@ -642,18 +691,14 @@ class RRTStar(PlannerBase):
         self._save_exploration_debug(exploration_rows, "joint", "success", len(path))
         self._save_solution_paths_debug(solution_paths, "success")
         _add_timing("save_debug", stage_t0)
-        print(
-            "RRTStar joint-space summary: success, "
-            f"start_goal_dist={start_goal_dist:.6f}, raw_dist={start_goal_raw_dist:.6f}, "
-            f"normalized={self.normalize_joint_space}, step_size={float(self.step_size):.6f}, "
-            f"search_radius={float(self.search_radius):.6f}, nodes={len(nodes)}, "
-            f"close_indices={len(close_indices)}, goal_idx={goal_idx}, "
-            f"path_waypoints={len(path)}, min_total_cost={float(min_total_cost):.6f}, stats={stats}"
+        _print_summary(
+            "success", start_goal_dist=f"{start_goal_dist:.6f}", raw_dist=f"{start_goal_raw_dist:.6f}",
+            normalized=self.normalize_joint_space, step_size=f"{float(self.step_size):.6f}",
+            search_radius=f"{float(self.search_radius):.6f}", nodes=len(nodes),
+            close_indices=len(close_indices), goal_idx=goal_idx, path_waypoints=len(path),
+            min_total_cost=f"{float(min_total_cost):.6f}", stats=stats,
         )
-        print(
-            "RRTStar joint-space timing: "
-            f"status=success, iteration={last_iteration}, timings=({_timing_text()})"
-        )
+        _print_timing("success")
         self.last_planning_status = "success"
         self.last_returned_path_reaches_goal = True
         return path
@@ -697,7 +742,10 @@ class RRTStar(PlannerBase):
             json.dump(serializable, f, indent=2)
             f.write("\n")
         self.last_solution_paths_json = path
-        print(f"RRTStar solution path snapshots saved: json={path}, count={len(serializable)}")
+        self._log_block("solution path snapshots saved", [
+            f"json={path}",
+            f"count={len(serializable)}",
+        ])
         return path
 
     def _sample_joint_target(self, goal_q, stats):

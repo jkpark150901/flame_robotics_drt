@@ -7,7 +7,6 @@
 """
 
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 from collections import deque
 import time
 import importlib
@@ -37,7 +36,12 @@ from viewervedo.robot import RobotModel, load_robots_from_config
 from viewervedo import geometry_utils as geom_utils
 from viewervedo import pipe_alignment_utils
 from viewervedo import vedo_visual_utils
-from plugins.pluginbase.plannerbase import PlannerBase
+from plugins.pluginbase.plannerbase import (
+    PlannerBase,
+    PlanningTarget,
+    RobotPlanningJob,
+    TargetPlanningResult,
+)
 from plugins.robotics.backend import RobotDescription
 from plugins.robotics.inspection_experiment_logger import InspectionExperimentLogger
 from plugins.robotics.inspection_planning_base import InspectionIKRequest, InspectionPlanningBase
@@ -58,7 +62,7 @@ class Visualizer:
         self._config = config
     
         self.__console = ConsoleLogger.get_logger()
-        experiment_root = Path(config.get("experiment_dir", "experiment")) / "inspection_ik"
+        experiment_root = Path(config.get("debug_dir", "debug")) / "inspection_ik"
         self._inspection_ik_experiment_logger = InspectionExperimentLogger(experiment_root)
         self._inspection_ik_experiment_dir = self._inspection_ik_experiment_logger.session_dir
         self.__console.info(f"inspection IK experiment session: {self._inspection_ik_experiment_dir}")
@@ -192,6 +196,8 @@ class Visualizer:
             "reconstruct_mesh": self._handle_request_reconstruct_mesh,                  # 배관 점군에서 mesh를 재구성한다.
             "save_spool": self._handle_request_save_spool,                              # 현재 배관 geometry와 align 상태를 저장한다.
             "pick_inspection_point": self._handle_request_pick_inspection_point,        # 검사 지점 선택 모드를 켜거나 끈다.
+            "save_inspection_points": self._handle_request_save_inspection_points,      # 선택된 검사 지점들을 JSON 파일로 저장한다.
+            "load_inspection_points": self._handle_request_load_inspection_points,      # JSON 파일에서 검사 지점들을 복원한다.
             "pick_chuck_mount_points": self._handle_request_pick_chuck_mount_points,    # chuck mount 기준점 선택/align 모드를 설정한다.
             "set_chuck_mount_points": self._handle_request_set_chuck_mount_points,      # 외부에서 전달된 chuck mount 점을 반영한다.
             "set_chuck_mount_config": self._handle_request_set_chuck_mount_config,      # chuck mount frame/offset 설정을 갱신한다.
@@ -258,6 +264,7 @@ class Visualizer:
 
             self.plotter.add(mesh)
             self._loaded_spool_mesh = mesh
+            self._invalidate_spool_collision_mesh_cache()
             self._render_spool_offset()
             self.plotter.render()
             self._load_spool_alignment_state(path, identity=identity)
@@ -277,6 +284,7 @@ class Visualizer:
         if _old_sp is not None:
             self.plotter.remove(_old_sp)
             self._loaded_spool_mesh = None
+            self._invalidate_spool_collision_mesh_cache()
         _old_rc = getattr(self, '_spool_recon_mesh', None)
         if _old_rc is not None:
             if _old_rc is not _old_sp:
@@ -446,7 +454,24 @@ class Visualizer:
                 continue
             model.update_fk()
 
+        self._invalidate_positioner_collision_mesh_cache()
+        spool_T_before = np.asarray(getattr(self, '_spool_world_T', None), dtype=float).copy() \
+            if getattr(self, '_spool_world_T', None) is not None else None
         self._sync_fixed_spool_after_positioner_move(axis, position, prev_positioner_r, request_data)
+        if axis == "r" and self._spool_fix_r and abs(position - prev_positioner_r) > 1e-9:
+            # 배관(spool)이 실제로 r축과 같이 돌았으면, 저장된 ef target pose도 배관에
+            # 고정돼 있다고 가정하고 정확히 같은 rigid transform으로 같이 돌린다.
+            # _sync_fixed_spool_after_positioner_move가 spool에 적용한 것과 완전히
+            # 동일한 축/중심/부호 공식(_positioner_r_rotation_transform)을 재사용한다.
+            try:
+                rotation_T = self._positioner_r_rotation_transform(position - prev_positioner_r)
+                self._rotate_inspection_target_groups(rotation_T)
+                self._verify_positioner_rotation_kept_poses_attached(
+                    spool_T_before, np.asarray(getattr(self, '_spool_world_T'), dtype=float), rotation_T)
+                self._verify_rotated_ef_poses_against_current_pipe()
+            except Exception as exc:
+                self.__console.warning(
+                    f"failed to rotate stored ef target poses with positioner r move: {exc}")
         self._show_chuck_frames(render=False)
         self.plotter.render()
         if self._spool_positioner_fixed:
@@ -507,6 +532,44 @@ class Visualizer:
     def _handle_request_reset_robot_base_pose(self, request_data):
         """선택 로봇 또는 전체 로봇을 설정된 base pose로 되돌린다."""
         self._reset_robot_base_pose(request_data.get("robot"), identity=request_data.get("_identity"))
+
+    def _handle_request_save_inspection_points(self, request_data):
+        """현재 선택된 검사 지점(pick point, 원본 좌표)들을 JSON 파일로 저장한다."""
+        path = request_data.get("path")
+        if not path:
+            self.__console.warning("save_inspection_points: no path given")
+            return
+        points = getattr(self, "_inspection_points", []) or []
+        try:
+            payload = {"points": [np.asarray(p, dtype=float).tolist() for p in points]}
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=4, ensure_ascii=False)
+            self.__console.info(f"save_inspection_points: saved {len(points)} point(s) to {path}")
+        except Exception as exc:
+            self.__console.error(f"save_inspection_points failed: {exc}")
+
+    def _handle_request_load_inspection_points(self, request_data):
+        """JSON 파일에서 검사 지점들을 읽어, pick으로 찍은 것과 동일하게 복원한다."""
+        path = request_data.get("path")
+        if not path:
+            self.__console.warning("load_inspection_points: no path given")
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            raw_points = payload.get("points", [])
+        except Exception as exc:
+            self.__console.error(f"load_inspection_points failed: {exc}")
+            return
+        self._clear_inspection_points(render=False)
+        for raw_point in raw_points:
+            self._set_inspection_point(np.asarray(raw_point, dtype=float))
+        identity = request_data.get("_identity")
+        if hasattr(self, 'zapi') and self.zapi and identity:
+            self.zapi.update_inspection_point({
+                "points": [p.tolist() for p in getattr(self, "_inspection_points", [])],
+            }, identity=identity)
+        self.__console.info(f"load_inspection_points: loaded {len(raw_points)} point(s) from {path}")
 
     def _handle_request_pick_inspection_point(self, request_data):
         """viewer mouse click을 검사 지점 선택으로 해석하도록 pick mode를 전환한다."""
@@ -1637,6 +1700,7 @@ class Visualizer:
             if "f_column_r_to_f_column_passive_clamp" in joint_map:
                 model.set_joint("f_column_r_to_f_column_passive_clamp", -clamp_val)
             model.update_fk()
+        self._invalidate_positioner_collision_mesh_cache()
         if update_frames:
             self._show_chuck_frames(render=False)
 
@@ -2851,6 +2915,15 @@ class Visualizer:
                         force_90_fallback=bool(params.get("force_90_fallback", False)),
                     )
                     target_groups = list(target_groups or [])
+                    # optimizer는 포인트마다 독립적으로 "Inspection pose 1"부터 이름을 다시 매긴다.
+                    # 여러 포인트를 합치면 이름이 중복되므로, 어느 검사 포인트의 몇 번째 포즈인지
+                    # 알 수 있도록 이름 앞에 포인트 번호를 붙이고 index도 전체 기준으로 다시 매긴다.
+                    for local_index, group_info in enumerate(target_groups):
+                        group_info["point_index"] = point_index
+                        group_info["name"] = (
+                            f"Point {point_index + 1} - {group_info.get('name', f'pose {local_index + 1}')}"
+                        )
+                        group_info["index"] = len(all_target_groups) + local_index
                     pose_dt = time.perf_counter() - stage_t0
                     pose_elapsed += pose_dt
 
@@ -2985,8 +3058,216 @@ class Visualizer:
             f"planner '{planner_name}' is not supported for robot q-space planning. "
             f"supported={sorted(q_space_planners)}")
 
+    def _invalidate_spool_collision_mesh_cache(self):
+        """배관이 새로 로드되거나 world pose가 바뀌면(포지셔너/척 이동 등) 호출한다."""
+        self._spool_collision_mesh_cache = None
+
     def _current_spool_collision_mesh(self):
-        """Build an Open3D mesh from the currently rendered pipe. Positioner/pipe are static here."""
+        """Build an Open3D mesh from the currently rendered pipe. Positioner/pipe are static here.
+
+        alpha-shape 재구성(점군 경로)은 비용이 커서, 배관이 로드되거나 world pose가
+        바뀔 때만 다시 만들고 그 사이의 반복 호출(경로 계획 target마다)은 캐시를 그대로 쓴다.
+        """
+        cached = getattr(self, '_spool_collision_mesh_cache', None)
+        if cached is not None:
+            return cached
+        mesh = self._build_spool_collision_mesh()
+        self._spool_collision_mesh_cache = mesh
+        return mesh
+
+    def _log_rotation_invariant_check(self, second_groups, obstacle_mesh, rotated_obstacle_mesh, rotation_T):
+        """rigid transform이 정말 동일하게 적용됐는지 수치로 검증한다.
+
+        target pose와 obstacle mesh에 같은 rotation_T를 적용했다면, "target -> mesh 최단거리"는
+        회전 전/후로 절대 안 변해야 한다(rigid transform의 기본 성질). 이 값이 실제로 다르게
+        찍히면 mesh/pose 변환 어딘가(캐시, base_T 처리 등)에 불일치가 있다는 확실한 증거가 된다.
+        회전 전/후 값이 같다면 반대로, 새로 생긴 충돌은 배관이 완전한 회전대칭이 아니라서
+        (원래 위치엔 없던 형상이 반대편엔 있어서) 생기는 것으로 확정할 수 있다.
+        """
+        try:
+            kdtree_before = _o3d.geometry.KDTreeFlann(obstacle_mesh)
+            kdtree_after = _o3d.geometry.KDTreeFlann(rotated_obstacle_mesh)
+            for group_info in second_groups:
+                for robot_name, pose_name, target_T in self._inspection_group_pose_items(group_info):
+                    target_T = np.asarray(target_T, dtype=float)
+                    pos_before = target_T[:3, 3]
+                    rotated_T = self._transform_target_pose(target_T, rotation_T)
+                    pos_after = np.asarray(rotated_T, dtype=float)[:3, 3]
+                    _, _, dist2_before = kdtree_before.search_knn_vector_3d(pos_before, 1)
+                    _, _, dist2_after = kdtree_after.search_knn_vector_3d(pos_after, 1)
+                    d_before = float(np.sqrt(dist2_before[0])) if dist2_before else float("nan")
+                    d_after = float(np.sqrt(dist2_after[0])) if dist2_after else float("nan")
+                    self.__console.warning(
+                        "rotation invariant check (target-to-mesh nearest vertex distance): "
+                        f"group={group_info.get('name')}, robot={robot_name}, pose={pose_name}, "
+                        f"dist_before_rotation={d_before:.4f}, dist_after_rotation={d_after:.4f}, "
+                        f"delta={abs(d_before - d_after):.4f}")
+        except Exception as exc:
+            self.__console.debug(f"rotation invariant check skipped: {exc}")
+
+    def _rotate_inspection_target_groups(self, rotation_T):
+        """저장된 ef target pose(dda_pose/rt_pose/target_point)를 배관과 같이 회전시킨다.
+
+        지금까지는 UI에서 positioner r축을 실제로 돌려도(_handle_request_move_positioner)
+        배관(spool)만 움직이고 self._inspection_target_groups에 저장된 ef pose는 그대로
+        남아 있었다. 그래서 실제로 배관을 돌린 뒤 이 pose로 계획/검증하면 "배관은 이미
+        돌았는데 ef pose는 원래 자리"인 채로 비교하게 되어 원래는 안 겹쳐야 할 것이
+        겹치는 것처럼 보였다. ef pose는 배관에 고정돼 있다고 가정하고, 배관에 적용한 것과
+        똑같은 rigid transform을 여기에도 그대로 적용한다.
+        """
+        rotation_T = np.asarray(rotation_T, dtype=float)
+        for group_info in getattr(self, "_inspection_target_groups", []) or []:
+            for key in ("dda_pose", "rt_pose"):
+                pose = group_info.get(key)
+                if pose is not None:
+                    group_info[key] = rotation_T @ np.asarray(pose, dtype=float)
+            point = group_info.get("target_point")
+            if point is not None:
+                point = np.asarray(point, dtype=float)
+                group_info["target_point"] = rotation_T[:3, :3] @ point + rotation_T[:3, 3]
+
+    def _verify_positioner_rotation_kept_poses_attached(self, spool_T_before, spool_T_after, rotation_T):
+        """ef pose가 배관에 대해 상대적으로 정말 고정된 채 유지됐는지 수치로 검증한다.
+
+        ef pose와 배관에 똑같은 rigid transform을 적용했다면, "배관 local frame 기준 ef pose
+        좌표"는 회전 전/후로 절대 안 변해야 한다. 이 값이 실제로 달라지면 두 변환이 어딘가
+        어긋났다는 확실한 증거다.
+        """
+        if spool_T_before is None or spool_T_after is None:
+            return
+        try:
+            inv_before = np.linalg.inv(spool_T_before)
+            inv_after = np.linalg.inv(spool_T_after)
+        except np.linalg.LinAlgError:
+            return
+        max_delta = 0.0
+        checked = 0
+        for group_info in getattr(self, "_inspection_target_groups", []) or []:
+            for key in ("dda_pose", "rt_pose"):
+                pose_after = group_info.get(key)
+                if pose_after is None:
+                    continue
+                pose_after = np.asarray(pose_after, dtype=float)
+                pose_before = np.linalg.inv(rotation_T) @ pose_after
+                local_before = inv_before @ pose_before
+                local_after = inv_after @ pose_after
+                delta = float(np.max(np.abs(local_before[:3, 3] - local_after[:3, 3])))
+                max_delta = max(max_delta, delta)
+                checked += 1
+        self.__console.info(
+            "positioner r move: ef-pose-to-pipe attachment check | "
+            f"checked_poses={checked}, max_local_offset_delta={max_delta:.6f}"
+            + (" (OK, rigidly attached)" if max_delta < 1e-6 else " (WARNING: drifted)"))
+
+    def _verify_rotated_ef_poses_against_current_pipe(self):
+        """positioner r 이동으로 ef pose를 회전시킨 직후, 지금(회전 반영된) 배관 mesh를
+        기준으로 순수 기하학적 충돌만 확인하고 화면에 표시한다. IK는 안 푼다 - ef pose
+        지점 자체가 배관 mesh 안에 들어가 있는지(signed distance < 0)만 본다.
+
+        rotation 로직이 수학적으로 맞더라도, 배관이 완전한 회전대칭이 아니면 회전 후
+        실제로 충돌하는 pose가 생길 수 있다 - 그건 버그가 아니라 실제 형상 문제이므로,
+        여기서 바로 잡아내서 로그 + 화면 마커로 남긴다. 정상 pose는 기존 goal-pose
+        마커(주황/보라 반투명)로, 충돌 pose는 IK 실패와 동일한 빨간 마커로 표시한다.
+        """
+        obstacle_mesh = self._current_spool_collision_mesh()
+        if obstacle_mesh is None:
+            return
+        try:
+            t_mesh = _o3d.t.geometry.TriangleMesh.from_legacy(obstacle_mesh)
+            scene = _o3d.t.geometry.RaycastingScene()
+            scene.add_triangles(t_mesh)
+        except Exception as exc:
+            self.__console.debug(f"post-rotation collision check skipped (scene build failed): {exc}")
+            return
+        # 회전 전 pose로 그려졌던 마커(determine ef pose 때 _show_ef_target_poses로 그린
+        # 것, 이전 회전 검증에서 그린 goal-pose 마커 둘 다)는 지금 더 이상 유효하지 않으니
+        # 지운다. clear_poses=False로 self._inspection_target_groups 데이터는 건드리지 않는다.
+        self._clear_ef_pose_visuals(clear_poses=False)
+        self._clear_inspection_goal_pose_visuals(render=False)
+        checked = 0
+        failed = []
+        for group_info in getattr(self, "_inspection_target_groups", []) or []:
+            for robot_name, pose_name, target_T in self._inspection_group_pose_items(group_info):
+                target_T = np.asarray(target_T, dtype=float)
+                if target_T.shape != (4, 4):
+                    target_T = self._pose_to_T(target_T.reshape(-1)[:6])
+                pos = target_T[:3, 3].astype(np.float32)
+                query = _o3d.core.Tensor([pos], dtype=_o3d.core.Dtype.Float32)
+                signed_distance = float(scene.compute_signed_distance(query).numpy()[0])
+                checked += 1
+                is_colliding = signed_distance < 0.0
+                if is_colliding:
+                    failed.append(
+                        f"{group_info.get('name')}:{robot_name}(signed_distance={signed_distance:.4f})")
+                    self._show_ik_failure_reached_pose(robot_name, target_T, target_T)
+                else:
+                    self._show_inspection_goal_pose(robot_name, target_T, clear=False, render=False)
+        self.plotter.render()
+        log_fn = self.__console.warning if failed else self.__console.info
+        log_fn(
+            "post-rotation ef pose collision check (current pipe pose, geometry only): "
+            f"checked={checked}, failed={len(failed)}"
+            + (f", failures={failed}" if failed else ""))
+
+    def _invalidate_positioner_collision_mesh_cache(self):
+        """포지셔너 joint(x/z/r/clamp)가 움직인 뒤 collision mesh 캐시를 무효화한다."""
+        self._positioner_collision_mesh_cache = None
+
+    def _build_positioner_collision_mesh(self):
+        """포지셔너(chuck/column 등) 하드웨어의 현재 world pose 기준 collision mesh를 만든다.
+
+        지금까지 path planning의 collision scene에는 배관(obstacle_mesh)과 로봇만 들어가고
+        포지셔너 URDF는 빠져 있었다(`_planner_has_positioner_collision`가 항상 False). 그래서
+        회전된 second-group target(포지셔너 쪽으로 더 붙는 자세)에 로봇이 도달했을 때 실제로는
+        EF가 포지셔너 하드웨어와 겹쳐도 이 체크로는 못 잡았다. 포지셔너 자체(그 중에서도
+        r-joint 이후 파이프만 도는 부분 제외)는 실제로 움직이지 않으므로, second-group 가상
+        회전과 무관하게 항상 "현재" pose 그대로 하나의 static mesh로 추가한다.
+
+        한 배치 안에서 target마다(=이 함수 호출마다) 새 mesh 객체를 만들면 backend의
+        static mesh identity 캐시(`_configured_mesh_key`)가 매번 깨져 collision scene을
+        불필요하게 다시 빌드하게 된다. 포지셔너는 planning 도중에는 움직이지 않으므로
+        캐시해서 같은 객체를 재사용하고, 실제로 포지셔너가 움직였을 때만 무효화한다.
+        """
+        cached = getattr(self, "_positioner_collision_mesh_cache", None)
+        if cached is not None:
+            return cached
+        mesh = self._build_positioner_collision_mesh_uncached()
+        self._positioner_collision_mesh_cache = mesh
+        return mesh
+
+    def _build_positioner_collision_mesh_uncached(self):
+        model = self._positioner_robot_model()
+        if model is None:
+            return None
+        actors = [
+            actor for actor in (getattr(model, "actors", None) or [])
+            if actor is not None
+            and hasattr(actor, "vertices")
+            and hasattr(actor, "cells")
+            and len(getattr(actor, "cells", [])) > 0
+        ]
+        if not actors:
+            return None
+        all_verts = []
+        all_faces = []
+        offset = 0
+        for actor in actors:
+            verts = np.asarray(actor.vertices, dtype=float)
+            faces = np.asarray(actor.cells, dtype=np.int32)
+            if verts.size == 0 or faces.size == 0:
+                continue
+            all_verts.append(verts)
+            all_faces.append(faces + offset)
+            offset += len(verts)
+        if not all_verts:
+            return None
+        mesh = _o3d.geometry.TriangleMesh()
+        mesh.vertices = _o3d.utility.Vector3dVector(np.vstack(all_verts))
+        mesh.triangles = _o3d.utility.Vector3iVector(np.vstack(all_faces))
+        mesh.compute_vertex_normals()
+        return mesh
+
+    def _build_spool_collision_mesh(self):
         spool = getattr(self, '_loaded_spool_mesh', None)
         actors = spool if isinstance(spool, (list, tuple)) else [spool]
         mesh_actor = next(
@@ -3083,10 +3364,19 @@ class Visualizer:
         timings=None,
     ):
         setup_t0 = time.perf_counter()
-        mn = np.minimum(obstacle_mesh.get_min_bound(), np.minimum(start[:3], goal[:3]))
-        mx = np.maximum(obstacle_mesh.get_max_bound(), np.maximum(start[:3], goal[:3]))
-        ext = np.maximum(mx - mn, 1e-6)
-        pad = np.maximum(ext * 0.5, 0.5)
+        mn = np.minimum(start[:3], goal[:3])
+        mx = np.maximum(start[:3], goal[:3])
+        offset_cfg = (self._config.get("path_planning", {}) or {}).get(
+            "workspace_check_offset", {}
+        ) or {}
+        pad = np.array(
+            [
+                float(offset_cfg.get("x", 0.5)),
+                float(offset_cfg.get("y", 0.5)),
+                float(offset_cfg.get("z", 0.5)),
+            ],
+            dtype=float,
+        )
         bounds = {
             "x_min": float(mn[0] - pad[0]), "x_max": float(mx[0] + pad[0]),
             "y_min": float(mn[1] - pad[1]), "y_max": float(mx[1] + pad[1]),
@@ -3101,16 +3391,29 @@ class Visualizer:
             backend = getattr(self, "_robotics_backend", None)
             if backend is None:
                 raise RuntimeError("robotics backend is not initialized")
+        # q-space planner는 원래 world 좌표계 제한이 없다(joint limit만 봄). 옵트인
+        # 설정(path_planning.enable_workspace_check)이 켜져 있으면, IK가 풀리는 대상
+        # frame(로봇의 target link)의 FK world position을 위 bounds로 제한한다.
+        enable_workspace_check = bool(
+            (self._config.get("path_planning", {}) or {}).get("enable_workspace_check", False)
+        )
+        workspace_check_frame_name = (
+            self._robot_target_link_name(robot_name)
+            if enable_workspace_check and robot_name is not None
+            else None
+        )
         planner.configure(
             bounds=bounds,
             step_size=float(step_size),
             max_iter=int(max_iter),
             robotics_backend=backend,
             robotics_robot_name=robot_name,
+            workspace_check_frame_name=workspace_check_frame_name,
         )
         if timings is not None:
             timings["planner_bounds_config"] = time.perf_counter() - setup_t0
         collision_obstacle_mesh = obstacle_mesh
+        collision_positioner_mesh = self._build_positioner_collision_mesh()
         if robot_name is not None:
             model = self._find_robot(robot_name)
             urdf_path = getattr(model, "urdf_path", None) if model is not None else None
@@ -3130,6 +3433,9 @@ class Visualizer:
                     transform_t0 = time.perf_counter()
                     collision_obstacle_mesh = copy.deepcopy(obstacle_mesh)
                     collision_obstacle_mesh.transform(np.linalg.inv(base_T))
+                    if collision_positioner_mesh is not None:
+                        collision_positioner_mesh = copy.deepcopy(collision_positioner_mesh)
+                        collision_positioner_mesh.transform(np.linalg.inv(base_T))
                     if timings is not None:
                         timings["planner_obstacle_base_transform"] = time.perf_counter() - transform_t0
                     self.__console.debug(
@@ -3137,6 +3443,8 @@ class Visualizer:
                         f"robot={robot_name}, base_t={np.round(base_T[:3, 3], 5).tolist()}")
         obstacle_t0 = time.perf_counter()
         planner.add_collision_object(collision_obstacle_mesh)
+        if collision_positioner_mesh is not None:
+            planner.add_collision_object(collision_positioner_mesh)
         if timings is not None:
             timings["planner_obstacle_bvh"] = time.perf_counter() - obstacle_t0
         self._log_robot_collision_targets(robot_name, planner)
@@ -3234,7 +3542,7 @@ class Visualizer:
                 }
             except Exception:
                 continue
-        self.__console.info(
+        self.__console.debug(
             f"robot backend model for {robot_name}: backend={backend_name}, urdf={urdf_path}, "
             f"mtime_ns={urdf_mtime_ns}, "
             f"dof={self._robot_dof(robot_name, robot_backend_model)}, joints={joint_names}, track_joints={track_joints}, "
@@ -3333,6 +3641,86 @@ class Visualizer:
                 break
             q[i] = float(model._joint_cfg.get(joint_name, 0.0))
         return q
+
+    def _seed_linear_track_q_for_world_x(self, robot_name, robot_backend_model, frame_name, q, target_world_x):
+        """linear track joint의 IK 초기값을 target world x 위치에 가깝게 미리 옮긴다.
+
+        Args:
+            robot_name: backend에 등록된 로봇 이름.
+            robot_backend_model: pinocchio 모델(joint 이름 조회용).
+            frame_name: IK를 풀 대상 frame 이름(FK 기준점).
+            q: 원래 IK 초기값(start_q).
+            target_world_x: 검사 목표 pose의 world x 좌표.
+
+        Returns:
+            linear track 성분만 조정된 새 q. track joint가 없거나 FK로 축 민감도를
+            구할 수 없으면 원래 q를 그대로 반환한다.
+
+        계산 과정:
+            현재 q에서의 frame world x와, track joint를 살짝 움직였을 때의 world x
+            변화량(민감도)을 FK로 직접 구해서, 그 비율로 필요한 track 이동량을 역산한다.
+            축 방향/부호를 가정하지 않고 실제 FK로 구하므로 URDF의 joint 축 방향이
+            바뀌어도 안전하다. IK를 대신하는 게 아니라 초기 추정값만 더 가깝게 준다 -
+            이후 IK는 전체 joint를 그대로 계속 풀어서 조정한다.
+        """
+        backend = getattr(self, "_robotics_backend", None)
+        if backend is None:
+            return q
+        joint_names = self._robot_joint_names(robot_name, robot_backend_model)
+        track_idx = next((i for i, name in enumerate(joint_names) if "linear_track" in name), None)
+        if track_idx is None or track_idx >= len(q):
+            return q
+        q = np.asarray(q, dtype=float).copy()
+        try:
+            T0 = backend.frame_world_T(robot_name, q, frame_name)
+            probe_q = q.copy()
+            delta = 0.05
+            probe_q[track_idx] += delta
+            T1 = backend.frame_world_T(robot_name, probe_q, frame_name)
+        except Exception as exc:
+            self.__console.debug(f"linear track seeding skipped: robot={robot_name}, error={exc}")
+            return q
+        if T0 is None or T1 is None:
+            return q
+        sensitivity = (float(T1[0, 3]) - float(T0[0, 3])) / delta
+        if abs(sensitivity) < 1e-6:
+            return q
+        track_delta = (float(target_world_x) - float(T0[0, 3])) / sensitivity
+        new_value = float(q[track_idx]) + track_delta
+        try:
+            lo, hi, _ = backend.joint_limits_for_metric(robot_name, normalize=False)
+            new_value = float(np.clip(new_value, lo[track_idx], hi[track_idx]))
+        except Exception:
+            pass
+        self.__console.debug(
+            f"linear track seeded: robot={robot_name}, "
+            f"track_idx={track_idx}, old={q[track_idx]:.4f}, new={new_value:.4f}, "
+            f"target_world_x={target_world_x:.4f}")
+        q[track_idx] = new_value
+        return q
+
+    def _zero_q_keep_linear_track(self, robot_name, q):
+        """positioner 회전 직전 안전 자세: linear_track만 유지하고 나머지 joint는 0으로.
+
+        Args:
+            robot_name: backend에 등록된 로봇 이름.
+            q: 유지할 linear_track 값을 담고 있는 원본 q(first group 마지막 자세).
+
+        Returns:
+            나머지 joint는 0, linear_track 성분만 원래 값을 유지한 새 q.
+            backend/joint 이름을 못 찾으면 원래 q를 그대로 반환한다.
+        """
+        backend = getattr(self, "_robotics_backend", None)
+        if backend is None:
+            return q
+        robot_backend_model = backend.robot_model(robot_name) if robot_name is not None else None
+        joint_names = self._robot_joint_names(robot_name, robot_backend_model)
+        q = np.asarray(q, dtype=float)
+        zeroed = np.zeros_like(q)
+        for i, name in enumerate(joint_names[:len(q)]):
+            if "linear_track" in name:
+                zeroed[i] = q[i]
+        return zeroed
 
     def _apply_robot_q(self, model, pin_model, q, robot_name=None):
         robot_name = robot_name or getattr(model, "name", None)
@@ -3456,7 +3844,7 @@ class Visualizer:
         """
         cfg = dict((self._config.get("inspection_ik", {}) or {}))
         path_cfg = self._config.get("path_planning", {}) or {}
-        cfg.setdefault("max_iter", path_cfg.get("ik_max_iter", 1000))
+        cfg.setdefault("max_iter", path_cfg.get("ik_max_iter", 3000))
         cfg.setdefault("tol", path_cfg.get("ik_tol", 1e-4))
         cfg.setdefault("damping", path_cfg.get("ik_damping", 1e-3))
         cfg.setdefault("dt", path_cfg.get("ik_dt", 0.35))
@@ -3487,7 +3875,7 @@ class Visualizer:
             logger = getattr(self, "_inspection_ik_experiment_logger", None)
             if logger is None:
                 logger = InspectionExperimentLogger(
-                    Path(self._config.get("experiment_dir", "experiment")) / "inspection_ik"
+                    Path(self._config.get("debug_dir", "debug")) / "inspection_ik"
                 )
                 self._inspection_ik_experiment_logger = logger
                 self._inspection_ik_experiment_dir = logger.session_dir
@@ -3504,8 +3892,10 @@ class Visualizer:
             )
             if not saved:
                 return None
-            self.__console.info(
-                f"inspection IK experiment saved: robot={robot_name}, csv={saved['csv']}, meta={saved['meta']}")
+            log_fn = self.__console.warning if saved.get("plot") else self.__console.debug
+            log_fn(
+                f"inspection IK experiment saved: robot={robot_name}, csv={saved['csv']}, "
+                f"meta={saved['meta']}, plot={saved.get('plot')}")
             return saved
         except Exception as exc:
             self.__console.warning(f"failed to save inspection IK experiment: robot={robot_name}, error={exc}")
@@ -3758,6 +4148,40 @@ class Visualizer:
         robot_dof = self._robot_dof(robot_name, robot_backend_model)
         timings["robotics_model_lookup"] = time.perf_counter() - stage_t0
 
+        # obstacle_mesh를 실제 collision scene에 반영한다. 이전에는 이 인자를 그냥
+        # 버렸는데, 그러면 collision 판정이 이 robot handle에 마지막으로 설정된
+        # (다른 요청 때의, 혹은 회전 안 된) 배관 기준으로 이뤄져 IK check 결과가
+        # 실제 요청 mesh와 어긋날 수 있었다.
+        if obstacle_mesh is not None:
+            stage_t0 = time.perf_counter()
+            sample_resolution = float(self._config.get("planner_collision_sample_resolution", 0.05))
+            # obstacle_mesh(월드 좌표계)를 그대로 등록하면 안 된다. pinocchio 모델은
+            # base_T만큼 world에서 옮겨 붙은 로봇의 "base 기준" 좌표계로 kinematics를
+            # 풀기 때문에(_configure_inspection_planner의 path-planning 쪽과 동일 로직),
+            # base_T가 identity가 아닌 로봇(예: rail에 offset으로 마운트된 로봇)은 여기서
+            # world-frame mesh를 그대로 쓰면 실제와 다른 위치에서 collision을 검사하게 되어
+            # "IK check는 collision 없음" / "path planning은 start_collision" 처럼 두 체크가
+            # 어긋나는 원인이 됐다.
+            collision_obstacle_mesh = obstacle_mesh
+            # path planning(_configure_inspection_planner)과 마찬가지로 포지셔너 하드웨어도
+            # static obstacle로 같이 등록한다 - 안 그러면 이 IK-only 체크는 EF가 포지셔너와
+            # 겹쳐도 잡아내지 못해 실제 path planning의 positioner collision과 어긋난다.
+            collision_positioner_mesh = self._build_positioner_collision_mesh()
+            model = self._find_robot(robot_name)
+            base_T = np.asarray(getattr(model, "_base_T", np.eye(4)), dtype=float) if model is not None else np.eye(4)
+            if base_T.shape == (4, 4) and not np.allclose(base_T, np.eye(4)):
+                collision_obstacle_mesh = copy.deepcopy(obstacle_mesh)
+                collision_obstacle_mesh.transform(np.linalg.inv(base_T))
+                if collision_positioner_mesh is not None:
+                    collision_positioner_mesh = copy.deepcopy(collision_positioner_mesh)
+                    collision_positioner_mesh.transform(np.linalg.inv(base_T))
+            static_meshes = [collision_obstacle_mesh]
+            if collision_positioner_mesh is not None:
+                static_meshes.append(collision_positioner_mesh)
+            backend.configure_collision(
+                robot_name, static_meshes=static_meshes, sample_resolution=sample_resolution)
+            timings["collision_scene_setup"] = time.perf_counter() - stage_t0
+
         stage_t0 = time.perf_counter()
         start_q = np.zeros(robot_dof, dtype=float)
         start_overrides = request_data.get("_start_q_override_by_robot") or {}
@@ -3816,6 +4240,8 @@ class Visualizer:
         self._last_inspection_ik_trace = getattr(self, "_last_inspection_ik_trace", {})
         self._last_inspection_ik_trace[robot_name] = result.get("ik_trace", [])
         level = self.__console.info if ik_result.get("success") and not ik_result.get("collision") else self.__console.warning
+        collision_pairs = ik_result.get("collision_pairs") or []
+        collision_pairs_text = ", ".join(f"{a}<->{b}" for a, b in collision_pairs) or "-"
         level(
             "inspection IK result: "
             f"robot={robot_name}, success={bool(ik_result.get('success'))}, "
@@ -3823,9 +4249,11 @@ class Visualizer:
             f"position_error={float(ik_result.get('position_error', float('inf'))):.5f}m, "
             f"orientation_error={float(ik_result.get('orientation_error', float('inf'))):.5f}rad, "
             f"collision={bool(ik_result.get('collision'))}, "
-            f"collision_pairs={int(ik_result.get('collision_pair_count', 0))}, "
+            f"collision_pairs=[{collision_pairs_text}], "
             f"iterations={ik_result.get('iterations', '-')}")
-        self.__console.info(
+        # start_q/target_q는 위 "inspection IK check input" debug 로그에 이미 있고,
+        # 여기서 또 INFO로 찍으면 매 로봇/포즈마다 같은 값이 중복으로 콘솔을 채운다.
+        self.__console.debug(
             "inspection IK q: "
             f"robot={robot_name}, "
             f"start_q={np.round(start_q, 6).tolist()}, "
@@ -3843,27 +4271,66 @@ class Visualizer:
         result["timing"] = timings
         return result
 
-    def _partition_and_sort_inspection_groups(self, target_groups):
-        """target group을 first/second로 나누고 각각 RT 위치 x오름차순·z내림차순으로 정렬한다."""
-        first_groups, second_groups = [], []
-        for group_info in list(target_groups or []):
-            reachable = self._inspection_group_is_reachable_now(group_info)
-            self.__console.info(
-                f"inspection group reachability: {group_info.get('name')} -> reachable={reachable}")
-            if reachable:
-                first_groups.append(group_info)
-            else:
-                second_groups.append(group_info)
+    def _planning_coordinator(self):
+        """group 파티셔닝/배치 계획에 쓰는 PlannerBase coordinator 인스턴스(상태 없음, 재사용)."""
+        coordinator = getattr(self, "_planning_coordinator_instance", None)
+        if coordinator is None:
+            coordinator = PlannerBase()
+            self._planning_coordinator_instance = coordinator
+        return coordinator
+
+    def _inspection_group_sort_key_fn(self, x_ascending=True):
+        """group 정렬 키 factory: RT target 위치의 x 기준(방향 지정 가능), z는 항상 내림차순(x 우선).
+
+        x_ascending=True면 x 오름차순(마지막 group이 x 최대), False면 x 내림차순
+        (첫 group이 x 최대)이다. 방향을 하드코딩하지 않는 이유는 first/second 그룹의
+        정렬 방향이 서로 이어져야 하기 때문이다: first는 x가 커지는 방향으로 진행해
+        x 최대 지점에서 끝나고, second는 그 지점(x 최대)에서 바로 이어받도록 x가
+        작아지는 방향으로 진행해야 로봇 이동이 연속적이다.
+        """
+        sign = 1.0 if x_ascending else -1.0
 
         def sort_key(group_info):
             rt_pos = self._inspection_group_rt_position(group_info)
-            return (float(rt_pos[0]), -float(rt_pos[2]))  # x 우선 오름차순, z 내림차순
+            return (sign * float(rt_pos[0]), -float(rt_pos[2]))
 
-        first_groups.sort(key=sort_key)
-        second_groups.sort(key=sort_key)
-        return first_groups, second_groups
+        return sort_key
 
-    def _plan_inspection_path_for_robot(self, request_data, robot_name, target_pose, obstacle_mesh=None):
+    def _partition_and_sort_inspection_groups(
+        self, target_groups, *, first_x_ascending=True, second_x_ascending=None
+    ):
+        """target group을 first(reachable)/second(deferred)로 나누고 각각 정렬한다.
+
+        분류/정렬 알고리즘 자체는 PlannerBase.partition_and_sort_groups(범용, 재사용 가능)에
+        위임하고, Visualizer는 application 지식이 필요한 reachability 판단(콜백)과 정렬 키만 제공한다.
+
+        first_x_ascending: first(reachable) 정렬 방향. 기본 오름차순 -> x 최대 지점에서 끝난다.
+        second_x_ascending: second(deferred) 정렬 방향. None이면 first의 반대 방향을 써서
+            first가 끝난 지점(x 최대)에서 second가 이어 시작하도록 한다.
+        """
+        if second_x_ascending is None:
+            second_x_ascending = not first_x_ascending
+        partition = self._planning_coordinator().partition_and_sort_groups(
+            list(target_groups or []),
+            is_reachable=self._inspection_group_is_reachable_now,
+            reachable_sort_key=self._inspection_group_sort_key_fn(first_x_ascending),
+            deferred_sort_key=self._inspection_group_sort_key_fn(second_x_ascending),
+        )
+        for group_info in list(target_groups or []):
+            name = group_info.get("name")
+            if name in partition.evaluation_errors:
+                self.__console.warning(
+                    f"inspection group reachability check failed: {name} -> "
+                    f"{partition.evaluation_errors[name]} (treated as deferred)")
+        self.__console.info(
+            "inspection group reachability: \n"
+            f"first(reachable)={[g.get('name') for g in partition.reachable]}\n"
+            f"second(deferred)={[g.get('name') for g in partition.deferred]}")
+        return partition.reachable, partition.deferred
+
+    def _plan_inspection_path_for_robot(
+        self, request_data, robot_name, target_pose, obstacle_mesh=None, context_label=None
+    ):
         """검사 목표 pose까지 한 로봇의 q-space path를 계산한다.
 
         Args:
@@ -3871,6 +4338,8 @@ class Visualizer:
             robot_name: 경로를 계산할 로봇 이름.
             target_pose: 목표 TCP pose. 4x4 transform, 6D pose, 3D point를 허용한다.
             obstacle_mesh: collision scene에 넣을 배관 mesh. None이면 현재 로드된 배관 mesh를 사용한다.
+            context_label: 로그 구분용 "몇 번째 포인트/자세" 식별 문자열(예: "Point 2 - Inspection pose 2:DDA").
+                None이면 robot_name만 쓴다. planner의 탐색/타이밍 로그 맨 앞에 붙는다.
 
         Returns:
             dict: q_path, TCP display path, IK 결과, collision verification, timing을 포함한 계획 결과.
@@ -3883,6 +4352,7 @@ class Visualizer:
         """
         total_t0 = time.perf_counter()
         timings = {}
+        label = context_label or robot_name
         stage_t0 = time.perf_counter()
         # 1) 현재 배관을 collision obstacle mesh로 준비한다.
         if obstacle_mesh is None:
@@ -3892,8 +4362,33 @@ class Visualizer:
         timings["obstacle_mesh"] = time.perf_counter() - stage_t0
 
         # 2) planner 입력인 시작 TCP pose와 목표 pose를 world 좌표계 기준으로 정리한다.
+        #    workspace bound는 실제 planning이 출발하는 start_q(override 포함, 예: 여러
+        #    group을 이어 계획할 때 이전 group의 마지막 q)의 FK world position을 기준으로
+        #    잡아야 한다. _get_robot_tcp_pose()는 "현재 뷰어 상 로봇 위치"라서, override로
+        #    start_q가 바뀌는 경우 실제 start_q와 어긋나 start_out_of_workspace가 잘못
+        #    발생하는 버그가 있었다 - 그래서 start_q를 먼저 구하고 그 FK로 start pose를 만든다.
         stage_t0 = time.perf_counter()
-        start = self._get_robot_tcp_pose(robot_name)
+        robot_model = self._find_robot(robot_name)
+        if robot_model is None:
+            raise RuntimeError(f"robot model not found: {robot_name}")
+        backend = getattr(self, "_robotics_backend", None)
+        robot_backend_model = (
+            backend.robot_model(robot_name) if (backend is not None and robot_name is not None) else None
+        )
+        robot_dof = self._robot_dof(robot_name, robot_backend_model)
+        start_q = self._current_robot_q(robot_model, robot_backend_model, robot_name=robot_name)
+        start_overrides = request_data.get("_start_q_override_by_robot") or {}
+        if robot_name in start_overrides:
+            try:
+                start_q = np.asarray(start_overrides[robot_name], dtype=float)
+                if start_q.shape[0] != robot_dof:
+                    raise ValueError(f"expected dof={robot_dof}, got {start_q.shape[0]}")
+            except Exception as exc:
+                self.__console.warning(
+                    f"inspection path start_q override ignored: robot={robot_name}, error={exc}")
+                start_q = self._current_robot_q(robot_model, robot_backend_model, robot_name=robot_name)
+
+        start = self._T_to_pose(self._pin_target_world_T(robot_model, robot_backend_model, start_q, robot_name))
         if start is None:
             raise RuntimeError(f"robot TCP not found: {robot_name}")
         goal = np.zeros(6, dtype=float)
@@ -3903,15 +4398,13 @@ class Visualizer:
         else:
             flat_target = target_arr.reshape(-1)
             goal[:min(6, flat_target.size)] = flat_target[:min(6, flat_target.size)]
-        robot_model = self._find_robot(robot_name)
-        if robot_model is None:
-            raise RuntimeError(f"robot model not found: {robot_name}")
         timings["target_setup"] = time.perf_counter() - stage_t0
 
         # 3) 요청된 q-space planner를 만들고 robotics backend collision scene을 설정한다.
         stage_t0 = time.perf_counter()
         planner_name = self._inspection_q_space_planner_name(request_data.get("planner", "rrt_connect"))
         planner = self._load_path_planner(planner_name)
+        planner.debug_context = label
         self._configure_inspection_planner(
             planner,
             obstacle_mesh,
@@ -3929,29 +4422,26 @@ class Visualizer:
             "inspection path planner setup timing: "
             f"robot={robot_name}, total={timings.get('planner_setup', 0.0):.3f}s, "
             f"bounds={timings.get('planner_bounds_config', 0.0):.3f}s, "
-            f"urdf_collision_model={timings.get('planner_pinocchio_urdf_collision_model', 0.0):.3f}s, "
+            f"robotics_model={timings.get('planner_robotics_model', 0.0):.3f}s, "
             f"obstacle_transform={timings.get('planner_obstacle_base_transform', 0.0):.3f}s, "
             f"obstacle_bvh={timings.get('planner_obstacle_bvh', 0.0):.3f}s")
 
         # 4) IK solve, q-space planning, collision verification은 robotics base에 위임한다.
+        #    robot_backend_model/start_q(override 포함)는 위 2)에서 이미 구했으므로 재사용한다.
         stage_t0 = time.perf_counter()
-        robot_backend_model = getattr(planner, "robot_model", None) or getattr(planner, "pin_model", None)
-        robot_dof = self._robot_dof(robot_name, robot_backend_model)
-        start_q = self._current_robot_q(robot_model, robot_backend_model, robot_name=robot_name)
-        start_overrides = request_data.get("_start_q_override_by_robot") or {}
-        if robot_name in start_overrides:
-            try:
-                start_q = np.asarray(start_overrides[robot_name], dtype=float)
-                if start_q.shape[0] != robot_dof:
-                    raise ValueError(f"expected dof={robot_dof}, got {start_q.shape[0]}")
-            except Exception as exc:
-                self.__console.warning(
-                    f"inspection path start_q override ignored: robot={robot_name}, error={exc}")
-                start_q = self._current_robot_q(robot_model, robot_backend_model, robot_name=robot_name)
+        # path planning에서만: IK solver가 goal_q를 풀 때 쓰는 초기 추정값(q_init)만
+        # linear track에 한해 target의 world x 위치 근처로 미리 옮겨준다. 로봇의 실제
+        # 현재 위치(q_start, path planning이 실제로 출발하는 지점)는 절대 안 건드린다 -
+        # start_q는 그대로 두고 IK 요청에만 별도 변수(ik_start_q)로 넘긴다.
+        # check_ef_pose_ik는 그대로 둔다.
+        ik_start_q = self._seed_linear_track_q_for_world_x(
+            robot_name, robot_backend_model, self._robot_target_link_name(robot_name),
+            start_q, float(goal[0]))
         self.__console.debug(
-            f"inspection path IK input: robot={robot_name}, "
-            f"start_q={np.round(start_q, 5).tolist()}, "
-            f"target_world_pose={np.round(goal, 5).tolist()}")
+            f"inspection path IK input: [{label}] robot={robot_name}\n"
+            f"  start_q    = {np.round(start_q, 5).tolist()}\n"
+            f"  ik_start_q = {np.round(ik_start_q, 5).tolist()}\n"
+            f"  target_world_pose = {np.round(goal, 5).tolist()}")
         planning_timeout = float(request_data.get(
             "planning_timeout",
             (self._config.get("path_planning", {}) or {}).get("planning_timeout", 0.0),
@@ -3962,16 +4452,16 @@ class Visualizer:
         plan = service.plan_q_path_for_robot(
             planner=planner,
             ik_request=InspectionIKRequest(
-                robot_name=robot_name,
-                target_pose=target_pose,
-                start_tcp_pose=start,
-                start_q=start_q,
-                frame_name=self._robot_target_link_name(robot_name),
-                joint_names=self._robot_joint_names(robot_name, robot_backend_model),
-                planner_name=planner_name,
-                ik_config=self._inspection_ik_config(),
-                ik_solver=request_data.get("ik_solver"),
-                ik_normalize=request_data.get("ik_normalize"),
+                robot_name      =robot_name,
+                target_pose     =target_pose,
+                start_tcp_pose  =start,
+                start_q         =ik_start_q,
+                frame_name      =self._robot_target_link_name(robot_name),
+                joint_names     =self._robot_joint_names(robot_name, robot_backend_model),
+                planner_name    =planner_name,
+                ik_config       =self._inspection_ik_config(),
+                ik_solver       =request_data.get("ik_solver"),
+                ik_normalize    =request_data.get("ik_normalize"),
             ),
             q_start=start_q,
             planning_timeout=planning_timeout,
@@ -3986,8 +4476,15 @@ class Visualizer:
             ),
         })
         plan["verification"] = verification
-        timings.update(plan.get("timing", {}))
-        timings["planner_setup"] = timings.get("planner_setup", time.perf_counter() - stage_t0)
+        # service(plan_q_path_for_robot)가 반환하는 timing에도 "target_setup"/"total" 키가
+        # 있는데, 여기서 재는 target_setup(1~2단계: obstacle/goal 준비)과 total(전체)과는
+        # 다른 걸 재는 값이라 그대로 update()하면 이름이 겹쳐 덮어써진다. 겹치는 두 키는
+        # 무시하고(ik_ 접두어로만 갖고 온다) 나머지 IK/planning/verify 단계 키만 그대로 합친다.
+        service_timing = plan.get("timing", {}) or {}
+        timings["ik_target_setup"] = service_timing.get("target_setup", 0.0)
+        for key in ("ik", "ik_result_check", "planning", "collision_verification"):
+            if key in service_timing:
+                timings[key] = service_timing[key]
         goal_q = np.asarray(plan["goal_q"], dtype=float)
         q_path = [np.asarray(q, dtype=float) for q in plan.get("q_path", [])]
         if plan.get("ik_failure"):
@@ -4006,11 +4503,11 @@ class Visualizer:
         }
         self._last_inspection_ik_trace = getattr(self, "_last_inspection_ik_trace", {})
         self._last_inspection_ik_trace[robot_name] = plan.get("ik_trace", [])
-        self.__console.info(
-            "inspection path IK q: "
-            f"robot={robot_name}, "
-            f"start_q={np.round(start_q, 6).tolist()}, "
-            f"target_q={np.round(goal_q, 6).tolist()}")
+        # self.__console.info(
+        #     "inspection path IK q: "
+        #     f"robot={robot_name}, "
+        #     f"start_q={np.round(start_q, 6).tolist()}, "
+        #     f"target_q={np.round(goal_q, 6).tolist()}")
         ik_experiment = self._save_inspection_ik_experiment(
             robot_name,
             robot_model,
@@ -4030,22 +4527,55 @@ class Visualizer:
             q_path,
             sample_resolution=display_resolution)
         if len(path) < 2:
-            raise RuntimeError("planned q path could not be converted to TCP path")
+            # q_path가 1점(planner가 경로를 못 찾아 start_q로만 fallback한 경우 등)이면
+            # 여기서 걸린다. "TCP path 변환 실패"는 증상일 뿐 원인이 아니므로, planner가
+            # 이미 파악한 실패 사유(planning_error/collision_preview_reason/ik_failure)를
+            # 그대로 실어 로그에서 바로 원인을 알 수 있게 한다.
+            reason = (
+                plan.get("planning_error")
+                or plan.get("collision_preview_reason")
+                or (plan.get("ik_failure") or {}).get("type")
+                or f"q_path has only {len(q_path)} point(s)"
+            )
+            if "start_collision" in str(reason):
+                # start_q(현재/이어받은 로봇 위치) 자체가 충돌이라는 뜻이므로, 화면에서
+                # 바로 확인할 수 있게 그 pose에 IK 실패 마커와 같은 표시를 남긴다.
+                try:
+                    collision_T = self._pin_target_world_T(robot_model, robot_backend_model, start_q, robot_name)
+                    self._show_ik_failure_reached_pose(robot_name, collision_T, None)
+                except Exception as marker_exc:
+                    self.__console.debug(
+                        f"start_collision marker skipped: robot={robot_name}, error={marker_exc}")
+                # 어느 geometry pair가 충돌했는지(예: 이전 group에서 이어받은 q가 second
+                # group의 가상 회전된 배관 mesh와 겹치는지) 원인 문자열에 같이 실어 둔다.
+                collision_pairs = getattr(planner, "last_collision_pairs", None)
+                if collision_pairs:
+                    reason = f"{reason}(pairs={collision_pairs})"
+            raise RuntimeError(f"planning failed for target: {reason}")
         timings["path_conversion"] = time.perf_counter() - stage_t0
         timings["total"] = time.perf_counter() - total_t0
-        self.__console.info(
-            "inspection path timing: "
-            f"robot={robot_name}, planner={planner_name}, "
-            f"target={timings.get('target_setup', 0.0):.3f}s, "
-            f"setup={timings.get('planner_setup', 0.0):.3f}s, "
-            f"ik={timings.get('ik', 0.0):.3f}s, "
-            f"planning={timings.get('planning', 0.0):.3f}s, "
-            f"verify={timings.get('collision_verification', 0.0):.3f}s, "
-            f"convert={timings.get('path_conversion', 0.0):.3f}s, "
-            f"total={timings.get('total', 0.0):.3f}s, "
-            f"collision_edges={plan.get('verification', {}).get('colliding_edges', 0)}, "
-            f"collision_preview={plan.get('collision_preview')}, "
-            f"collision_preview_reason={plan.get('collision_preview_reason')}")
+        # collision_preview가 켜졌는데 이유가 없어 보이는 경우가 잦았던 건 ik_fallback(IK
+        # 미수렴) 때문에 켜진 걸 여기 로그에는 안 보여줘서였다. ik_fallback을 같이 남기고,
+        # preview/실패 상태면 info 대신 warning으로 눈에 띄게 한다.
+        is_preview_or_failed = bool(plan.get("collision_preview")) or bool(plan.get("ik_fallback"))
+        log_fn = self.__console.warning if is_preview_or_failed else self.__console.info
+        planner_iteration_count = getattr(planner, "last_iteration_count", None)
+        log_fn(
+            f"inspection path timing: [{label}] robot={robot_name}, planner={planner_name}\n"
+            f"  target={timings.get('target_setup', 0.0):.3f}s"
+            f"  setup={timings.get('planner_setup', 0.0):.3f}s"
+            f"  ik_target_setup={timings.get('ik_target_setup', 0.0):.3f}s\n"
+            f"  ik={timings.get('ik', 0.0):.3f}s"
+            f"  ik_result_check={timings.get('ik_result_check', 0.0):.3f}s"
+            f"  planning={timings.get('planning', 0.0):.3f}s"
+            f"  iteration={planner_iteration_count}\n"
+            f"  verify={timings.get('collision_verification', 0.0):.3f}s"
+            f"  convert={timings.get('path_conversion', 0.0):.3f}s"
+            f"  total={timings.get('total', 0.0):.3f}s\n"
+            f"  ik_fallback={bool(plan.get('ik_fallback'))}"
+            f"  collision_edges={plan.get('verification', {}).get('colliding_edges', 0)}"
+            f"  collision_preview={plan.get('collision_preview')}\n"
+            f"  collision_preview_reason={plan.get('collision_preview_reason')}")
         plan.update({
             "path": [np.asarray(p, dtype=float) for p in path],
             "ik_experiment": ik_experiment,
@@ -4169,6 +4699,39 @@ class Visualizer:
 
 
 
+    def _move_positioner_r_to(self, r_deg, identity=None):
+        """포지셔너 r축을 절대각 r_deg로 실제 이동시킨다(playback에서 second group 진입 시 사용).
+
+        _handle_request_move_positioner(axis="r")와 동일한 이동/spool 동기화 로직을 쓴다.
+        """
+        import math
+        prev_positioner_r = float(getattr(self, '_positioner_r_deg', 0.0))
+        self._positioner_r_deg = float(r_deg)
+        for model in getattr(self, '_robot_models', []):
+            joint_map = model._urdf._joint_map if model._urdf else {}
+            if "f_column_z_to_f_column_r" in joint_map:
+                model.set_joint("f_column_z_to_f_column_r", math.radians(r_deg))
+                model.update_fk()
+        self._invalidate_positioner_collision_mesh_cache()
+        spool_T_before = np.asarray(getattr(self, '_spool_world_T', None), dtype=float).copy() \
+            if getattr(self, '_spool_world_T', None) is not None else None
+        self._sync_fixed_spool_after_positioner_move("r", r_deg, prev_positioner_r, {})
+        if self._spool_fix_r and abs(r_deg - prev_positioner_r) > 1e-9:
+            try:
+                rotation_T = self._positioner_r_rotation_transform(r_deg - prev_positioner_r)
+                self._rotate_inspection_target_groups(rotation_T)
+                self._verify_positioner_rotation_kept_poses_attached(
+                    spool_T_before, np.asarray(getattr(self, '_spool_world_T'), dtype=float), rotation_T)
+                self._verify_rotated_ef_poses_against_current_pipe()
+            except Exception as exc:
+                self.__console.warning(
+                    f"failed to rotate stored ef target poses with positioner r move: {exc}")
+        self._show_chuck_frames(render=False)
+        if self._spool_positioner_fixed:
+            self._save_spool_alignment_state(reason="inspection sequence playback r move")
+        self._send_positioner_pose_update(identity=identity)
+        self.__console.info(f"execute_inspection_path: positioner rotated to r={r_deg:.1f}deg for playback")
+
     def _positioner_r_rotation_transform(self, delta_r_deg):
         """포지셔너 r축(=m-chuck 축) 기준 delta_r_deg 회전 world transform(4x4)을 만든다.
 
@@ -4197,106 +4760,145 @@ class Visualizer:
             return target_T
         return np.asarray(transform, dtype=float) @ target_T
 
-    def _plan_inspection_group_sequence(
-        self,
-        groups,
-        obstacle_mesh,
-        request_data,
-        *,
-        start_q_overrides,
-        failures,
-        ik_failures,
-        planning_timeout,
-        future_timeout,
-        group_offset=0,
-        pose_transform=None,
-    ):
-        """group 목록을 순차 계획한다. 이전 group의 마지막 q를 다음 group start q로 넘긴다.
+    def _build_robot_planning_jobs(self, groups, pose_transform=None, start_q_by_robot=None):
+        """group 목록(같은 phase)에서 로봇별 RobotPlanningJob을 만든다.
 
-        pose_transform이 주어지면(예: 포지셔너 가상 회전) 각 target pose에 적용한 뒤 계획한다.
-        start_q_overrides/failures/ik_failures는 in-place로 갱신하며, group_sequence 항목 list를 반환한다.
+        같은 로봇이 여러 group에 나오면 group 순서대로 이어붙여 하나의 job(순차 target list)으로
+        묶는다. PlannerBase.plan_batch가 이 job들을 로봇별로 병렬 실행하고, 한 job 안의 target들은
+        순차로 계획하며 마지막 q를 다음 target의 시작 q로 넘긴다.
+
+        Args:
+            groups: 같은 phase(first 또는 second)의 target group 목록.
+            pose_transform: 주어지면(포지셔너 가상 회전 등) 각 target pose에 적용한다.
+            start_q_by_robot: {robot_name: q} 이전 phase에서 이어받을 시작 q. 없는 로봇은
+                None으로 두어 `_plan_target_for_job`가 실제 현재 로봇 pose를 쓰게 한다.
         """
-        group_sequence = []
-        for sequence_index, group_info in enumerate(groups):
-            seq_i = group_offset + sequence_index
-            group_index = int(group_info.get("index", seq_i))
-            group_name = str(group_info.get("name", f"Inspection pose {seq_i + 1}"))
-            pose_items = self._inspection_group_pose_items(group_info)
-            plans = {}
-            group_failures = {}
-            group_ik_failures = {}
-            group_request = dict(request_data)
-            group_request["_start_q_override_by_robot"] = {
-                name: np.asarray(q, dtype=float).tolist()
-                for name, q in start_q_overrides.items()
-            }
-            max_workers = min(len(pose_items), int(request_data.get("max_workers", len(pose_items))))
-            start_source = "previous inspection pose" if start_q_overrides else "current robot pose"
-            self.__console.info(
-                f"inspection path planning: {group_name} ({len(pose_items)} robots), "
-                f"start={start_source}, start_overrides={list(start_q_overrides.keys())}, "
-                f"pose_transform={'yes' if pose_transform is not None else 'no'}")
-            executor = ThreadPoolExecutor(max_workers=max(1, max_workers))
-            futures = {
-                executor.submit(
-                    self._plan_inspection_path_for_robot,
-                    group_request,
-                    robot_name,
-                    self._transform_target_pose(target_T, pose_transform),
-                    obstacle_mesh,
-                ): (robot_name, pose_name)
-                for robot_name, pose_name, target_T in pose_items
-            }
-            try:
-                for future in as_completed(futures, timeout=future_timeout):
-                    robot_name, pose_name = futures[future]
-                    failure_key = f"{group_name}:{robot_name}"
-                    try:
-                        plan = future.result()
-                        plan["pose_name"] = pose_name
-                        plan["inspection_pose_name"] = group_name
-                        plan["inspection_pose_index"] = group_index
-                        plans[robot_name] = plan
-                        if plan.get("q_path"):
-                            start_q_overrides[robot_name] = np.asarray(plan["q_path"][-1], dtype=float)
-                        if plan.get("ik_failure"):
-                            group_ik_failures[robot_name] = plan["ik_failure"]
-                            ik_failures[failure_key] = plan["ik_failure"]
-                            self._last_ik_failure = getattr(self, "_last_ik_failure", {})
-                            self._last_ik_failure[robot_name] = plan["ik_failure"]
-                    except InspectionIKFailure as exc:
-                        group_failures[robot_name] = str(exc)
-                        failures[failure_key] = str(exc)
-                        if exc.failure_info:
-                            group_ik_failures[robot_name] = exc.failure_info
-                            ik_failures[failure_key] = exc.failure_info
-                            self._last_ik_failure = getattr(self, "_last_ik_failure", {})
-                            self._last_ik_failure[robot_name] = exc.failure_info
-                        self.__console.error(f"inspection path failed for {failure_key}: {exc}")
-                    except Exception as exc:
-                        group_failures[robot_name] = str(exc)
-                        failures[failure_key] = str(exc)
-                        self.__console.error(f"inspection path failed for {failure_key}: {exc}")
-            except FuturesTimeoutError:
-                for future, (robot_name, _pose_name) in futures.items():
-                    if future.done():
-                        continue
-                    future.cancel()
-                    failure_key = f"{group_name}:{robot_name}"
-                    group_failures[robot_name] = f"path planning timeout ({planning_timeout:.1f}s)"
-                    failures[failure_key] = group_failures[robot_name]
-                    self.__console.error(f"inspection path timeout for {failure_key}: {planning_timeout:.1f}s")
-            finally:
-                executor.shutdown(wait=False, cancel_futures=True)
+        start_q_by_robot = start_q_by_robot or {}
+        targets_by_robot: dict[str, list] = {}
+        for group_order, group_info in enumerate(groups):
+            group_name  = group_info.get("name")
+            group_index = group_info.get("index")
+            for robot_name, pose_name, target_T in self._inspection_group_pose_items(group_info):
+                target_T = self._transform_target_pose(target_T, pose_transform)
+                targets_by_robot.setdefault(robot_name, []).append(
+                    PlanningTarget(
+                        name=f"{group_name}:{pose_name}",
+                        target_pose=target_T,
+                        metadata={
+                            "pose_name": pose_name,
+                            "group_name": group_name,
+                            "group_index": group_index,
+                            # group_index는 EF pose 결정 시 부여된 원본 discovery 순서라
+                            # 실제 계획 순서(정렬 결과, waypoint로 반드시 지나야 하는 순서)와
+                            # 다를 수 있다. group_order는 이 phase에서 groups가 실제로 순회된
+                            # 순서(=정렬된 순서)를 담아, 결과 재구성 시 이 순서를 되살리는 데 쓴다.
+                            "group_order": group_order,
+                        },
+                    )
+                )
+        return [
+            RobotPlanningJob(
+                robot_name=robot_name,
+                start_q=start_q_by_robot.get(robot_name),
+                targets=targets,
+            )
+            for robot_name, targets in targets_by_robot.items()
+        ]
 
-            group_sequence.append({
-                "index": group_index,
-                "name": group_name,
-                "plans": plans,
-                "failures": group_failures,
-                "ik_failures": group_ik_failures,
-            })
-        return group_sequence
+    def _plan_target_for_job(self, job, target, start_q, *, request_data, obstacle_mesh):
+        """PlannerBase.plan_target_sequence가 호출하는 단일 target 계획 어댑터.
+
+        IK/joint-space planning 자체는 기존 `_plan_inspection_path_for_robot`(로봇 backend,
+        collision scene 등 Visualizer 상태에 묶여 있음)에 그대로 위임하고, 그 결과를
+        PlannerBase가 이해하는 TargetPlanningResult로 감싼다. 원본 plan dict는 렌더링/응답
+        재구성을 위해 metadata["plan"]에 보존한다.
+        """
+        group_request = dict(request_data)
+        group_request["_start_q_override_by_robot"] = (
+            {} if start_q is None
+            else {job.robot_name: np.asarray(start_q, dtype=float).tolist()}
+        )
+        try:
+            plan = self._plan_inspection_path_for_robot(
+                group_request, job.robot_name, target.target_pose, obstacle_mesh,
+                context_label=target.name,
+            )
+        except InspectionIKFailure as exc:
+            self.__console.error(f"inspection path failed for {job.robot_name}:{target.name}: {exc}")
+            return TargetPlanningResult(
+                target_name=target.name,
+                success=False,
+                error=str(exc),
+                ik_failure=exc.failure_info,
+                metadata={"target": target},
+            )
+        except Exception as exc:
+            self.__console.error(f"inspection path failed for {job.robot_name}:{target.name}: {exc}")
+            return TargetPlanningResult(
+                target_name=target.name, success=False, error=str(exc), metadata={"target": target},
+            )
+
+        plan["pose_name"] = target.metadata.get("pose_name")
+        plan["inspection_pose_name"] = target.metadata.get("group_name")
+        plan["inspection_pose_index"] = target.metadata.get("group_index")
+        if plan.get("ik_failure"):
+            self._last_ik_failure = getattr(self, "_last_ik_failure", {})
+            self._last_ik_failure[job.robot_name] = plan["ik_failure"]
+        return TargetPlanningResult(
+            target_name=target.name,
+            success=not bool(plan.get("ik_failure")),
+            q_path=[np.asarray(q, dtype=float) for q in (plan.get("q_path") or [])],
+            goal_q=(
+                np.asarray(plan["q_path"][-1], dtype=float) if plan.get("q_path") else None
+            ),
+            error=plan.get("planning_error"),
+            ik_failure=plan.get("ik_failure"),
+            verification=plan.get("verification", {}) or {},
+            timing=plan.get("timing", {}) or {},
+            metadata={"plan": plan, "target": target},
+        )
+
+    def _group_sequence_from_batch(self, batch):
+        """BatchPlanningResult를 기존 렌더링/응답 코드가 쓰던 group_sequence 형태로 재구성한다.
+
+        group_sequence 항목: {index, name, plans: {robot_name: plan_dict}, failures, ik_failures}.
+        같은 group에 속한 target들을 robot job에서 순서대로 이어붙였으므로, 여기서 다시
+        group_name/group_index(각 target의 metadata)를 기준으로 묶어 되돌린다.
+        """
+        groups_by_key: dict = {}
+        for robot_name, robot_result in batch.robot_results.items():
+            for target_result in robot_result.target_results:
+                target = target_result.metadata.get("target")
+                if target is None:
+                    continue
+                group_name = target.metadata.get("group_name")
+                group_index = target.metadata.get("group_index")
+                group_order = target.metadata.get("group_order")
+                key = (group_index, group_name)
+                if key not in groups_by_key:
+                    groups_by_key[key] = {
+                        "index": group_index,
+                        "order": group_order,
+                        "name": group_name,
+                        "plans": {},
+                        "failures": {},
+                        "ik_failures": {},
+                    }
+                entry = groups_by_key[key]
+                if target_result.success:
+                    entry["plans"][robot_name] = target_result.metadata["plan"]
+                else:
+                    entry["failures"][robot_name] = target_result.error or "planning failed"
+                    if target_result.ik_failure:
+                        entry["ik_failures"][robot_name] = target_result.ik_failure
+        # robot_results 순회 순서(병렬 완료 순서, 비결정적)나 group의 원본 discovery index가
+        # 아니라, 이 phase에서 실제로 정렬되어 계획된 순서(group_order)로 정렬해 반환한다.
+        # 정렬된 pose들은 경로 계획이 반드시 순서대로 지나야 하는 waypoint이므로 이 순서를
+        # 결과/렌더링까지 그대로 보존해야 한다.
+        return sorted(
+            groups_by_key.values(),
+            key=lambda entry: (entry["order"] is None, entry["order"]),
+        )
 
     def _handle_request_plan_inspection_path(self, request_data):
         """검사 target group 하나 이상에 대해 로봇 경로를 순차 계획한다.
@@ -4333,15 +4935,22 @@ class Visualizer:
             # target group을 접근 가능(first)/불가(second)로 나누고 각각 정렬한다.
             # 현재 로봇 위치는 base 위치로 가정한다. first를 계획한 뒤 포지셔너를
             # 룰베이스로 가상 회전하고 second를 이어서 계획한다.
+            # first_x_ascending 기본값(True)은 first가 x 오름차순(x 최대에서 종료)으로
+            # 진행하고, second는 그 반대 방향(x 최대에서 시작)으로 이어받는다는 뜻이다.
+            # 필요하면 request로 방향을 직접 지정할 수 있다.
             first_groups, second_groups = self._partition_and_sort_inspection_groups(
-                self._inspection_target_groups
+                self._inspection_target_groups,
+                first_x_ascending=bool(request_data.get("first_group_x_ascending", True)),
+                second_x_ascending=request_data.get("second_group_x_ascending"),
             )
+
             
             self._inspection_second_groups = second_groups
             self.__console.info(
                 "inspection groups partitioned: "
                 f"first(reachable)={len(first_groups)}, second(deferred)={len(second_groups)}, "
-                f"first_order={[g.get('name') for g in first_groups]}")
+                f"first_order={[g.get('name') for g in first_groups]} \n"
+                f"second_order={[g.get('name') for g in second_groups]} ")
             if not first_groups:
                 raise RuntimeError(
                     f"no reachable inspection group now (deferred={len(second_groups)})")
@@ -4356,34 +4965,65 @@ class Visualizer:
                     )
             self.plotter.render()
 
-            stage_t0 = time.perf_counter()
-            obstacle_mesh = self._current_spool_collision_mesh()
+            stage_t0        = time.perf_counter()
+            obstacle_mesh   = self._current_spool_collision_mesh()
             if obstacle_mesh is None:
                 raise RuntimeError("loaded pipe is not available")
             obstacle_elapsed = time.perf_counter() - stage_t0
 
-            start_q_overrides = {}
             planning_timeout = float(request_data.get(
                 "planning_timeout",
                 (self._config.get("path_planning", {}) or {}).get("planning_timeout", 0.0),
             ))
-            future_timeout = None if planning_timeout <= 0 else planning_timeout + 2.0
+            robot_timeout_sec = None if planning_timeout <= 0 else planning_timeout
+            fail_policy = request_data.get("fail_policy", "stop_robot")
+            max_workers = request_data.get("max_workers")
+            coordinator = self._planning_coordinator()
 
-            # 1) first group(현재 접근 가능) 경로 계획.
-            group_sequence = self._plan_inspection_group_sequence(
-                first_groups,
-                obstacle_mesh,
-                request_data,
-                start_q_overrides=start_q_overrides,
-                failures=failures,
-                ik_failures=ik_failures,
-                planning_timeout=planning_timeout,
-                future_timeout=future_timeout,
+            # 1) first group(현재 접근 가능): 로봇별 job으로 묶어 병렬 계획한다. 같은 로봇이 여러
+            #    group에 걸치면 그 로봇의 job 안에서 순차로 계획되어 마지막 q가 다음 target으로 이어진다.
+            first_jobs = self._build_robot_planning_jobs(first_groups)
+            self.__console.debug(
+                "inspection path planning for first group: "
+                f"groups={len(first_groups)}, jobs={len(first_jobs)}, max_workers={max_workers}, "
+                f"fail_policy={fail_policy}, timeout_sec={robot_timeout_sec}")
+            first_batch = coordinator.plan_batch(
+                first_jobs,
+                lambda job, target, start_q: self._plan_target_for_job(
+                    job, target, start_q, request_data=request_data, obstacle_mesh=obstacle_mesh),
+                max_workers=max_workers,
+                fail_policy=fail_policy,
+                timeout_sec=robot_timeout_sec,
             )
+            group_sequence = self._group_sequence_from_batch(first_batch)
+            for group in group_sequence:
+                group["positioner_r_deg"] = 0.0
+
+            self.__console.debug(first_batch.robot_results.items())
 
             # 2) first -> second 전환: 룰베이스 고정각으로 포지셔너 r축을 가상 회전한다.
             #    실제 포지셔너/spool은 움직이지 않고, second pose와 collision mesh만 회전시켜 계획한다.
-            if second_groups:
+            second_batch = None
+            if second_groups and not self._spool_fix_r:
+                # _spool_fix_r가 꺼져 있으면 배관은 positioner r축과 실제로(UI든 playback이든)
+                # 같이 돌지 않는다(_sync_fixed_spool_after_positioner_move의 r-branch가
+                # self._spool_fix_r로 걸려 있음). 그런데 여기 가상 회전은 그 상태와 무관하게
+                # "배관이 돌 것"이라고 가정해서 계산해왔다 - 그러면 계산은 회전된 배관 기준으로
+                # 충돌 없다고 나오지만, 실제/미리보기 화면의 배관은 원래 자리 그대로라 그 경로가
+                # 실제로는(또는 화면에서도) 충돌하는 것처럼 보인다. 배관이 실제로 따라 돌지 않는
+                # 상태에서는 second group을 가상 회전으로 계획하지 않고 명확히 실패 처리한다.
+                self.__console.warning(
+                    "positioner virtual rotation skipped: spool is not fixed to chuck "
+                    "(_spool_fix_r=False), so the pipe will not actually follow r-axis rotation - "
+                    f"{len(second_groups)} group(s) requiring rotation cannot be planned. "
+                    "enable spool-to-chuck fixation (fix_f_column_r) first.")
+                for group_info in second_groups:
+                    group_name = group_info.get("name")
+                    for robot_name, pose_name, _target_T in self._inspection_group_pose_items(group_info):
+                        failures[f"{group_name}:{robot_name}"] = (
+                            "positioner_not_fixed_to_spool: pipe does not actually follow r-axis "
+                            "rotation while spool-to-chuck fixation is off")
+            elif second_groups:
                 delta_r_deg = float(request_data.get(
                     "positioner_second_group_r_deg",
                     (self._config.get("path_planning", {}) or {}).get(
@@ -4392,22 +5032,42 @@ class Visualizer:
                 rotation_T = self._positioner_r_rotation_transform(delta_r_deg)
                 rotated_obstacle_mesh = copy.deepcopy(obstacle_mesh)
                 rotated_obstacle_mesh.transform(rotation_T)
-                self.__console.info(
+                self.__console.debug(
                     "positioner rule-based virtual rotation for second group: "
                     f"delta_r={delta_r_deg:.1f}deg, groups={len(second_groups)}")
-                # 3) second group 경로 계획 (회전된 pose/mesh 기준, first의 마지막 q에서 이어서).
-                group_sequence += self._plan_inspection_group_sequence(
-                    second_groups,
-                    rotated_obstacle_mesh,
-                    request_data,
-                    start_q_overrides=start_q_overrides,
-                    failures=failures,
-                    ik_failures=ik_failures,
-                    planning_timeout=planning_timeout,
-                    future_timeout=future_timeout,
-                    group_offset=len(first_groups),
-                    pose_transform=rotation_T,
+                self._log_rotation_invariant_check(second_groups, obstacle_mesh, rotated_obstacle_mesh, rotation_T)
+                # 3) second group 경로 계획 (회전된 pose/mesh 기준). first에서 그 로봇의 마지막 q가
+                #    있으면 이어받고, 없으면(first에 없던 로봇) 현재 실제 로봇 pose에서 시작한다.
+                #    포지셔너가 실제로(가상이 아니라) 회전하기 직전이므로, 배관과 가까울 수 있는
+                #    first group 마지막 자세를 그대로 이어받지 않고 모든 joint를 0으로 초기화한
+                #    "안전 자세"에서 시작한다. linear_track만은 위치(carriage가 배관 축 방향으로
+                #    이동해 있는 값)를 그대로 유지한다.
+                start_q_by_robot = {
+                    robot_name: self._zero_q_keep_linear_track(robot_name, robot_result.final_q)
+                    for robot_name, robot_result in first_batch.robot_results.items()
+                    if robot_result.final_q is not None
+                }
+                second_jobs = self._build_robot_planning_jobs(
+                    second_groups, pose_transform=rotation_T, start_q_by_robot=start_q_by_robot)
+                second_batch = coordinator.plan_batch(
+                    second_jobs,
+                    lambda job, target, start_q: self._plan_target_for_job(
+                        job, target, start_q, request_data=request_data,
+                        obstacle_mesh=rotated_obstacle_mesh),
+                    max_workers=max_workers,
+                    fail_policy=fail_policy,
+                    timeout_sec=robot_timeout_sec,
                 )
+                second_group_sequence = self._group_sequence_from_batch(second_batch)
+                for group in second_group_sequence:
+                    group["positioner_r_deg"] = delta_r_deg
+                group_sequence += second_group_sequence
+
+            for group in group_sequence:
+                for robot_name, msg in group["failures"].items():
+                    failures[f"{group['name']}:{robot_name}"] = msg
+                for robot_name, info in group["ik_failures"].items():
+                    ik_failures[f"{group['name']}:{robot_name}"] = info
 
             if ik_failures:
                 plain_ik_failures = {
@@ -4428,12 +5088,21 @@ class Visualizer:
             plan_wall_elapsed = time.perf_counter() - total_t0
 
             self._last_inspection_plan_sequence = [
-                {"name": group["name"], "plans": group["plans"]}
+                {
+                    "name": group["name"],
+                    "plans": group["plans"],
+                    "positioner_r_deg": group.get("positioner_r_deg", 0.0),
+                }
                 for group in group_sequence
                 if group["plans"]
             ]
-            first_group = next(group for group in group_sequence if group["plans"])
-            self._last_inspection_plans = first_group["plans"]
+            # "합쳐진 전체 plan"이 아니라, 정렬된 group_sequence 중 계획이 하나라도 성공한
+            # 첫 번째 group 하나만 고른다(단일 group의 로봇별 plan dict). first_groups(접근
+            # 가능 phase)와는 다른 개념이라 이름을 분명히 구분한다.
+            earliest_planned_group = next(group for group in group_sequence if group["plans"])
+            self._last_inspection_plans = earliest_planned_group["plans"]
+            
+
             for group in group_sequence:
                 for robot_name, plan in group["plans"].items():
                     self._show_inspection_ik_pose_result(
@@ -4454,11 +5123,13 @@ class Visualizer:
                     if plan.get("planning_error") and plan.get("reached_T") is not None:
                         self._show_ik_failure_reached_pose(robot_name, plan.get("reached_T"), None)
 
-            first_robot, first_plan = next(iter(first_group["plans"].items()))
-            self._last_inspection_q_path = first_plan["q_path"]
-            self._last_inspection_edge_collisions = first_plan.get("edge_collisions", [])
-            self._last_inspection_robot = first_robot
-            self._last_inspection_path = first_plan["path"]
+            # earliest_planned_group 안에서도 로봇 하나(임의 순서상 첫 번째)의 plan만
+            # 미리보기/재생용 단일 경로 상태로 남긴다. 다른 로봇 plan은 여기서 버려진다.
+            preview_robot_name, preview_plan = next(iter(earliest_planned_group["plans"].items()))
+            self._last_inspection_q_path            = preview_plan["q_path"]
+            self._last_inspection_edge_collisions   = preview_plan.get("edge_collisions", [])
+            self._last_inspection_robot             = preview_robot_name
+            self._last_inspection_path              = preview_plan["path"]
 
             has_partial_plan = any(plan.get("status") != "success" for plan in all_plans.values())
             result = {
@@ -4478,7 +5149,7 @@ class Visualizer:
                 ],
                 "robots": {
                     robot_name: self._inspection_plan_result_for_robot(plan)
-                    for robot_name, plan in first_group["plans"].items()
+                    for robot_name, plan in earliest_planned_group["plans"].items()
                 },
                 "failures": failures,
                 "ik_failures": ik_failures,
@@ -4490,15 +5161,42 @@ class Visualizer:
                     "planning_sum": float(sum(plan["elapsed"] for plan in all_plans.values())),
                 },
             }
-            self.__console.info(
-                "inspection paths planned by target group: "
-                + " | ".join(
-                    f"{group['name']}["
-                    + ", ".join(
-                        f"{robot}({plan['waypoints']} wp, {plan['elapsed']:.3f}s)"
-                        for robot, plan in group["plans"].items())
-                    + "]"
-                    for group in group_sequence if group["plans"])
+            # check_ef_pose_ik 로그와 같은 형식: pose(group)별 한 줄 + 마지막 전체 요약 한 줄로
+            # 정리하고, ik_fallback/collision_preview/완전 실패가 있으면 그 줄을 warning으로 남긴다.
+            failed_group_names = []
+            failed_group_reasons = []
+            for group in group_sequence:
+                if not group["plans"] and not group["failures"]:
+                    continue
+                robot_texts = []
+                group_failed = bool(group["failures"]) or bool(group["ik_failures"])
+                for robot, plan in group["plans"].items():
+                    robot_ok = not plan.get("ik_fallback", False) and not plan.get("collision_preview", False)
+                    if not robot_ok:
+                        group_failed = True
+                        reason = plan.get("collision_preview_reason") or (
+                            "ik_fallback" if plan.get("ik_fallback") else "collision_preview")
+                        robot_texts.append(f"{robot}=FAIL({reason})")
+                    else:
+                        robot_texts.append(f"{robot}=ok({plan['waypoints']}wp, {plan['elapsed']:.3f}s)")
+                for robot, failure_msg in group["failures"].items():
+                    if robot not in group["plans"]:
+                        # failure_msg는 _plan_target_for_job에서 잡힌 예외 문자열
+                        # ("planning failed for target: start_collision" 등) - 원인을 그대로 남긴다.
+                        robot_texts.append(f"{robot}=FAIL({failure_msg})")
+                log_fn = self.__console.warning if group_failed else self.__console.info
+                if group_failed:
+                    failed_group_names.append(group["name"])
+                    failed_texts = [text for text in robot_texts if "=FAIL(" in text]
+                    failed_group_reasons.append(f"{group['name']}[{', '.join(failed_texts)}]")
+                log_fn(f"inspection path plan: {group['name']}: {', '.join(robot_texts)}")
+
+            n_total = sum(1 for group in group_sequence if group["plans"] or group["failures"])
+            n_failed = len(failed_group_names)
+            summary_fn = self.__console.warning if n_failed else self.__console.info
+            summary_fn(
+                f"inspection path plan summary: {n_total - n_failed}/{n_total} poses ok"
+                + (f", failed={failed_group_reasons}" if n_failed else "")
                 + f", wall={plan_wall_elapsed:.3f}s, obstacle={obstacle_elapsed:.3f}s")
         except Exception as e:
             elapsed = time.perf_counter() - total_t0
@@ -4552,6 +5250,10 @@ class Visualizer:
         total_t0 = time.perf_counter()
         failures = {}
         ik_failures = {}
+        # 포즈 개수가 많으면 goal pose가 다 겹쳐 보여서 실패한 것만 보이게 걸러낼 수 있게 한다.
+        show_only_failed = bool(
+            (self._config.get("display_options", {}) or {}).get("show_only_failed_ik_poses", False)
+        )
         try:
             self._clear_inspection_visuals(clear_point=False)
             # target_groups = self._inspection_target_groups_for_planning
@@ -4559,21 +5261,52 @@ class Visualizer:
             if not target_groups:
                 raise RuntimeError("EF poses are not determined")
             self._clear_inspection_goal_pose_visuals(render=False)
-            for group_info in target_groups:
-                for robot_name, _pose_name, target_T in self._inspection_group_pose_items(group_info):
-                    self._show_inspection_goal_pose(
-                        robot_name,
-                        target_T,
-                        clear=False,
-                        render=False,
-                    )
-            self.plotter.render()
+            if not show_only_failed:
+                for group_info in target_groups:
+                    for robot_name, _pose_name, target_T in self._inspection_group_pose_items(group_info):
+                        self._show_inspection_goal_pose(
+                            robot_name,
+                            target_T,
+                            clear=False,
+                            render=False,
+                        )
+                self.plotter.render()
 
             stage_t0 = time.perf_counter()
             obstacle_mesh = self._current_spool_collision_mesh()
             if obstacle_mesh is None:
                 raise RuntimeError("loaded pipe is not available")
             obstacle_elapsed = time.perf_counter() - stage_t0
+
+            # group마다 positioner 회전 필요 여부(_inspection_group_is_reachable_now)를 보고,
+            # 회전이 필요한 group은 실제 path planning(_handle_request_plan_inspection_path)과
+            # 같은 방식으로 pose/obstacle mesh를 가상 회전시킨 뒤 IK를 확인한다. 회전을
+            # 감안하지 않으면 IK check 결과가 실제 계획 결과와 어긋난다.
+            delta_r_deg = float(request_data.get(
+                "positioner_second_group_r_deg",
+                (self._config.get("path_planning", {}) or {}).get(
+                    "positioner_second_group_r_deg", 180.0),
+            ))
+            rotation_T = None
+            rotated_obstacle_mesh = None
+
+            # 실제 path planning처럼 "현재 로봇 pose"를 IK 초기 추정값으로 쓴다. IK는 국소
+            # solver라 초기값에 따라 수렴 여부/결과가 달라질 수 있어서, q=0에서만 확인하면
+            # 실제 계획 때(현재 q에서 시작) 결과와 어긋날 수 있다. 로봇별로 한 번만 계산해
+            # 이 핸들러의 모든 group/check에 동일하게 재사용한다.
+            current_q_by_robot = {}
+            for group_info in target_groups:
+                for robot_name, _pose_name, _target_T in self._inspection_group_pose_items(group_info):
+                    if robot_name in current_q_by_robot:
+                        continue
+                    robot_model = self._find_robot(robot_name)
+                    backend = getattr(self, "_robotics_backend", None)
+                    if robot_model is None or backend is None:
+                        continue
+                    robot_backend_model = backend.robot_model(robot_name)
+                    current_q_by_robot[robot_name] = self._current_robot_q(
+                        robot_model, robot_backend_model, robot_name=robot_name
+                    ).tolist()
 
             group_sequence = []
             for sequence_index, group_info in enumerate(target_groups):
@@ -4584,18 +5317,49 @@ class Visualizer:
                 group_failures = {}
                 group_ik_failures = {}
                 group_request = dict(request_data)
-                group_request["_start_q_override_by_robot"] = {}
+                group_request["_start_q_override_by_robot"] = current_q_by_robot
+
+                needs_rotation = not self._inspection_group_is_reachable_now(group_info)
+                if needs_rotation and not self._spool_fix_r:
+                    # 배관이 실제로 chuck에 고정돼 있지 않으면(_spool_fix_r=False) positioner
+                    # r축을 돌려도 배관은 안 따라 돈다 - 이 group을 가상 회전으로 "도달 가능"
+                    # 취급하면 실제/미리보기 상태와 어긋나므로 명확히 실패 처리한다.
+                    self.__console.warning(
+                        f"EF pose IK check: {group_name} skipped - spool is not fixed to chuck "
+                        "(_spool_fix_r=False), pipe will not actually follow r-axis rotation")
+                    for robot_name, pose_name, _target_T in pose_items:
+                        failure_key = f"{group_name}:{robot_name}"
+                        msg = (
+                            "positioner_not_fixed_to_spool: pipe does not actually follow r-axis "
+                            "rotation while spool-to-chuck fixation is off")
+                        group_failures[robot_name] = msg
+                        failures[failure_key] = msg
+                    group_sequence.append({
+                        "index": group_index,
+                        "name": group_name,
+                        "checks": checks,
+                        "failures": group_failures,
+                        "ik_failures": group_ik_failures,
+                    })
+                    continue
+                if needs_rotation and rotation_T is None:
+                    rotation_T = self._positioner_r_rotation_transform(delta_r_deg)
+                    rotated_obstacle_mesh = copy.deepcopy(obstacle_mesh)
+                    rotated_obstacle_mesh.transform(rotation_T)
+                group_pose_transform = rotation_T if needs_rotation else None
+                group_obstacle_mesh = rotated_obstacle_mesh if needs_rotation else obstacle_mesh
+
                 self.__console.info(
                     f"EF pose IK check: {group_name} ({len(pose_items)} robots), "
-                    "start_q=zeros")
+                    f"start_q=current_pose, needs_positioner_rotation={needs_rotation}")
                 for robot_name, pose_name, target_T in pose_items:
                     failure_key = f"{group_name}:{robot_name}"
                     try:
                         check = self._check_inspection_ik_for_robot(
                             group_request,
                             robot_name,
-                            target_T,
-                            obstacle_mesh,
+                            self._transform_target_pose(target_T, group_pose_transform),
+                            group_obstacle_mesh,
                         )
                         check["pose_name"] = pose_name
                         check["inspection_pose_name"] = group_name
@@ -4638,6 +5402,14 @@ class Visualizer:
 
             for group in group_sequence:
                 for robot_name, check in group["checks"].items():
+                    is_failed = (
+                        bool(check.get("ik_fallback", False))
+                        or bool(check.get("collision", False))
+                        or robot_name in group.get("ik_failures", {})
+                        or robot_name in group.get("failures", {})
+                    )
+                    if show_only_failed and not is_failed:
+                        continue
                     self._show_inspection_ik_pose_result(
                         robot_name,
                         check.get("ik_reached_T"),
@@ -4663,7 +5435,9 @@ class Visualizer:
                 raise RuntimeError(f"all EF pose IK checks failed: {failures}")
 
             wall_elapsed = time.perf_counter() - total_t0
-            first_group = next(group for group in group_sequence if group["checks"])
+            # 합쳐진 전체 checks가 아니라, group_sequence 중 check가 하나라도 있는 첫 번째
+            # group 하나만 고른다(단일 group의 로봇별 check dict).
+            earliest_checked_group = next(group for group in group_sequence if group["checks"])
             result = {
                 "mode": "ik_check",
                 "status": "success" if not failures and not ik_failures else "partial",
@@ -4700,7 +5474,7 @@ class Visualizer:
                         "ik_normalize": check.get("ik_normalize"),
                         "timing": check.get("timing", {}),
                     }
-                    for robot_name, check in first_group["checks"].items()
+                    for robot_name, check in earliest_checked_group["checks"].items()
                 },
                 "failures": failures,
                 "ik_failures": ik_failures,
@@ -4713,18 +5487,35 @@ class Visualizer:
                         for check in all_checks.values())),
                 },
             }
-            self.__console.info(
-                "EF pose IK checked by inspection pose: "
-                + " | ".join(
-                    f"{group['name']}["
-                    + ", ".join(
-                        f"{robot}(success={check.get('ik_result', {}).get('success', False)}, "
-                        f"solver={check.get('ik_solver')}, "
-                        f"normalize={check.get('ik_normalize')}, "
-                        f"fallback={check.get('ik_fallback', False)})"
-                        for robot, check in group["checks"].items())
-                    + "]"
-                    for group in group_sequence if group["checks"])
+            # 한 줄에 9개 포즈를 다 욱여넣으면 안 보이니, pose(group)별로 한 줄씩 나누고
+            # 실패한 pose는 warning으로 남긴다. "실패"는 IK 미수렴(fallback)/충돌/체크 자체
+            # 예외(failures/ik_failures) 중 하나라도 있으면이다.
+            failed_group_names = []
+            for group in group_sequence:
+                if not group["checks"]:
+                    continue
+                robot_texts = []
+                group_failed = bool(group["failures"]) or bool(group["ik_failures"])
+                for robot, check in group["checks"].items():
+                    robot_ok = (
+                        bool(check.get("ik_result", {}).get("success", False))
+                        and not check.get("ik_fallback", False)
+                        and not check.get("ik_result", {}).get("collision", False)
+                    )
+                    if not robot_ok:
+                        group_failed = True
+                    robot_texts.append(f"{robot}={'ok' if robot_ok else 'FAIL'}")
+                log_fn = self.__console.warning if group_failed else self.__console.info
+                if group_failed:
+                    failed_group_names.append(group["name"])
+                log_fn(f"EF pose IK check: {group['name']}: {', '.join(robot_texts)}")
+
+            n_total = sum(1 for group in group_sequence if group["checks"])
+            n_failed = len(failed_group_names)
+            summary_fn = self.__console.warning if n_failed else self.__console.info
+            summary_fn(
+                f"EF pose IK check summary: {n_total - n_failed}/{n_total} poses ok"
+                + (f", failed=[{', '.join(failed_group_names)}]" if n_failed else "")
                 + f", wall={wall_elapsed:.3f}s, obstacle={obstacle_elapsed:.3f}s")
         except Exception as e:
             elapsed = time.perf_counter() - total_t0
@@ -5097,6 +5888,10 @@ class Visualizer:
             return False
         group = sequence[idx]
         seq_state["index"] = idx + 1
+        target_r_deg = group.get("positioner_r_deg")
+        if target_r_deg is not None and float(target_r_deg) != float(getattr(self, '_positioner_r_deg', 0.0)):
+            self._move_positioner_r_to(target_r_deg, identity=seq_state.get("identity"))
+            self.plotter.render()
         self.__console.info(
             f"execute_inspection_path: start {group.get('name', f'inspection pose {idx + 1}')} "
             f"({idx + 1}/{len(sequence)})")
@@ -5185,9 +5980,9 @@ class Visualizer:
         pairs = edge_collisions.get(edge_idx) or []
         self._highlight_collision_pairs(pairs)
         pair_text = ", ".join(f"{a} <-> {b}" for a, b in pairs) if pairs else "unknown pair"
-        self.__console.warning(
-            "execute_inspection_path: collision between "
-            f"waypoint {edge_idx} -> {edge_idx + 1} ({pair_text})")
+        # self.__console.warning(
+        #     "execute_inspection_path: collision between "
+        #     f"waypoint {edge_idx} -> {edge_idx + 1} ({pair_text})")
         logged.add(edge_idx)
         playback["logged_collision_edges"] = logged
         self.plotter.render()
@@ -5591,6 +6386,7 @@ class Visualizer:
         new_actor = vedo.Points(new_pts)
         self.plotter.add(new_actor)
         self._loaded_spool_mesh = new_actor
+        self._invalidate_spool_collision_mesh_cache()
         # spool 모델 일관성을 위해 world point를 현재 chuck@offset 기준 local로 환산한다.
         Tc = self._chuck_world_T()
         if Tc is not None and getattr(self, '_spool_local_verts', None) is not None:
@@ -5671,6 +6467,7 @@ class Visualizer:
             # 재구성 mesh를 spool로 사용해 positioner/chuck 추종 시 같이 움직이도록 한다.
             self._loaded_spool_mesh = vmesh
             self._spool_recon_mesh = vmesh
+            self._invalidate_spool_collision_mesh_cache()
             Tc = self._chuck_world_T()
             T = (getattr(self, '_spool_world_T', None)
                  if getattr(self, '_spool_world_T', None) is not None
@@ -5786,6 +6583,7 @@ class Visualizer:
         actors = spool if isinstance(spool, (list, tuple)) else [spool]
         if actors and hasattr(actors[0], 'vertices'):
             actors[0].vertices = world
+            self._invalidate_spool_collision_mesh_cache()
             return True
         return False
 

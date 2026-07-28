@@ -33,13 +33,6 @@ from plugins.robotics.backend import (
     RobotDescription,
     RoboticsBackend,
 )
-from plugins.robotics.ik_solver import (
-    damped_least_squares_step,
-    normalized_damped_least_squares_step,
-    solve_qp_ik_step,
-)
-
-
 @dataclass
 class PinocchioRobotHandle:
     description: RobotDescription
@@ -50,6 +43,87 @@ class PinocchioRobotHandle:
     robot_geom_ids: List[int] = field(default_factory=list)
     static_object_ids: List[int] = field(default_factory=list)
     sample_resolution: float = 0.05
+    base_geom_model: Any = None
+    _configured_mesh_key: Any = None
+    # mesh_key(id 기반) 캐시 비교가 안전하려면 이전에 configure_collision에 넘겨졌던
+    # mesh 객체들이 다음 호출 전까지 GC되지 않도록 여기서 강하게 붙잡아 둬야 한다.
+    _configured_meshes: Any = None
+
+
+def damped_least_squares_step(
+    pin_module,
+    pin_model,
+    data,
+    q,
+    frame_id,
+    err,
+    damping=1e-3,
+    dt=0.35,
+):
+    """Compute one classic DLS IK step.
+
+    Args:
+        pin_module: pinocchio module.
+        pin_model: Pinocchio model.
+        data: Pinocchio data.
+        q: Current joint vector.
+        frame_id: Target frame id.
+        err: 6D error from the current frame to the target frame.
+        damping: task-space damping coefficient.
+        dt: update gain.
+
+    Returns:
+        Next q clamped inside joint limits.
+    """
+    J = pin_module.computeFrameJacobian(pin_model, data, q, frame_id, pin_module.ReferenceFrame.LOCAL)
+    JJt = J @ J.T
+    dq = J.T @ np.linalg.solve(JJt + float(damping) * np.eye(6), err)
+
+    q_next = pin_module.integrate(pin_model, np.asarray(q, dtype=float), float(dt) * dq)
+    return np.minimum(np.maximum(q_next, pin_model.lowerPositionLimit), pin_model.upperPositionLimit)
+
+
+def solve_qp_ik_step(
+    pin_model,
+    data,
+    q,
+    frame_name,
+    target_se3,
+    dt=0.35,
+    solver="quadprog",
+):
+    """Compute one IK step with the QP (pink) backend.
+
+    External QP IK dependencies are imported only here. Viewer/UI code only
+    selects the generic `qp` solver and does not depend on backend package names.
+    """
+    try:
+        import pink
+        from pink import solve_ik
+        from pink.tasks import FrameTask
+    except ImportError as exc:
+        raise RuntimeError(
+            "QP IK backend is not available. Install backend dependencies: "
+            "pip uninstall -y pink; pip install pin-pink qpsolvers quadprog"
+        ) from exc
+
+    if not hasattr(pink, "Configuration"):
+        raise RuntimeError(
+            "The installed QP IK backend is not the robotics package expected by this project. "
+            "Run: pip uninstall -y pink; pip install pin-pink qpsolvers quadprog"
+        )
+
+    configuration = pink.Configuration(pin_model, data, np.asarray(q, dtype=float).copy())
+    task = FrameTask(
+        frame_name,
+        position_cost=1.0,
+        orientation_cost=1.0,
+        gain=1.0,
+    )
+    task.set_target(target_se3)
+    velocity = solve_ik(configuration, [task], float(dt), solver=solver)
+    configuration.integrate_inplace(velocity, float(dt))
+    return np.asarray(configuration.q, dtype=float).copy()
 
 
 class PinocchioRoboticsBackend(RoboticsBackend):
@@ -299,14 +373,13 @@ class PinocchioRoboticsBackend(RoboticsBackend):
         target_local_T = np.linalg.inv(handle.description.base_T) @ target_world_T
         target_se3 = pin.SE3(target_local_T[:3, :3], target_local_T[:3, 3])
 
-        solver_name = str(options.solver or "normalized_dls").lower()
+        solver_name = str(options.solver or "dls").lower()
         use_qp = solver_name in ("qp", "qp_ik")
-        normalize = bool(options.normalize) if options.normalize is not None else solver_name not in (
-            "dls",
-            "classic_dls",
-            "legacy_dls",
-        )
-        solver_label = "qp" if use_qp else ("dls_normalized" if normalize else "dls")
+        use_pybullet = solver_name in ("pybullet", "pybullet_ik")
+        # normalized DLS는 pink가 대체하지 못하는 별도 구현이었는데 정리하며 제거했다.
+        # dls만 남았으므로 QP/pybullet이 아니면 무조건 dls를 쓴다.
+        normalize = bool(options.normalize) if options.normalize is not None else False
+        solver_label = "qp" if use_qp else ("pybullet" if use_pybullet else "dls")
 
         t0 = time.perf_counter()
         q = np.asarray(q_init, dtype=float).copy()
@@ -335,56 +408,72 @@ class PinocchioRoboticsBackend(RoboticsBackend):
             return err_vec, position_error, orientation_error
 
         err, position_error, orientation_error = record(0)
-        for iteration in range(int(options.max_iter)):
+
+        if use_pybullet:
+            # PyBullet의 IK는 C++로 구현된 반복 solver라 자체적으로 max_iter만큼 내부에서
+            # 다 수렴시킨다. 우리 쪽 Python for-loop을 매 iteration 돌리는 대신 한 번만
+            # 호출하고, 수렴/오차 판정은 다른 solver와 똑같이 Pinocchio FK(record)로 한다
+            # - 두 라이브러리의 오차 계산 방식이 달라서 생기는 결과 불일치를 막기 위함이다.
+            from plugins.robotics import pybullet_ik
+            q = pybullet_ik.solve(
+                handle.description.urdf_path,
+                handle.description.base_T,
+                self.joint_names(robot_name),
+                q,
+                target_world_T,
+                frame_name,
+                max_iter=int(options.max_iter),
+                tol=float(options.tol),
+                damping=float(options.damping),
+            )
+            err, position_error, orientation_error = record(int(options.max_iter))
             if np.linalg.norm(err) < float(options.tol):
                 return self._ik_result(
-                    True,
-                    q,
-                    solver_label,
-                    normalize,
-                    iteration,
-                    time.perf_counter() - t0,
-                    position_error,
-                    orientation_error,
-                    target_world_T,
-                    trace,
-                    robot_name,
-                    frame_name,
+                    True, q, solver_label, normalize, int(options.max_iter),
+                    time.perf_counter() - t0, position_error, orientation_error,
+                    target_world_T, trace, robot_name, frame_name,
                 )
+            iteration = int(options.max_iter)
+        else:
+            for iteration in range(int(options.max_iter)):
+                if np.linalg.norm(err) < float(options.tol):
+                    return self._ik_result(
+                        True,
+                        q,
+                        solver_label,
+                        normalize,
+                        iteration,
+                        time.perf_counter() - t0,
+                        position_error,
+                        orientation_error,
+                        target_world_T,
+                        trace,
+                        robot_name,
+                        frame_name,
+                    )
 
-            if use_qp:
-                q = solve_qp_ik_step(
-                    model,
-                    data,
-                    q,
-                    frame_name,
-                    target_se3,
-                    dt=options.dt,
-                    solver=options.backend_solver,
-                )
-            elif normalize:
-                q = normalized_damped_least_squares_step(
-                    pin,
-                    model,
-                    data,
-                    q,
-                    fid,
-                    err,
-                    damping=options.damping,
-                    dt=options.dt,
-                )
-            else:
-                q = damped_least_squares_step(
-                    pin,
-                    model,
-                    data,
-                    q,
-                    fid,
-                    err,
-                    damping=options.damping,
-                    dt=options.dt,
-                )
-            err, position_error, orientation_error = record(iteration + 1)
+                if use_qp:
+                    q = solve_qp_ik_step(
+                        model,
+                        data,
+                        q,
+                        frame_name,
+                        target_se3,
+                        dt=options.dt,
+                        solver=options.backend_solver,
+                    )
+                else:
+                    q = damped_least_squares_step(
+                        pin,
+                        model,
+                        data,
+                        q,
+                        fid,
+                        err,
+                        damping=options.damping,
+                        dt=options.dt,
+                    )
+                err, position_error, orientation_error = record(iteration + 1)
 
         position_only = position_error < float(options.position_only_tol)
         final_q = q.copy()
@@ -488,22 +577,54 @@ class PinocchioRoboticsBackend(RoboticsBackend):
         if hppfcl is None:
             raise RuntimeError("hppfcl/coal is not available")
         handle = self._handle(robot_name)
-        package_dirs = handle.description.package_dirs or [os.path.dirname(handle.description.urdf_path)]
-        handle.geom_model = pin.buildGeomFromUrdf(
-            handle.model,
-            handle.description.urdf_path,
-            pin.GeometryType.COLLISION,
-            None,
-            [os.path.abspath(p) for p in package_dirs],
-        )
-        handle.geom_model.addAllCollisionPairs()
-        self._remove_adjacent_pairs(handle)
+        # 같은 obstacle mesh 객체로 반복 호출되면(한 batch 안의 target들이 보통 그렇다)
+        # geom_model deepcopy + BVH 재계산을 또 할 필요가 없다. 객체 identity로만 판단한다
+        # (내용이 바뀌었는데 같은 객체를 그대로 mutate한 경우는 대상이 아님 - 호출부는
+        # 항상 새 mesh 객체를 만들어 넘긴다).
+        #
+        # 주의: id()만으로 판단하면 위험하다 - 호출부가 넘기는 mesh(예: 매 target마다
+        # copy.deepcopy로 새로 만든 rotated obstacle mesh)는 이 함수 호출이 끝나면 호출부
+        # 쪽 참조가 사라져 곧바로 GC될 수 있고, CPython은 그 자리(id)를 바로 다음에 만들어진
+        # 전혀 다른 mesh 객체에 재사용할 수 있다. 그러면 "이전과 같은 mesh"로 오판해서
+        # 실제로는 새로 회전된 mesh인데 이전(회전 전) collision geometry를 그대로 써버린다 -
+        # 예를 들어 positioner 회전 후 ef pose는 제대로 rotated pose로 IK를 푸는데, collision
+        # 검사만 회전 전 배관 mesh 기준으로 이뤄져 "같은 축으로 같이 돌았는데도 충돌한다"는
+        # 겉보기 모순이 생긴다. static_meshes를 handle에 강하게 붙잡아 두면(다음 호출 전까지)
+        # 이 GC/id 재사용 자체가 불가능해져 mesh_key 비교가 안전해진다.
+        mesh_key = tuple(id(mesh) for mesh in (static_meshes or []))
+        if handle.base_geom_model is not None and handle.geom_model is not None \
+                and getattr(handle, "_configured_mesh_key", None) == mesh_key:
+            handle.sample_resolution = float(sample_resolution)
+            handle._configured_meshes = list(static_meshes or [])
+            return
+        if handle.base_geom_model is None:
+            # URDF 파싱 + robot self-collision pair 계산은 로봇 URDF가 바뀌지 않는 한
+            # 매 planning 호출마다 다시 할 필요가 없다. 로봇 전용(geom_model, static
+            # object 없음) 버전을 한 번만 만들어 캐시하고, 이후에는 그걸 deepcopy해서
+            # static mesh(장애물)만 새로 얹는다.
+            package_dirs = handle.description.package_dirs or [os.path.dirname(handle.description.urdf_path)]
+            base_geom_model = pin.buildGeomFromUrdf(
+                handle.model,
+                handle.description.urdf_path,
+                pin.GeometryType.COLLISION,
+                None,
+                [os.path.abspath(p) for p in package_dirs],
+            )
+            base_geom_model.addAllCollisionPairs()
+            handle.geom_model = base_geom_model
+            self._remove_adjacent_pairs(handle)
+            handle.base_geom_model = handle.geom_model
+        handle.geom_model = copy.deepcopy(handle.base_geom_model)
         handle.robot_geom_ids = list(range(len(handle.geom_model.geometryObjects)))
         handle.static_object_ids = []
         handle.sample_resolution = float(sample_resolution)
         for mesh in static_meshes or []:
             self._add_static_mesh(handle, mesh, recreate_data=False)
         handle.geom_data = pin.GeometryData(handle.geom_model)
+        handle._configured_mesh_key = mesh_key
+        # mesh_key(id 기반) 비교가 다음 호출까지 안전하려면, 이 mesh들이 그 사이 GC되어
+        # id가 재사용되지 않도록 handle이 직접 참조를 붙잡고 있어야 한다.
+        handle._configured_meshes = list(static_meshes or [])
 
     def check_collision(self, robot_name: str, q: Sequence[float], return_pairs: bool = False) -> CollisionResult:
         handle = self._handle(robot_name)

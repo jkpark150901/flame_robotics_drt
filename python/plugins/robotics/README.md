@@ -8,11 +8,17 @@ path planning orchestration.
 - `backend.py`
   - Library-neutral dataclasses and `RoboticsBackend` abstract interface.
   - Viewer/planner code should depend on these types.
-- `ik_solver.py`
-  - Shared IK step implementations.
-  - External QP IK dependencies are imported only in this module.
 - `pinocchio_backend.py`
   - First concrete backend using Pinocchio and hpp-fcl/coal.
+  - Also owns the IK step implementations (`damped_least_squares_step`, `solve_qp_ik_step`);
+    external QP IK dependencies (pink) are imported only inside `solve_qp_ik_step`.
+  - `solver="pybullet"` delegates the IK solve itself to `pybullet_ik.py` (PyBullet's
+    native IK, much faster per call than the Python DLS loop) while collision/FK/error
+    metrics stay on Pinocchio for consistency with the other solvers.
+- `pybullet_ik.py`
+  - Optional, faster IK solver. Lazily imports `pybullet`; caches one DIRECT physics
+    client and one loaded URDF body per robot (reused across calls, like the
+    Pinocchio collision-model cache).
 
 ## Backend responsibilities
 
@@ -31,7 +37,7 @@ Every backend should implement:
 
 The viewer should not care whether the robot math comes from Pinocchio,
 PyBullet, or another solver stack. The UI can expose generic choices such as
-`dls`, `normalized_dls`, and `qp`; the backend owns the concrete library calls.
+`dls` and `qp`; the backend owns the concrete library calls.
 
 ## PyBullet backend plan
 

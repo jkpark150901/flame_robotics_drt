@@ -190,6 +190,22 @@ class ZAPI(QObject, ZAPIBase):
         else:
             self.__console.warning("[ZAPI] Cannot send save_spool: Socket not connected")
 
+    def _ZAPI_request_save_inspection_points(self, file_path: str):
+        """현재 선택된 검사 지점들을 JSON 파일로 저장."""
+        if self.__dealer_socket and self.__dealer_socket.is_joined:
+            self.call(self.__dealer_socket, "zapi_save_inspection_points", {"path": file_path})
+            self.__console.info(f"[ZAPI] Sent save_inspection_points request: {file_path}")
+        else:
+            self.__console.warning("[ZAPI] Cannot send save_inspection_points: Socket not connected")
+
+    def _ZAPI_request_load_inspection_points(self, file_path: str):
+        """JSON 파일에서 검사 지점들을 읽어 복원."""
+        if self.__dealer_socket and self.__dealer_socket.is_joined:
+            self.call(self.__dealer_socket, "zapi_load_inspection_points", {"path": file_path})
+            self.__console.info(f"[ZAPI] Sent load_inspection_points request: {file_path}")
+        else:
+            self.__console.warning("[ZAPI] Cannot send load_inspection_points: Socket not connected")
+
     def _ZAPI_request_move_manipulator(self, robot: str, joint: str,
                                        target: float, speed: float = 1.0, accel: float = None):
         """매니퓰레이터 조인트를 target으로 사다리꼴 프로파일 이동(가감속). 예: 레일 베이스."""
@@ -291,8 +307,8 @@ class ZAPI(QObject, ZAPIBase):
     def _ZAPI_request_plan_inspection_path(self, planner: str, robot: str = "rb20_1900es",
                                            step_size: float = 0.08, max_iter: int = 3000,
                                            max_workers: int = 2,
-                                           ik_solver: str = "normalized_dls",
-                                           ik_normalize: bool = True,
+                                           ik_solver: str = "dls",
+                                           ik_normalize: bool = False,
                                            use_ef_pose_targets: bool = False):
         """Request unified inspection path planning."""
         if self.__dealer_socket and self.__dealer_socket.is_joined:
@@ -315,8 +331,8 @@ class ZAPI(QObject, ZAPIBase):
                                        step_size: float = 0.08,
                                        max_iter: int = 3000,
                                        max_workers: int = 2,
-                                       ik_solver: str = "normalized_dls",
-                                       ik_normalize: bool = True):
+                                       ik_solver: str = "dls",
+                                       ik_normalize: bool = False):
         """Request IK-only validation/visualization for the determined DDA/RT EF poses."""
         if self.__dealer_socket and self.__dealer_socket.is_joined:
             kwargs = {

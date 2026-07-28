@@ -33,6 +33,12 @@ if __name__ == "__main__":
     try:
         configure = load_config(args.config)
 
+        # path planning/IK solver 설정은 viewervedo.cfg와 같은 폴더의 별도 파일로 분리한다.
+        # 있으면 병합해서 override하고, 없으면 코드 기본값을 그대로 쓴다.
+        extra_config_path = pathlib.Path(args.config).resolve().parent / "path_planning.cfg"
+        if extra_config_path.exists():
+            configure.update(load_config(extra_config_path))
+
         configure["root_path"] = ROOT_PATH
         configure["app_path"] = (pathlib.Path(__file__).parent / APP_NAME)
         configure["verbose_level"] = args.verbose_level.upper()

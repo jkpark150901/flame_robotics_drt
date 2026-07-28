@@ -13,6 +13,7 @@ positioner_traj/
 sample/
 data/
 data(old)/
+debug/
 
 # Distribution / packaging
 .Python

@@ -22,7 +22,7 @@ class RobotDescription:
 class IKOptions:
     """Common IK options passed from UI/planner code."""
 
-    solver: str = "normalized_dls"
+    solver: str = "dls"
     normalize: Optional[bool] = None
     damping: float = 1e-3
     dt: float = 0.35

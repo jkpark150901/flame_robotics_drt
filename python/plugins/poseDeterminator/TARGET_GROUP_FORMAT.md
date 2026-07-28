@@ -24,10 +24,17 @@ target_groups: list[dict]
 | 필드 | 타입 | 설명 |
 |------|------|------|
 | `name` | `str` | 표시용 이름. 예: `"Inspection pose 1"` |
-| `index` | `int` | 0부터의 순번 |
+| `index` | `int` | 0부터의 순번. optimizer가 매길 때는 검사 지점(target_point) 하나 안에서의 순번이다. |
 | `target_point` | `list[float]` (길이 3) | 검사 기준 위치 `[x, y, z]` (world 좌표계) |
 | `dda_pose` | `list` (4x4) | DDA endeffector target pose (world 좌표계 homogeneous transform) |
 | `rt_pose` | `list` (4x4) | RT endeffector target pose (world 좌표계 homogeneous transform) |
+
+> **여러 검사 지점을 합칠 때 주의**: optimizer는 지점(point)마다 독립적으로 `name`/`index`를
+> 1부터 다시 매긴다("Inspection pose 1"이 지점마다 반복됨). 여러 지점의 target group을
+> 하나로 합치는 소비자(viewer의 `_handle_request_determine_ef_pose`)는 이름 충돌을 피하기
+> 위해 `name`에 지점 번호를 접두어로 붙이고(`"Point 2 - Inspection pose 1"`), `index`를
+> 합친 목록 기준으로 다시 매기며, 원래 지점 번호를 `point_index`(0부터)에 별도로 저장한다.
+> `point_index`는 optimizer 계약에는 없는, viewer가 추가하는 필드다.
 
 > 각도/편차/arc/rt_name/positioner 관련 상세 정보는 여기 넣지 않는다. 필요하면
 > `optimizer.debuging_info`(debug 모드)에 담거나 별도 채널로 전달한다.

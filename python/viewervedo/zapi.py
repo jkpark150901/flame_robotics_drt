@@ -695,6 +695,38 @@ class ZAPI(ZAPIBase):
         else:
             self.push_to_queue(request_payload)
 
+    def zapi_save_inspection_points(self, kwargs=None):
+        """Handle save_inspection_points request (선택된 검사 지점들을 JSON으로 저장)."""
+        self.__console.info(f"Received zapi_save_inspection_points with kwargs: {kwargs}")
+        if not kwargs or "path" not in kwargs:
+            self.__console.warning("[ZAPI_VIEWERVEDO] save_inspection_points without path")
+            return
+        request_payload = {
+            "command": "save_inspection_points",
+            "path": kwargs.get("path"),
+            "_identity": kwargs.get("_identity"),
+        }
+        if self._visualizer:
+            self._visualizer.push_request(request_payload)
+        else:
+            self.push_to_queue(request_payload)
+
+    def zapi_load_inspection_points(self, kwargs=None):
+        """Handle load_inspection_points request (JSON에서 검사 지점들을 복원)."""
+        self.__console.info(f"Received zapi_load_inspection_points with kwargs: {kwargs}")
+        if not kwargs or "path" not in kwargs:
+            self.__console.warning("[ZAPI_VIEWERVEDO] load_inspection_points without path")
+            return
+        request_payload = {
+            "command": "load_inspection_points",
+            "path": kwargs.get("path"),
+            "_identity": kwargs.get("_identity"),
+        }
+        if self._visualizer:
+            self._visualizer.push_request(request_payload)
+        else:
+            self.push_to_queue(request_payload)
+
     def zapi_pick_inspection_point(self, kwargs=None):
         """Handle pipe inspection point pick mode request."""
         self.__console.info(f"Received zapi_pick_inspection_point with kwargs: {kwargs}")
@@ -725,8 +757,8 @@ class ZAPI(ZAPIBase):
             "max_iter": (kwargs or {}).get("max_iter", 3000),
             "max_workers": (kwargs or {}).get("max_workers", 2),
             "use_ef_pose_targets": bool((kwargs or {}).get("use_ef_pose_targets", False)),
-            "ik_solver": (kwargs or {}).get("ik_solver", "normalized_dls"),
-            "ik_normalize": (kwargs or {}).get("ik_normalize", True),
+            "ik_solver": (kwargs or {}).get("ik_solver", "dls"),
+            "ik_normalize": (kwargs or {}).get("ik_normalize", False),
             "_identity": (kwargs or {}).get("_identity"),
         }
         if isinstance((kwargs or {}).get("target_groups"), list):
@@ -745,8 +777,8 @@ class ZAPI(ZAPIBase):
             "step_size": (kwargs or {}).get("step_size", 0.08),
             "max_iter": (kwargs or {}).get("max_iter", 3000),
             "max_workers": (kwargs or {}).get("max_workers", 2),
-            "ik_solver": (kwargs or {}).get("ik_solver", "normalized_dls"),
-            "ik_normalize": (kwargs or {}).get("ik_normalize", True),
+            "ik_solver": (kwargs or {}).get("ik_solver", "dls"),
+            "ik_normalize": (kwargs or {}).get("ik_normalize", False),
             "_identity": (kwargs or {}).get("_identity"),
         }
         if self._visualizer:

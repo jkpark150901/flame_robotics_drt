@@ -31,7 +31,7 @@ from simtool.param import SimParameterMap
 class AppWindow(QMainWindow):
     # 모션 속도/가속 (사다리꼴 프로파일). kind별 단위: lin=m, rot=deg(전송 시 rad 변환)
     _LIN_SPEED, _LIN_ACCEL = 1.0, 2.0               # m/s, m/s^2
-    _ROT_SPEED, _ROT_ACCEL = 60.0, 120.0            # deg/s, deg/s^2
+    _ROT_SPEED, _ROT_ACCEL = 120.0, 240.0            # deg/s, deg/s^2
     _LIN_RES, _ROT_RES = 0.01, 1.0                  # 슬라이더 분해능 (m, deg)
 
     _SOURCE_ROBOT = "rb20_1900es"
@@ -247,6 +247,10 @@ class AppWindow(QMainWindow):
             self.btn_determine_ef_pose.clicked.connect(self.__on_btn_determine_ef_pose_clicked)
         if hasattr(self, 'btn_check_inspection_ik'):
             self.btn_check_inspection_ik.clicked.connect(self.__on_btn_check_inspection_ik_clicked)
+        if hasattr(self, 'btn_save_inspection_points'):
+            self.btn_save_inspection_points.clicked.connect(self.__on_btn_save_inspection_points_clicked)
+        if hasattr(self, 'btn_load_inspection_points'):
+            self.btn_load_inspection_points.clicked.connect(self.__on_btn_load_inspection_points_clicked)
         self.__ensure_chuck_mount_pick_button()
         if hasattr(self, 'btn_align_f_column'):
             self.btn_align_f_column.clicked.connect(self.__on_btn_align_f_column_clicked)
@@ -759,14 +763,12 @@ class AppWindow(QMainWindow):
             text = self.cbx_ik_solver.currentText()
             if text:
                 return str(text).strip().lower()
-        return "normalized_dls" if self.__current_ik_normalize_enabled() else "dls"
+        return "dls"
 
     def __current_ik_request_options(self):
         solver = self.__current_ik_solver_name()
         if solver == "dls":
             return solver, False
-        if solver == "normalized_dls":
-            return solver, True
         return solver, self.__current_ik_normalize_enabled()
 
     def __set_path_plan_status(self, msg):
@@ -780,7 +782,7 @@ class AppWindow(QMainWindow):
         parent = self.btn_clear_inspection_path.parent()
         if parent is not None and hasattr(parent, 'geometry'):
             parent_geo = parent.geometry()
-            target_height = 492
+            target_height = 528
             if parent_geo.height() < target_height:
                 parent.setGeometry(parent_geo.x(), parent_geo.y(), parent_geo.width(), target_height)
         self.btn_pick_inspection_point.setGeometry(10, 348, 101, 32)
@@ -802,9 +804,9 @@ class AppWindow(QMainWindow):
             self.cbx_ik_solver = QComboBox(parent)
             self.cbx_ik_solver.setObjectName("cbx_ik_solver")
             self.cbx_ik_solver.addItem("DLS", "dls")
-            self.cbx_ik_solver.addItem("Normalized DLS", "normalized_dls")
             self.cbx_ik_solver.addItem("QP IK", "qp")
-            self.cbx_ik_solver.setCurrentIndex(1)
+            self.cbx_ik_solver.addItem("PyBullet IK", "pybullet")
+            self.cbx_ik_solver.setCurrentIndex(0)
         self.cbx_ik_solver.setGeometry(92, 424, 125, 24)
         if not hasattr(self, 'chk_ik_normalize'):
             self.chk_ik_normalize = QCheckBox("Normalize IK joints", parent)
@@ -816,6 +818,14 @@ class AppWindow(QMainWindow):
             self.edit_inspection_point.setGeometry(10, 456, 171, 22)
         if hasattr(self, 'label_path_plan_status'):
             self.label_path_plan_status.setGeometry(188, 456, 133, 22)
+        if not hasattr(self, 'btn_save_inspection_points'):
+            self.btn_save_inspection_points = QPushButton("Save Points", parent)
+            self.btn_save_inspection_points.setObjectName("btn_save_inspection_points")
+        self.btn_save_inspection_points.setGeometry(10, 486, 155, 32)
+        if not hasattr(self, 'btn_load_inspection_points'):
+            self.btn_load_inspection_points = QPushButton("Load Points", parent)
+            self.btn_load_inspection_points.setObjectName("btn_load_inspection_points")
+        self.btn_load_inspection_points.setGeometry(168, 486, 153, 32)
         display_group = getattr(self, 'groupBox_3', None)
         if display_group is not None:
             geo = display_group.geometry()
@@ -830,6 +840,8 @@ class AppWindow(QMainWindow):
         self.label_ik_solver.show()
         self.cbx_ik_solver.show()
         self.chk_ik_normalize.show()
+        self.btn_save_inspection_points.show()
+        self.btn_load_inspection_points.show()
 
     def __ensure_chuck_mount_pick_button(self):
         if not hasattr(self, 'btn_spool_pose_load'):
@@ -1069,6 +1081,44 @@ class AppWindow(QMainWindow):
             self.__console.error(f"Error saving chuck mount cfg: {e}")
             self.__set_path_plan_status(f"[!] {e}")
 
+    def __on_btn_save_inspection_points_clicked(self):
+        try:
+            if not self.zapi:
+                self.__set_path_plan_status("[!] ZAPI not available")
+                return
+            file_name, _ = QFileDialog.getSaveFileName(
+                self,
+                "Save Inspection Points",
+                str(pathlib.Path(self.__config.get("root_path", "")) / "sample"),
+                "JSON Files (*.json)"
+            )
+            if not file_name:
+                return
+            self.zapi._ZAPI_request_save_inspection_points(file_name)
+            self.__set_path_plan_status(f"Inspection points save requested -> {pathlib.Path(file_name).name}")
+        except Exception as e:
+            self.__console.error(f"Error saving inspection points: {e}")
+            self.__set_path_plan_status(f"[!] {e}")
+
+    def __on_btn_load_inspection_points_clicked(self):
+        try:
+            if not self.zapi:
+                self.__set_path_plan_status("[!] ZAPI not available")
+                return
+            file_name, _ = QFileDialog.getOpenFileName(
+                self,
+                "Load Inspection Points",
+                str(pathlib.Path(self.__config.get("root_path", "")) / "sample"),
+                "JSON Files (*.json)"
+            )
+            if not file_name:
+                return
+            self.zapi._ZAPI_request_load_inspection_points(file_name)
+            self.__set_path_plan_status(f"Inspection points load requested -> {pathlib.Path(file_name).name}")
+        except Exception as e:
+            self.__console.error(f"Error loading inspection points: {e}")
+            self.__set_path_plan_status(f"[!] {e}")
+
     def __on_btn_determine_ef_pose_clicked(self):
         try:
             if not self.zapi:
@@ -1136,7 +1186,7 @@ class AppWindow(QMainWindow):
             if not self.zapi:
                 self.__set_path_plan_status("[!] ZAPI not available")
                 return
-            self.zapi._ZAPI_request_execute_inspection_path(speed=0.2)
+            self.zapi._ZAPI_request_execute_inspection_path(speed=1.0)
             self.__set_path_plan_status("Simulation playback requested")
         except Exception as e:
             self.__console.error(f"Error starting simulation: {e}")
