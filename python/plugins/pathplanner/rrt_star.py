@@ -233,6 +233,7 @@ class RRTStar(PlannerBase):
             self._log_block("joint-space summary", [
                 "status=failed(start_collision)",
                 f"collision_pairs={start_collision_pairs}",
+                f"static_geometry_aabb={self.static_geometry_aabb_summary()}",
                 f"start_goal_dist={start_goal_dist:.6f}",
                 f"raw_dist={start_goal_raw_dist:.6f}",
                 f"normalized={self.normalize_joint_space}",
@@ -245,7 +246,8 @@ class RRTStar(PlannerBase):
             self.last_returned_path_reaches_goal = False
             return []
 
-        if self.check_robot_collision(goal_q):
+        goal_in_collision, goal_collision_pairs = self.check_robot_collision(goal_q, return_pairs=True)
+        if goal_in_collision:
             self._record_exploration(
                 exploration_rows,
                 iteration=-1,
@@ -256,8 +258,11 @@ class RRTStar(PlannerBase):
                 node_count=1,
             )
             self._save_exploration_debug(exploration_rows, "joint", "goal_collision")
+            self.last_collision_pairs = goal_collision_pairs
             self._log_block("joint-space summary", [
                 "status=failed(goal_collision)",
+                f"collision_pairs={goal_collision_pairs}",
+                f"static_geometry_aabb={self.static_geometry_aabb_summary()}",
                 f"start_goal_dist={start_goal_dist:.6f}",
                 f"raw_dist={start_goal_raw_dist:.6f}",
                 f"normalized={self.normalize_joint_space}",

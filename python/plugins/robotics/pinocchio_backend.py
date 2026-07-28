@@ -723,13 +723,24 @@ class PinocchioRoboticsBackend(RoboticsBackend):
         for geom_id, geom in enumerate(handle.geom_model.geometryObjects):
             parent_joint = int(geom.parentJoint)
             joint_name = names[parent_joint] if 0 <= parent_joint < len(names) else str(parent_joint)
-            summary.append({
+            item = {
                 "id": int(geom_id),
                 "name": str(geom.name),
                 "parent_joint": parent_joint,
                 "parent_joint_name": str(joint_name),
                 "kind": "static" if geom_id in static_ids else "robot",
-            })
+            }
+            # static object는 world 좌표계에 이미 구운(placement=Identity) mesh라, 이
+            # local AABB가 곧 world AABB다 - "지금 실제로 등록된 배관이 회전된 위치에
+            # 있는지"를 숫자로 바로 확인할 수 있다(collision 원인 진단용).
+            if geom_id in static_ids:
+                try:
+                    box = geom.geometry.aabb_local
+                    item["aabb_min"] = [float(v) for v in box.min_]
+                    item["aabb_max"] = [float(v) for v in box.max_]
+                except Exception:
+                    pass
+            summary.append(item)
         return summary
 
     def collision_pair_summary(
@@ -869,7 +880,22 @@ class PinocchioRoboticsBackend(RoboticsBackend):
         if handle.geom_model is None or handle.geom_data is None:
             raise RuntimeError(f"collision is not configured: {handle.description.name}")
 
-    def _add_static_mesh(self, handle: PinocchioRobotHandle, mesh, recreate_data=True):
+    def _static_bvh_for_mesh(self, mesh):
+        """mesh 정점/삼각형으로 hppfcl BVH를 만들되, 같은 mesh 객체면 캐시해서 재사용한다.
+
+        BVH 생성은 정점/삼각형을 Python 루프로 hppfcl 벡터에 하나씩 append하는 과정이라
+        100k 규모 배관 mesh에서 수 초씩 걸린다. mesh 객체(id)가 같으면(예: IK check 뒤 이어지는
+        path planning이 같은 base-frame 배관 mesh를 재사용) 이미 만든 BVH를 그대로 쓴다.
+        BVH는 collision 질의에서 읽기 전용이라 여러 geom_model이 공유해도 안전하다.
+        """
+        cache = getattr(self, "_static_bvh_cache", None)
+        if cache is None:
+            cache = {}
+            self._static_bvh_cache = cache
+        key = id(mesh)
+        entry = cache.get(key)
+        if entry is not None and entry[0] is mesh:
+            return entry[1]
         vertices = np.asarray(mesh.vertices, dtype=float)
         triangles = np.asarray(mesh.triangles if hasattr(mesh, "triangles") else mesh.faces, dtype=np.int32)
         if triangles.shape[1] > 3:
@@ -885,6 +911,14 @@ class PinocchioRoboticsBackend(RoboticsBackend):
         bvh.addSubModel(vec_vertices, vec_triangles)
         bvh.endModel()
         bvh.computeLocalAABB()
+        # 무한정 커지지 않게 최근 소수만 유지한다. mesh 참조를 같이 보관해 id 재사용을 막는다.
+        if len(cache) > 8:
+            cache.clear()
+        cache[key] = (mesh, bvh)
+        return bvh
+
+    def _add_static_mesh(self, handle: PinocchioRobotHandle, mesh, recreate_data=True):
+        bvh = self._static_bvh_for_mesh(mesh)
         geom_obj = pin.GeometryObject(
             f"collision_object_{len(handle.static_object_ids)}",
             0,

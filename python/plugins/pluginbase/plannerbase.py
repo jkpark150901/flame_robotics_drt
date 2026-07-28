@@ -681,6 +681,44 @@ class PlannerBase(ABC):
                 print(f"Error adding object to Pinocchio collision scene: {e}")
         return None
 
+    def add_collision_objects(self, object_models):
+        """여러 static obstacle mesh를 한 번의 configure_collision 호출로 등록한다.
+
+        add_collision_object를 mesh마다 호출하면 configure_collision이 매번 실행되고,
+        그때마다 static_meshes 목록이 달라져(1개 -> 2개) backend의 BVH 캐시 key가 매번
+        달라진다. 그러면 target마다 BVH를 다시 쌓느라(100k mesh 기준 수 초) setup이 느려진다.
+        전체 목록을 한 번에 넘기면 key가 안정적이라 같은 mesh들에 대해 캐시가 hit한다.
+        """
+        added = [m for m in (object_models or []) if m is not None]
+        if not added:
+            return None
+        self.collision_objects.extend(added)
+        backend, robot_name = self._robotics_collision_backend()
+        if backend is not None:
+            backend.configure_collision(
+                robot_name,
+                static_meshes=self.collision_objects,
+                sample_resolution=self.pin_collision_sample_resolution,
+            )
+            handle = backend.robot_handle(robot_name) if hasattr(backend, "robot_handle") else None
+            if handle is not None:
+                self.pin_model = handle.model
+                self.pin_data = handle.data
+                self.pin_geom_model = handle.geom_model
+                self.pin_geom_data = handle.geom_data
+                self._pin_robot_geom_ids = list(getattr(handle, "robot_geom_ids", []) or [])
+                self._pin_static_object_ids = list(getattr(handle, "static_object_ids", []) or [])
+            return self._pin_static_object_ids[-1] if self._pin_static_object_ids else None
+        if self.pin_geom_model is not None:
+            last = None
+            for object_model in added:
+                try:
+                    last = self._add_pinocchio_collision_mesh(object_model)
+                except Exception as e:
+                    print(f"Error adding object to Pinocchio collision scene: {e}")
+            return last
+        return None
+
     def add_static_object(self, object_model):
         """Backward-compatible alias for older planner callers."""
         return self.add_collision_object(object_model)
@@ -828,6 +866,26 @@ class PlannerBase(ABC):
                 "kind": "static" if geom_id in static_ids else "robot",
             })
         return summary
+
+    def static_geometry_aabb_summary(self):
+        """등록된 static obstacle(배관, positioner 등)의 world AABB를 이름과 함께 반환한다.
+
+        배관이 실제로 회전된 위치에 등록됐는지("가상 회전"이 정말 collision scene에
+        반영됐는지)를 숫자로 바로 확인하기 위한 진단용이다.
+        """
+        try:
+            geometries = self.pinocchio_collision_geometry_summary()
+        except Exception:
+            return []
+        return [
+            {
+                "name": item.get("name"),
+                "aabb_min": item.get("aabb_min"),
+                "aabb_max": item.get("aabb_max"),
+            }
+            for item in geometries
+            if item.get("kind") == "static" and item.get("aabb_min") is not None
+        ]
 
     def pinocchio_collision_pair_summary(self, include_robot_self=True, include_static=True, limit=None):
         """Return the collision pairs checked by Pinocchio."""

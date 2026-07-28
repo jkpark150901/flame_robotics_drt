@@ -1158,8 +1158,8 @@ class AppWindow(QMainWindow):
             ik_solver, ik_normalize = self.__current_ik_request_options()
             self.zapi._ZAPI_request_plan_inspection_path(
                 planner=planner,
-                step_size=0.08,
-                max_iter=3000,
+                step_size=0.1,
+                max_iter=5000,
                 max_workers=2,
                 ik_solver=ik_solver,
                 ik_normalize=ik_normalize,

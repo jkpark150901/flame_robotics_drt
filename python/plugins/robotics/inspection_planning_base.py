@@ -295,6 +295,49 @@ class InspectionPlanningBase:
             "timing": timings,
         }
 
+    @staticmethod
+    def _linear_track_indices(joint_names) -> list:
+        """joint 이름 목록에서 linear track(prismatic 레일) joint의 인덱스를 찾는다."""
+        return [i for i, name in enumerate(joint_names or []) if "linear_track" in str(name)]
+
+    def _pin_joint_values(self, robot_name: str, fixed_values: Dict[int, float]):
+        """지정한 joint 인덱스를 고정하도록 로봇 모델의 position limit을 임시로 좁힌다.
+
+        [v, v+eps]로 좁히면 backend.sample_configuration이 그 joint를 항상 v 근처로만
+        뽑고(레일이 planning 중 안 움직임), joint_limits_for_metric은 span이 1e-9 미만이라
+        1.0으로 보정돼(거리 metric에서 이 joint 기여가 ~0) 정규화도 안전하다. lo==hi로
+        두면 `hi <= lo` invalid 처리로 [-pi, pi]로 리셋돼 고정이 풀리므로 아주 작은
+        eps를 둔다. 로봇마다 별도 model이라 다른 로봇 병렬 planning에 영향을 주지 않는다.
+
+        Returns:
+            원래 limit으로 되돌리는 restore 콜러블. 모델 접근 실패 시 None.
+        """
+        try:
+            handle = self.backend.robot_handle(robot_name)
+            model = handle.model
+        except Exception:
+            return None
+        try:
+            orig_lo = np.asarray(model.lowerPositionLimit, dtype=float).copy()
+            orig_hi = np.asarray(model.upperPositionLimit, dtype=float).copy()
+        except Exception:
+            return None
+        lo = orig_lo.copy()
+        hi = orig_hi.copy()
+        eps = 1e-11
+        for i, v in fixed_values.items():
+            if 0 <= i < lo.shape[0]:
+                lo[i] = float(v)
+                hi[i] = float(v) + eps
+        model.lowerPositionLimit = lo
+        model.upperPositionLimit = hi
+
+        def restore():
+            model.lowerPositionLimit = orig_lo
+            model.upperPositionLimit = orig_hi
+
+        return restore
+
     def plan_q_path_for_robot(
         self,
         *,
@@ -302,6 +345,7 @@ class InspectionPlanningBase:
         ik_request: InspectionIKRequest,
         q_start: Sequence[float],
         planning_timeout: float = 0.0,
+        lock_linear_track: bool = True,
     ) -> Dict[str, Any]:
         """IK 목표 q까지 q-space path planning을 수행한다.
 
@@ -310,15 +354,18 @@ class InspectionPlanningBase:
             ik_request: 목표 pose와 IK 설정.
             q_start: path planning 시작 raw q.
             planning_timeout: planner deadline. 0 이하면 비활성화.
+            lock_linear_track: True면 룰베이스로 linear track을 먼저 목표값으로 이동시킨 뒤,
+                그 값에 고정한 상태로 나머지 joint만 path planning한다(탐색 공간 축소로 속도↑).
 
         Returns:
             dict: IK check 결과에 q_path, verification, planning timing을 추가한 결과.
 
         계산 과정:
             1. check_inspection_ik_for_robot으로 목표 q를 구한다.
-            2. planner.generate(q_start, goal_q)를 호출한다.
-            3. timeout/empty path/fallback 상태를 collision preview 사유로 기록한다.
-            4. planner.verify_path로 반환 path의 충돌 여부를 검증한다.
+            2. (룰베이스) linear track을 목표값으로 옮긴 prep q에서 시작하고 track을 고정한다.
+            3. planner.generate(plan_start_q, goal_q)를 호출한다.
+            4. timeout/empty path/fallback 상태를 collision preview 사유로 기록한다.
+            5. track 이동 구간을 앞에 붙이고 planner.verify_path로 전체 path 충돌을 검증한다.
         """
         result = self.check_inspection_ik_for_robot(ik_request)
         q_start = np.asarray(q_start, dtype=float)
@@ -330,12 +377,28 @@ class InspectionPlanningBase:
         # 분기들이 있으면 그쪽이 더 구체적이라 그대로 덮어쓴다).
         fallback_reason = "ik_fallback" if forced_collision_preview else None
 
+        # 룰베이스 linear track 고정: track을 먼저 목표값으로 옮긴 자세(plan_start_q)에서
+        # planning을 시작하고, 그 로봇 모델의 track limit을 좁혀 track이 planning 중 안
+        # 움직이게 한다. q_start -> plan_start_q(레일 이동) 구간은 나중에 path 앞에 붙인다.
+        plan_start_q = q_start
+        track_prepended = False
+        track_restore = None
+        if lock_linear_track:
+            track_indices = self._linear_track_indices(ik_request.joint_names)
+            if track_indices and goal_q.shape[0] == q_start.shape[0]:
+                plan_start_q = q_start.copy()
+                for i in track_indices:
+                    plan_start_q[i] = goal_q[i]
+                track_prepended = not np.allclose(plan_start_q, q_start)
+                track_restore = self._pin_joint_values(
+                    ik_request.robot_name, {i: float(goal_q[i]) for i in track_indices})
+
         if planning_timeout > 0 and hasattr(planner, "planning_deadline"):
             planner.planning_deadline = time.monotonic() + float(planning_timeout)
         stage_t0 = time.perf_counter()
         wall_t0 = time.time()
         try:
-            q_path = planner.generate(q_start, goal_q)
+            q_path = planner.generate(plan_start_q, goal_q)
         except Exception as exc:
             if "timeout" not in str(exc).lower():
                 raise
@@ -344,6 +407,14 @@ class InspectionPlanningBase:
         finally:
             if hasattr(planner, "planning_deadline"):
                 planner.planning_deadline = None
+            if track_restore is not None:
+                track_restore()
+        # 레일 이동 구간(q_start -> plan_start_q)을 경로 맨 앞에 붙인다. 이후 verify_path가
+        # 이 구간도 함께 충돌 검사한다(레일 이동 중 충돌도 잡힘).
+        if track_prepended and q_path:
+            first = np.asarray(q_path[0], dtype=float)
+            if not np.allclose(first, q_start):
+                q_path = [q_start] + list(q_path)
         result["elapsed"] = time.time() - wall_t0
         result["timing"]["planning"] = time.perf_counter() - stage_t0
 
