@@ -305,7 +305,12 @@ class ZAPI(QObject, ZAPIBase):
             self.__console.warning("[ZAPI] Cannot send clear_chuck_mount_points: Socket not connected")
 
     def _ZAPI_request_plan_inspection_path(self, planner: str, robot: str = "rb20_1900es",
+                                           optimizer: str = None,
+                                           fixed_joints=None,
+                                           fixed_joint_indices=None,
+                                           fixed_joint_values=None,
                                            step_size: float = 0.08, max_iter: int = 3000,
+                                           planning_timeout: float = 5.0,
                                            max_workers: int = 2,
                                            ik_solver: str = "dls",
                                            ik_normalize: bool = False,
@@ -317,11 +322,20 @@ class ZAPI(QObject, ZAPIBase):
                 "robot": robot,
                 "step_size": step_size,
                 "max_iter": max_iter,
+                "planning_timeout": planning_timeout,
                 "max_workers": max_workers,
                 "ik_solver": ik_solver,
                 "ik_normalize": bool(ik_normalize),
                 "use_ef_pose_targets": bool(use_ef_pose_targets),
             }
+            if optimizer:
+                kwargs["optimizer"] = str(optimizer)
+            if fixed_joints is not None:
+                kwargs["fixed_joints"] = fixed_joints
+            if fixed_joint_indices is not None:
+                kwargs["fixed_joint_indices"] = fixed_joint_indices
+            if fixed_joint_values is not None:
+                kwargs["fixed_joint_values"] = fixed_joint_values
             self.call(self.__dealer_socket, "zapi_plan_inspection_path", kwargs)
             self.__console.info(f"[ZAPI] Sent plan_inspection_path: {kwargs}")
         else:

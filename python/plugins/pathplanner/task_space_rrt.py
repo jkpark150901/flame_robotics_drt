@@ -21,6 +21,7 @@ class TaskSpaceRRT(PlannerBase):
         self.step_size = self.config.get("step_size", 1.0)
         self.max_iter = self.config.get("max_iter", 1000)
         self.goal_bias = self.config.get("goal_bias", 0.1)
+        self.debug_convergence = bool(self.config.get("debug_convergence", True))
         self.weights = self.config.get("weights", {"pos": 1.0, "orient": 0.5})
         self.bounds = self.config.get("workspace_bounds", {
             "x_min": -10.0, "x_max": 10.0,
@@ -43,6 +44,7 @@ class TaskSpaceRRT(PlannerBase):
             
         nodes = [current_pose]
         parents = {0: None}
+        convergence_rows = self._begin_convergence_debug("task_space", current_pose, target_pose)
         
         w_pos = self.weights['pos']
         w_ori = self.weights['orient']
@@ -99,6 +101,16 @@ class TaskSpaceRRT(PlannerBase):
                 d_goal_current = np.sqrt(w_pos * np.sum(delta[:3]**2) + w_ori * np.sum(delta[3:]**2))
                 if d_goal_current < min_dist_to_goal:
                     min_dist_to_goal = d_goal_current
+                self._record_convergence(
+                    convergence_rows,
+                    iteration=i,
+                    phase="extend",
+                    state=new_point,
+                    sample_state=rnd_point,
+                    node_count=len(nodes),
+                    cost=dist,
+                    accepted=True,
+                )
                 
                 # 5. Check Goal
                 if d_goal_current < self.step_size: # Close enough
@@ -113,8 +125,45 @@ class TaskSpaceRRT(PlannerBase):
                         while curr is not None:
                             path.append(nodes[curr])
                             curr = parents[curr]
-                        return path[::-1]
+                        path = path[::-1]
+                        self._record_convergence(
+                            convergence_rows,
+                            iteration=i,
+                            phase="connect_goal",
+                            state=target_pose,
+                            node_count=len(nodes),
+                            accepted=True,
+                            reason="goal_connected",
+                        )
+                        self._save_convergence_debug(
+                            convergence_rows,
+                            "task_space",
+                            "success",
+                            len(path),
+                        )
+                        return path
+                    self._record_convergence(
+                        convergence_rows,
+                        iteration=i,
+                        phase="connect_goal",
+                        state=target_pose,
+                        node_count=len(nodes),
+                        collision=True,
+                        reason="goal_connection_collision",
+                    )
+            else:
+                self._record_convergence(
+                    convergence_rows,
+                    iteration=i,
+                    phase="extend",
+                    state=new_point,
+                    sample_state=rnd_point,
+                    node_count=len(nodes),
+                    collision=True,
+                    reason="edge_collision",
+                )
                         
         logging.error(f"Task Space RRT failed to find path. Max iterations ({self.max_iter}) reached.")
         logging.error(f"Closest distance to goal achieved: {min_dist_to_goal:.4f}")
+        self._save_convergence_debug(convergence_rows, "task_space", "max_iter_failed")
         return [] 

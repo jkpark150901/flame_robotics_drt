@@ -1,8 +1,36 @@
 {
+    "planner_backend": "ompl",
+    "algorithm": "informed_rrt_star",
     "step_size": 1.0,
     "max_iter": 1000,
     "search_radius": 5.0,
     "goal_bias": 0.1,
+    "use_joint_space_planning": true,
+    "normalize_joint_space": true,
+    "debug_convergence": true,
+    "debug_output_dir": "debug/informed_rrt_star",
+    "collision": {
+        "motion_validator": "discrete",
+        "normalized_resolution": 0.02,
+        "final_verify": true
+    },
+    "solve": {
+        "timeout_sec": 5.0,
+        "allow_approximate_solution": false,
+        "stop_on_first_solution": false,
+        "convergence_slice_sec": 0.1
+    },
+    "objective": {
+        "type": "path_length"
+    },
+    "planner": {
+        "range": 0.1,
+        "goal_bias": 0.1,
+        "rewire_factor": 1.1
+    },
+    "debug": {
+        "save_summary": true
+    },
     "workspace_bounds": {
         "x_min": -50.0,
         "x_max": 50.0,

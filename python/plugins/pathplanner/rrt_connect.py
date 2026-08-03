@@ -6,9 +6,11 @@ import sys
 
 # Adjust path to import PlannerBase
 # sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../pluginbase')))
-from plugins.pluginbase.plannerbase import PlannerBase
+from plugins.pathplanner.ompl.ompl_planner import OMPLPlanner
 
-class RRTConnect(PlannerBase):
+class RRTConnect(OMPLPlanner):
+    use_joint_space_planning = True
+
     def __init__(self, config_path: str = None):
         super().__init__()
         if config_path is None:
@@ -19,15 +21,30 @@ class RRTConnect(PlannerBase):
             
         self.step_size = self.config.get("step_size", 1.0)
         self.max_iter = self.config.get("max_iter", 1000)
+        self.debug_convergence = bool(self.config.get("debug_convergence", True))
+        self.debug_output_dir = self.config.get(
+            "debug_output_dir", os.path.join(os.getcwd(), "debug", "rrt_connect")
+        )
         self.bounds = self.config.get("workspace_bounds", {
             "x_min": -10.0, "x_max": 10.0,
             "y_min": -10.0, "y_max": 10.0,
             "z_min": -10.0, "z_max": 10.0
         })
 
+        self.configure_fixed_joints(
+            fixed_joints=self.config.get("fixed_joints"),
+            fixed_joint_indices=self.config.get("fixed_joint_indices"),
+            fixed_joint_values=self.config.get("fixed_joint_values"),
+        )
         self.configure_collision(self.config, default_sample_resolution=self.step_size)
+        self.configure_ompl(self.config, default_algorithm="rrt_connect")
 
-    def generate(self, current_pose: Union[List[float], np.ndarray], target_pose: Union[List[float], np.ndarray]) -> List[np.ndarray]:
+    def generate(
+        self,
+        current_pose: Union[List[float], np.ndarray],
+        target_pose: Union[List[float], np.ndarray],
+        step_callback=None,
+    ) -> List[np.ndarray]:
         current_pose = np.array(current_pose, dtype=float)
         target_pose = np.array(target_pose, dtype=float)
 
@@ -37,7 +54,8 @@ class RRTConnect(PlannerBase):
             and current_pose.shape[0] == dof
             and target_pose.shape[0] == dof
         ):
-            return self._generate_joint_space(current_pose, target_pose)
+            current_pose, target_pose = self._prepare_fixed_joint_constraints(current_pose, target_pose)
+            return self._generate_joint_space(current_pose, target_pose, step_callback=step_callback)
         if self._has_robot_q_space_model():
             raise ValueError(
                 "RRTConnect is configured for robot q-space planning, so generate() "
@@ -54,6 +72,7 @@ class RRTConnect(PlannerBase):
         
         tree_b = [goal_pos]
         parents_b = {0: None}
+        convergence_rows = self._begin_convergence_debug("task_space", current_pose, target_pose)
         
         path_found = False
         connect_node_a_idx = -1
@@ -71,11 +90,30 @@ class RRTConnect(PlannerBase):
             new_idx_a = self._extend(tree_a, parents_a, rnd_point)
             
             if new_idx_a is not None:
+                self._record_convergence(
+                    convergence_rows,
+                    iteration=i,
+                    phase="extend",
+                    state=tree_a[new_idx_a],
+                    sample_state=rnd_point,
+                    node_count=len(tree_a) + len(tree_b),
+                    accepted=True,
+                )
                 # Try to connect Tree B to the new node in A
                 new_node_a = tree_a[new_idx_a]
                 new_idx_b = self._connect(tree_b, parents_b, new_node_a)
                 
                 if new_idx_b is not None:
+                    self._record_convergence(
+                        convergence_rows,
+                        iteration=i,
+                        phase="connect",
+                        state=tree_b[new_idx_b],
+                        sample_state=new_node_a,
+                        node_count=len(tree_a) + len(tree_b),
+                        accepted=True,
+                        reason="trees_connected",
+                    )
                     # Connected!
                     connect_node_a_idx = new_idx_a
                     connect_node_b_idx = new_idx_b
@@ -125,9 +163,11 @@ class RRTConnect(PlannerBase):
             final_orient = target_pose[3:]
             current_orient = current_pose[3:]
             full_path[-1][3:] = np.where(np.isnan(final_orient), current_orient, final_orient)
+            self._save_convergence_debug(convergence_rows, "task_space", "success", len(full_path))
             
             return full_path
             
+        self._save_convergence_debug(convergence_rows, "task_space", "max_iter_failed")
         return []
 
     def _extend(self, nodes, parents, target_point):
@@ -239,12 +279,34 @@ class RRTConnect(PlannerBase):
             idx = parents[idx]
         return path
 
-    def _generate_joint_space(self, start_q, goal_q):
+    def _generate_joint_space_legacy(self, start_q, goal_q, step_callback=None):
+        start_q, goal_q = self._prepare_fixed_joint_constraints(start_q, goal_q)
+        convergence_rows = self._begin_convergence_debug("q_space", start_q, goal_q)
         if self.check_robot_collision(start_q):
             print("RRT-Connect failed: start configuration is in collision")
+            self._record_convergence(
+                convergence_rows,
+                iteration=-1,
+                phase="start_collision",
+                state=start_q,
+                node_count=1,
+                collision=True,
+                reason="start configuration is in collision",
+            )
+            self._save_convergence_debug(convergence_rows, "q_space", "start_collision")
             return []
         if self.check_robot_collision(goal_q):
             print("RRT-Connect failed: goal configuration is in collision")
+            self._record_convergence(
+                convergence_rows,
+                iteration=-1,
+                phase="goal_collision",
+                state=goal_q,
+                node_count=1,
+                collision=True,
+                reason="goal configuration is in collision",
+            )
+            self._save_convergence_debug(convergence_rows, "q_space", "goal_collision")
             return []
 
         tree_a = [start_q]
@@ -255,12 +317,31 @@ class RRTConnect(PlannerBase):
         connect_node_a_idx = -1
         connect_node_b_idx = -1
 
-        for _ in range(self.max_iter):
+        for i in range(self.max_iter):
             rnd_point = goal_q if np.random.random() < 0.1 else self._sample_robot_configuration()
             new_idx_a = self._extend_q(tree_a, parents_a, rnd_point)
             if new_idx_a is not None:
+                self._record_convergence(
+                    convergence_rows,
+                    iteration=i,
+                    phase="extend",
+                    state=tree_a[new_idx_a],
+                    sample_state=rnd_point,
+                    node_count=len(tree_a) + len(tree_b),
+                    accepted=True,
+                )
                 new_idx_b = self._connect_q(tree_b, parents_b, tree_a[new_idx_a])
                 if new_idx_b is not None:
+                    self._record_convergence(
+                        convergence_rows,
+                        iteration=i,
+                        phase="connect",
+                        state=tree_b[new_idx_b],
+                        sample_state=tree_a[new_idx_a],
+                        node_count=len(tree_a) + len(tree_b),
+                        accepted=True,
+                        reason="trees_connected",
+                    )
                     connect_node_a_idx = new_idx_a
                     connect_node_b_idx = new_idx_b
                     path_found = True
@@ -269,20 +350,24 @@ class RRTConnect(PlannerBase):
             parents_a, parents_b = parents_b, parents_a
 
         if not path_found:
+            self._save_convergence_debug(convergence_rows, "q_space", "max_iter_failed")
             return []
 
         is_tree_a_start = np.allclose(tree_a[0], start_q)
         path_a = self._trace_path(tree_a, parents_a, connect_node_a_idx)
         path_b = self._trace_path(tree_b, parents_b, connect_node_b_idx)
         if is_tree_a_start:
-            return path_a[::-1] + path_b
-        return path_b[::-1] + path_a
+            path = path_a[::-1] + path_b
+        else:
+            path = path_b[::-1] + path_a
+        self._save_convergence_debug(convergence_rows, "q_space", "success", len(path))
+        return path
 
     def _extend_q(self, nodes, parents, target):
         dists = np.linalg.norm(np.array(nodes) - target, axis=1)
         nearest_idx = int(np.argmin(dists))
         nearest_node = nodes[nearest_idx]
-        new_point = self._steer_state(nearest_node, target, self.step_size)
+        new_point = self._steer_joint_state(nearest_node, target, self.step_size)
         if not self._check_collision(nearest_node, new_point):
             nodes.append(new_point)
             new_idx = len(nodes) - 1
@@ -305,7 +390,7 @@ class RRTConnect(PlannerBase):
                     return new_idx
                 return None
 
-            new_point = self._steer_state(curr_node, target, self.step_size)
+            new_point = self._steer_joint_state(curr_node, target, self.step_size)
             if self._check_collision(curr_node, new_point):
                 return None
             nodes.append(new_point)

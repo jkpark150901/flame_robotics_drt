@@ -1,13 +1,30 @@
 {
+    "planner_backend": "ompl",
+    "algorithm": "rrt",
     "step_size": 1.0,
-    "max_iter": 1000,
-    "goal_bias": 0.1,
-    "workspace_bounds": {
-        "x_min": -50.0,
-        "x_max": 50.0,
-        "y_min": -50.0,
-        "y_max": 50.0,
-        "z_min": -50.0,
-        "z_max": 50.0
+    "goal_bias": 0.05,
+    "use_joint_space_planning": true,
+    "debug_convergence": true,
+    "debug_output_dir": "debug/rrt",
+    "collision": {
+        "motion_validator": "discrete",
+        "normalized_resolution": 0.02,
+        "final_verify": true
+    },
+    "solve": {
+        "timeout_sec": 5.0,
+        "allow_approximate_solution": false,
+        "stop_on_first_solution": true,
+        "convergence_slice_sec": 0.1
+    },
+    "objective": {
+        "type": "path_length"
+    },
+    "planner": {
+        "range": 1.0,
+        "goal_bias": 0.05
+    },
+    "debug": {
+        "save_summary": true
     }
 }

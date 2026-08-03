@@ -3052,12 +3052,37 @@ class Visualizer:
         from plugins.pluginbase.plannerbase import PlannerBase
         module = importlib.import_module(f"plugins.pathplanner.{module_name}")
         for _, obj in inspect.getmembers(module, inspect.isclass):
-            if issubclass(obj, PlannerBase) and obj is not PlannerBase:
+            if (
+                issubclass(obj, PlannerBase)
+                and obj is not PlannerBase
+                and obj.__module__ == module.__name__
+            ):
                 return obj()
         raise RuntimeError(f"Planner plugin class not found: {module_name}")
 
+    def _load_path_optimizer(self, module_name):
+        if not module_name:
+            return None
+        from plugins.pluginbase.optimizerbase import OptimizerBase
+        module = importlib.import_module(f"plugins.optimizer.{module_name}")
+        for _, obj in inspect.getmembers(module, inspect.isclass):
+            if issubclass(obj, OptimizerBase) and obj is not OptimizerBase:
+                return obj()
+        raise RuntimeError(f"Optimizer plugin class not found: {module_name}")
+
+    def _apply_path_optimizer(self, optimizer_name, q_path, planner):
+        if not optimizer_name:
+            return list(q_path or []), None
+        optimizer = self._load_path_optimizer(optimizer_name)
+        optimized_path = optimizer.optimize(list(q_path or []), planner)
+        status = getattr(optimizer, "last_optimization_status", None)
+        return [np.asarray(q, dtype=float) for q in (optimized_path or [])], status
+
     def _inspection_q_space_planner_name(self, planner_name):
-        q_space_planners = {"rrt_connect", "rrt_star", "direct_path"}
+        q_space_planners = {
+            "rrt", "rrt_connect", "rrt_star", "informed_rrt_star", "bit_star",
+            "legacy_rrt_star", "direct_path",
+        }
         planner_name = str(planner_name or "rrt_connect")
         if planner_name in q_space_planners:
             return planner_name
@@ -3420,6 +3445,78 @@ class Visualizer:
             return msg[:limit] + "..."
         return msg
 
+    def _path_planning_fixed_joint_options(
+        self,
+        request_data,
+        *,
+        robot_name,
+        robot_backend_model,
+        frame_name,
+        start_q,
+        target_world_pose,
+        nearest_point=None,
+    ):
+        cfg = (self._config.get("path_planning", {}) or {})
+        raw_joints = request_data.get("fixed_joints", cfg.get("fixed_joints"))
+        raw_indices = request_data.get("fixed_joint_indices", cfg.get("fixed_joint_indices"))
+        if raw_joints is None and raw_indices is None:
+            return {}
+
+        fixed_q, track_indices, track_values = self._inspection_track_fixed_q(
+            robot_name,
+            robot_backend_model,
+            frame_name,
+            start_q,
+            target_world_pose,
+            nearest_point,
+        )
+        if not track_indices:
+            return {}
+
+        linear_idx = track_indices[0]
+        carriage_idx = track_indices[1] if len(track_indices) > 1 else None
+        selected = set()
+
+        def add_token(token):
+            text = str(token).strip().lower()
+            if text in {"linear", "linear_track", "track_1", "joint_1"}:
+                selected.add(linear_idx)
+            elif text in {"carriage", "carriage_track", "track_2", "joint_2"} and carriage_idx is not None:
+                selected.add(carriage_idx)
+
+        if isinstance(raw_joints, dict):
+            for key in raw_joints.keys():
+                add_token(key)
+        elif raw_joints is True:
+            selected.update(idx for idx in (linear_idx, carriage_idx) if idx is not None)
+        elif raw_joints is not None:
+            items = [raw_joints] if isinstance(raw_joints, (str, bytes)) else list(raw_joints)
+            for item in items:
+                add_token(item)
+
+        if raw_indices is not None:
+            raw_index_items = [raw_indices] if np.isscalar(raw_indices) else list(raw_indices)
+            indices = [int(v) for v in raw_index_items]
+            one_based = bool(indices) and all(v in (1, 2) for v in indices) and 0 not in indices
+            for raw_idx in indices:
+                if one_based:
+                    if raw_idx == 1:
+                        selected.add(linear_idx)
+                    elif raw_idx == 2 and carriage_idx is not None:
+                        selected.add(carriage_idx)
+                    continue
+                if raw_idx == linear_idx or raw_idx == 0:
+                    selected.add(linear_idx)
+                elif carriage_idx is not None and (raw_idx == carriage_idx or raw_idx == 1):
+                    selected.add(carriage_idx)
+
+        selected_indices = [idx for idx in track_indices if idx in selected]
+        selected_values = [float(fixed_q[idx]) for idx in selected_indices]
+        return {
+            "fixed_joint_indices": selected_indices,
+            "fixed_joint_values": selected_values,
+        } if selected_indices else {}
+
     def _configure_inspection_planner(
         self,
         planner,
@@ -3431,6 +3528,9 @@ class Visualizer:
         robot_name=None,
         pin_cache=None,
         timings=None,
+        fixed_joints=None,
+        fixed_joint_indices=None,
+        fixed_joint_values=None,
     ):
         setup_t0 = time.perf_counter()
         mn = np.minimum(start[:3], goal[:3])
@@ -3478,6 +3578,10 @@ class Visualizer:
             robotics_backend=backend,
             robotics_robot_name=robot_name,
             workspace_check_frame_name=workspace_check_frame_name,
+            fixed_joints=fixed_joints,
+            fixed_joint_indices=fixed_joint_indices,
+            fixed_joint_values=fixed_joint_values,
+            joint_names=self._robot_joint_names(robot_name) if robot_name is not None else None,
         )
         if timings is not None:
             timings["planner_bounds_config"] = time.perf_counter() - setup_t0
@@ -3715,6 +3819,59 @@ class Visualizer:
             q[i] = float(model._joint_cfg.get(joint_name, 0.0))
         return q
 
+    def _seed_track_joint_q_for_world_axis(
+        self,
+        robot_name,
+        robot_backend_model,
+        frame_name,
+        q,
+        *,
+        joint_keyword,
+        fallback_index,
+        world_axis,
+        target_world_value,
+        label,
+    ):
+        """track joint 값을 world axis 목표 위치에 가깝게 FK 민감도로 옮긴다."""
+        backend = getattr(self, "_robotics_backend", None)
+        if backend is None:
+            return q
+        joint_names = self._robot_joint_names(robot_name, robot_backend_model)
+        track_idx = next((i for i, name in enumerate(joint_names) if joint_keyword in str(name)), None)
+        if track_idx is None and fallback_index is not None and fallback_index < len(joint_names):
+            track_idx = int(fallback_index)
+        if track_idx is None or track_idx >= len(q):
+            return q
+        q = np.asarray(q, dtype=float).copy()
+        axis = int(world_axis)
+        try:
+            T0 = backend.frame_world_T(robot_name, q, frame_name)
+            probe_q = q.copy()
+            delta = 0.05
+            probe_q[track_idx] += delta
+            T1 = backend.frame_world_T(robot_name, probe_q, frame_name)
+        except Exception as exc:
+            self.__console.debug(f"{label} track seeding skipped: robot={robot_name}, error={exc}")
+            return q
+        if T0 is None or T1 is None:
+            return q
+        sensitivity = (float(T1[axis, 3]) - float(T0[axis, 3])) / delta
+        if abs(sensitivity) < 1e-6:
+            return q
+        track_delta = (float(target_world_value) - float(T0[axis, 3])) / sensitivity
+        new_value = float(q[track_idx]) + track_delta
+        try:
+            lo, hi, _ = backend.joint_limits_for_metric(robot_name, normalize=False)
+            new_value = float(np.clip(new_value, lo[track_idx], hi[track_idx]))
+        except Exception:
+            pass
+        self.__console.debug(
+            f"{label} track seeded: robot={robot_name}, "
+            f"track_idx={track_idx}, old={q[track_idx]:.4f}, new={new_value:.4f}, "
+            f"target_world_axis={axis}, target_world_value={target_world_value:.4f}")
+        q[track_idx] = new_value
+        return q
+
     def _seed_linear_track_q_for_world_x(self, robot_name, robot_backend_model, frame_name, q, target_world_x):
         """linear track joint의 IK 초기값을 target world x 위치에 가깝게 미리 옮긴다.
 
@@ -3736,41 +3893,46 @@ class Visualizer:
             바뀌어도 안전하다. IK를 대신하는 게 아니라 초기 추정값만 더 가깝게 준다 -
             이후 IK는 전체 joint를 그대로 계속 풀어서 조정한다.
         """
-        backend = getattr(self, "_robotics_backend", None)
-        if backend is None:
-            return q
+        return self._seed_track_joint_q_for_world_axis(
+            robot_name,
+            robot_backend_model,
+            frame_name,
+            q,
+            joint_keyword="linear_track",
+            fallback_index=0,
+            world_axis=0,
+            target_world_value=target_world_x,
+            label="linear",
+        )
+
+    def _seed_carriage_track_q_for_world_y(self, robot_name, robot_backend_model, frame_name, q, target_world_y):
+        return self._seed_track_joint_q_for_world_axis(
+            robot_name,
+            robot_backend_model,
+            frame_name,
+            q,
+            joint_keyword="carriage",
+            fallback_index=1,
+            world_axis=1,
+            target_world_value=target_world_y,
+            label="carriage",
+        )
+
+    def _inspection_track_fixed_q(self, robot_name, robot_backend_model, frame_name, start_q, target_world_pose, nearest_point):
+        q = np.asarray(start_q, dtype=float).copy()
+        target_world_pose = np.asarray(target_world_pose, dtype=float).reshape(-1)
+        nearest = None if nearest_point is None else np.asarray(nearest_point, dtype=float).reshape(-1)
+        q = self._seed_linear_track_q_for_world_x(
+            robot_name, robot_backend_model, frame_name, q, float(target_world_pose[0]))
+        carriage_y = float(nearest[1]) if nearest is not None and nearest.size >= 2 else float(target_world_pose[1])
+        q = self._seed_carriage_track_q_for_world_y(
+            robot_name, robot_backend_model, frame_name, q, carriage_y)
         joint_names = self._robot_joint_names(robot_name, robot_backend_model)
-        track_idx = next((i for i, name in enumerate(joint_names) if "linear_track" in name), None)
-        if track_idx is None or track_idx >= len(q):
-            return q
-        q = np.asarray(q, dtype=float).copy()
-        try:
-            T0 = backend.frame_world_T(robot_name, q, frame_name)
-            probe_q = q.copy()
-            delta = 0.05
-            probe_q[track_idx] += delta
-            T1 = backend.frame_world_T(robot_name, probe_q, frame_name)
-        except Exception as exc:
-            self.__console.debug(f"linear track seeding skipped: robot={robot_name}, error={exc}")
-            return q
-        if T0 is None or T1 is None:
-            return q
-        sensitivity = (float(T1[0, 3]) - float(T0[0, 3])) / delta
-        if abs(sensitivity) < 1e-6:
-            return q
-        track_delta = (float(target_world_x) - float(T0[0, 3])) / sensitivity
-        new_value = float(q[track_idx]) + track_delta
-        try:
-            lo, hi, _ = backend.joint_limits_for_metric(robot_name, normalize=False)
-            new_value = float(np.clip(new_value, lo[track_idx], hi[track_idx]))
-        except Exception:
-            pass
-        self.__console.debug(
-            f"linear track seeded: robot={robot_name}, "
-            f"track_idx={track_idx}, old={q[track_idx]:.4f}, new={new_value:.4f}, "
-            f"target_world_x={target_world_x:.4f}")
-        q[track_idx] = new_value
-        return q
+        linear_idx = next((i for i, name in enumerate(joint_names) if "linear_track" in str(name)), 0)
+        carriage_idx = next((i for i, name in enumerate(joint_names) if "carriage" in str(name)), 1)
+        indices = [idx for idx in (linear_idx, carriage_idx) if idx is not None and idx < q.size]
+        values = [float(q[idx]) for idx in indices]
+        return q, indices, values
 
     def _zero_q_keep_linear_track(self, robot_name, q):
         """positioner 회전 직전 안전 자세: linear_track만 유지하고 나머지 joint는 0으로.
@@ -4489,6 +4651,17 @@ class Visualizer:
         planner_name = self._inspection_q_space_planner_name(request_data.get("planner", "rrt_connect"))
         planner = self._load_path_planner(planner_name)
         planner.debug_context = label
+        frame_name = self._robot_target_link_name(robot_name)
+        nearest_point = request_data.get("_inspection_target_point")
+        fixed_joint_options = self._path_planning_fixed_joint_options(
+            request_data,
+            robot_name=robot_name,
+            robot_backend_model=robot_backend_model,
+            frame_name=frame_name,
+            start_q=start_q,
+            target_world_pose=goal,
+            nearest_point=nearest_point,
+        )
         self._configure_inspection_planner(
             planner,
             obstacle_mesh,
@@ -4498,7 +4671,8 @@ class Visualizer:
             int(request_data.get("max_iter", 3000)),
             robot_name=robot_name,
             pin_cache=(getattr(self, "_pinocchio_robot_collision_cache", {}) or {}).get(robot_name),
-            timings=timings)
+            timings=timings,
+            **fixed_joint_options)
         if not getattr(planner, "_has_robot_q_space_model", lambda: False)():
             raise RuntimeError("robot q-space model is not configured")
         timings["planner_setup"] = time.perf_counter() - stage_t0
@@ -4519,8 +4693,15 @@ class Visualizer:
         # start_q는 그대로 두고 IK 요청에만 별도 변수(ik_start_q)로 넘긴다.
         # check_ef_pose_ik는 그대로 둔다.
         ik_start_q = self._seed_linear_track_q_for_world_x(
-            robot_name, robot_backend_model, self._robot_target_link_name(robot_name),
+            robot_name, robot_backend_model, frame_name,
             start_q, float(goal[0]))
+        if fixed_joint_options.get("fixed_joint_indices"):
+            for idx, value in zip(
+                fixed_joint_options.get("fixed_joint_indices", []),
+                fixed_joint_options.get("fixed_joint_values", []),
+            ):
+                if 0 <= int(idx) < ik_start_q.shape[0]:
+                    ik_start_q[int(idx)] = float(value)
         self.__console.debug(
             f"inspection path IK input: [{label}] robot={robot_name}\n"
             f"  start_q    = {np.round(start_q, 5).tolist()}\n"
@@ -4540,7 +4721,7 @@ class Visualizer:
                 target_pose     =target_pose,
                 start_tcp_pose  =start,
                 start_q         =ik_start_q,
-                frame_name      =self._robot_target_link_name(robot_name),
+                frame_name      =frame_name,
                 joint_names     =self._robot_joint_names(robot_name, robot_backend_model),
                 planner_name    =planner_name,
                 ik_config       =self._inspection_ik_config(),
@@ -4550,6 +4731,9 @@ class Visualizer:
             q_start=start_q,
             planning_timeout=planning_timeout,
         )
+        if fixed_joint_options.get("fixed_joint_indices"):
+            plan["fixed_joint_indices"] = list(fixed_joint_options.get("fixed_joint_indices", []))
+            plan["fixed_joint_values"] = list(fixed_joint_options.get("fixed_joint_values", []))
         verification = plan.get("verification", {}) or {}
         positioner_checked = self._planner_has_positioner_collision(planner)
         verification.update({
@@ -4569,8 +4753,58 @@ class Visualizer:
         for key in ("ik", "ik_result_check", "planning", "collision_verification"):
             if key in service_timing:
                 timings[key] = service_timing[key]
+        plan["convergence_csv"] = getattr(planner, "last_convergence_csv", None)
+        plan["convergence_plot"] = getattr(planner, "last_convergence_plot", None)
+        plan["exploration_csv"] = getattr(planner, "last_exploration_csv", None)
+        plan["exploration_plot"] = getattr(planner, "last_exploration_plot", None)
+        plan["planner_backend"] = getattr(planner, "planner_backend", "legacy")
+        plan["planner_algorithm"] = getattr(planner, "algorithm", planner_name)
+        plan["ompl_stats"] = getattr(planner, "last_ompl_stats", None)
+        plan["ompl_summary_json"] = getattr(planner, "last_ompl_summary_json", None)
         goal_q = np.asarray(plan["goal_q"], dtype=float)
         q_path = [np.asarray(q, dtype=float) for q in plan.get("q_path", [])]
+        optimizer_name = request_data.get("optimizer")
+        plan["optimizer"] = optimizer_name
+        if optimizer_name and q_path:
+            stage_t0 = time.perf_counter()
+            try:
+                optimized_q_path, optimization_status = self._apply_path_optimizer(
+                    optimizer_name,
+                    q_path,
+                    planner,
+                )
+                if optimized_q_path:
+                    q_path = optimized_q_path
+                    plan["q_path"] = q_path
+                    plan["waypoints"] = len(q_path)
+                    plan["optimization_status"] = optimization_status
+                    verification = planner.verify_path(q_path)
+                    if (
+                        verification.get("colliding_edges", 0) != 0
+                        or verification.get("colliding_waypoints", 0) != 0
+                    ):
+                        plan["collision_preview"] = True
+                        plan["collision_preview_reason"] = (
+                            plan.get("collision_preview_reason")
+                            or "optimized_path_collision"
+                        )
+                    plan["verification"] = verification
+                else:
+                    plan["optimization_status"] = "optimizer_empty_path"
+                    plan["collision_preview"] = True
+                    plan["collision_preview_reason"] = (
+                        plan.get("collision_preview_reason")
+                        or "optimizer_empty_path"
+                    )
+            except Exception as opt_exc:
+                plan["optimization_status"] = "optimizer_failed"
+                plan["optimization_error"] = str(opt_exc)
+                plan["collision_preview"] = True
+                plan["collision_preview_reason"] = (
+                    plan.get("collision_preview_reason")
+                    or f"optimizer_failed: {opt_exc}"
+                )
+            timings["optimization"] = time.perf_counter() - stage_t0
         if plan.get("ik_failure"):
             self._last_ik_failure = getattr(self, "_last_ik_failure", {})
             self._last_ik_failure[robot_name] = plan["ik_failure"]
@@ -4657,13 +4891,15 @@ class Visualizer:
         log_fn = self.__console.warning if is_preview_or_failed else self.__console.info
         planner_iteration_count = getattr(planner, "last_iteration_count", None)
         log_fn(
-            f"inspection path timing: [{label}] robot={robot_name}, planner={planner_name}\n"
+            f"inspection path timing: [{label}] robot={robot_name}, planner={planner_name}, "
+            f"optimizer={optimizer_name or 'none'}\n"
             f"  target={timings.get('target_setup', 0.0):.3f}s"
             f"  setup={timings.get('planner_setup', 0.0):.3f}s"
             f"  ik_target_setup={timings.get('ik_target_setup', 0.0):.3f}s\n"
             f"  ik={timings.get('ik', 0.0):.3f}s"
             f"  ik_result_check={timings.get('ik_result_check', 0.0):.3f}s"
             f"  planning={timings.get('planning', 0.0):.3f}s"
+            f"  optimization={timings.get('optimization', 0.0):.3f}s"
             f"  iteration={planner_iteration_count}\n"
             f"  verify={timings.get('collision_verification', 0.0):.3f}s"
             f"  convert={timings.get('path_conversion', 0.0):.3f}s"
@@ -4717,13 +4953,24 @@ class Visualizer:
         planner = self._load_path_planner(planner_name)
         planner.debug_context = label
         timings = {}
+        frame_name = self._robot_target_link_name(robot_name)
+        fixed_joint_options = self._path_planning_fixed_joint_options(
+            request_data,
+            robot_name=robot_name,
+            robot_backend_model=robot_backend_model,
+            frame_name=frame_name,
+            start_q=start_q,
+            target_world_pose=goal,
+            nearest_point=goal,
+        )
         self._configure_inspection_planner(
             planner, obstacle_mesh, start, goal,
             float(request_data.get("step_size", 0.08)),
             int(request_data.get("max_iter", 3000)),
             robot_name=robot_name,
             pin_cache=(getattr(self, "_pinocchio_robot_collision_cache", {}) or {}).get(robot_name),
-            timings=timings)
+            timings=timings,
+            **fixed_joint_options)
         if not getattr(planner, "_has_robot_q_space_model", lambda: False)():
             raise RuntimeError("robot q-space model is not configured")
         planning_timeout = float(request_data.get(
@@ -4744,6 +4991,28 @@ class Visualizer:
         if not q_path:
             q_path = [start_q]
             collision_preview_reason = collision_preview_reason or "planner_empty_start_only"
+        optimizer_name = request_data.get("optimizer")
+        optimization_status = None
+        optimization_error = None
+        optimization_elapsed = 0.0
+        if optimizer_name and q_path:
+            stage_t0 = time.perf_counter()
+            try:
+                optimized_q_path, optimization_status = self._apply_path_optimizer(
+                    optimizer_name,
+                    q_path,
+                    planner,
+                )
+                if optimized_q_path:
+                    q_path = optimized_q_path
+                else:
+                    optimization_status = "optimizer_empty_path"
+                    collision_preview_reason = collision_preview_reason or "optimizer_empty_path"
+            except Exception as opt_exc:
+                optimization_status = "optimizer_failed"
+                optimization_error = str(opt_exc)
+                collision_preview_reason = collision_preview_reason or f"optimizer_failed: {opt_exc}"
+            optimization_elapsed = time.perf_counter() - stage_t0
         verification = planner.verify_path(q_path)
         if verification.get("colliding_edges", 0) != 0 or verification.get("colliding_waypoints", 0) != 0:
             collision_preview_reason = collision_preview_reason or "returned_path_collision"
@@ -4757,7 +5026,8 @@ class Visualizer:
         collision_preview = collision_preview_reason is not None
         self.__console.info(
             f"inspection retreat plan: [{label}] robot={robot_name}, "
-            f"waypoints={len(q_path)}, planning={planning_elapsed:.3f}s, "
+            f"optimizer={optimizer_name or 'none'}, waypoints={len(q_path)}, "
+            f"planning={planning_elapsed:.3f}s, optimization={optimization_elapsed:.3f}s, "
             f"collision_preview={collision_preview}, reason={collision_preview_reason}")
         return {
             "q_path": q_path,
@@ -4765,6 +5035,17 @@ class Visualizer:
             "goal_q": safe_q,
             "waypoints": len(q_path),
             "elapsed": planning_elapsed,
+            "optimizer": optimizer_name,
+            "optimization_status": optimization_status,
+            "optimization_error": optimization_error,
+            "convergence_csv": getattr(planner, "last_convergence_csv", None),
+            "convergence_plot": getattr(planner, "last_convergence_plot", None),
+            "planner_backend": getattr(planner, "planner_backend", "legacy"),
+            "planner_algorithm": getattr(planner, "algorithm", planner_name),
+            "ompl_stats": getattr(planner, "last_ompl_stats", None),
+            "ompl_summary_json": getattr(planner, "last_ompl_summary_json", None),
+            "fixed_joint_indices": list(fixed_joint_options.get("fixed_joint_indices", [])),
+            "fixed_joint_values": list(fixed_joint_options.get("fixed_joint_values", [])),
             "verification": verification,
             "edge_collisions": verification.get("edge_collisions", []),
             "collision_preview": collision_preview,
@@ -4779,7 +5060,11 @@ class Visualizer:
             "planning_error": None,
             "pin_joint_names": self._robot_joint_names(robot_name, robot_backend_model),
             "pose_name": "retreat",
-            "timing": {"planning": planning_elapsed, "total": time.perf_counter() - total_t0},
+            "timing": {
+                "planning": planning_elapsed,
+                "optimization": optimization_elapsed,
+                "total": time.perf_counter() - total_t0,
+            },
         }
 
     # def _inspection_target_groups_for_planning(self, request_data):
@@ -4991,6 +5276,7 @@ class Visualizer:
                             "pose_name": pose_name,
                             "group_name": group_name,
                             "group_index": group_index,
+                            "target_point": group_info.get("target_point"),
                             # group_index는 EF pose 결정 시 부여된 원본 discovery 순서라
                             # 실제 계획 순서(정렬 결과, waypoint로 반드시 지나야 하는 순서)와
                             # 다를 수 있다. group_order는 이 phase에서 groups가 실제로 순회된
@@ -5021,6 +5307,8 @@ class Visualizer:
             {} if start_q is None
             else {job.robot_name: np.asarray(start_q, dtype=float).tolist()}
         )
+        if target.metadata.get("target_point") is not None:
+            group_request["_inspection_target_point"] = target.metadata.get("target_point")
         try:
             plan = self._plan_inspection_path_for_robot(
                 group_request, job.robot_name, target.target_pose, obstacle_mesh,
@@ -5378,6 +5666,7 @@ class Visualizer:
             result = {
                 "status": "success" if not failures and not ik_failures and not has_partial_plan else "partial",
                 "planner": request_data.get("planner", "rrt_connect"),
+                "optimizer": request_data.get("optimizer"),
                 "inspection_groups": [
                     {
                         "name": group["name"],
@@ -5483,6 +5772,19 @@ class Visualizer:
         """
         return {
             "pose_name": plan.get("pose_name"),
+            "optimizer": plan.get("optimizer"),
+            "optimization_status": plan.get("optimization_status"),
+            "optimization_error": plan.get("optimization_error"),
+            "fixed_joint_indices": plan.get("fixed_joint_indices"),
+            "fixed_joint_values": plan.get("fixed_joint_values"),
+            "convergence_csv": plan.get("convergence_csv"),
+            "convergence_plot": plan.get("convergence_plot"),
+            "exploration_csv": plan.get("exploration_csv"),
+            "exploration_plot": plan.get("exploration_plot"),
+            "planner_backend": plan.get("planner_backend"),
+            "planner_algorithm": plan.get("planner_algorithm"),
+            "ompl_stats": plan.get("ompl_stats"),
+            "ompl_summary_json": plan.get("ompl_summary_json"),
             "waypoints": plan["waypoints"],
             "init_q": np.asarray(plan["q_path"][0], dtype=float).round(6).tolist(),
             "target_q": np.asarray(plan["q_path"][-1], dtype=float).round(6).tolist(),

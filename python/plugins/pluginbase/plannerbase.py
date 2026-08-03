@@ -97,6 +97,164 @@ class GroupPartitionResult:
     evaluation_errors: Dict[str, str] = field(default_factory=dict)
 
 
+@dataclass
+class _JointSpaceTestCollisionResult:
+    collision: bool
+    pairs: List[tuple] = field(default_factory=list)
+    q: Optional[np.ndarray] = None
+    alpha: Optional[float] = None
+
+
+class _JointSpaceTestBackend:
+    """Small q-space backend for planner unit tests without Pinocchio."""
+
+    name = "joint_space_test"
+
+    def __init__(
+        self,
+        *,
+        dof: int,
+        lower_limits,
+        upper_limits,
+        collision_fn=None,
+        edge_collision_fn=None,
+        sample_fn=None,
+        sample_resolution: float = 0.1,
+    ):
+        self._dof = int(dof)
+        self._lo = np.asarray(lower_limits, dtype=float).reshape(self._dof)
+        self._hi = np.asarray(upper_limits, dtype=float).reshape(self._dof)
+        invalid = ~np.isfinite(self._lo) | ~np.isfinite(self._hi) | (self._hi <= self._lo)
+        self._lo[invalid] = -np.pi
+        self._hi[invalid] = np.pi
+        self._span = self._hi - self._lo
+        self._span[self._span < 1e-9] = 1.0
+        self._collision_fn = collision_fn
+        self._edge_collision_fn = edge_collision_fn
+        self._sample_fn = sample_fn
+        self._sample_resolution = max(float(sample_resolution), 1e-9)
+
+    def dof(self, robot_name):
+        return self._dof
+
+    def configure_collision(self, robot_name, static_meshes=None, sample_resolution=None):
+        if sample_resolution is not None:
+            self._sample_resolution = max(float(sample_resolution), 1e-9)
+
+    def _coerce_collision_result(self, value, *, q=None, alpha=None):
+        if isinstance(value, _JointSpaceTestCollisionResult):
+            return value
+        pairs = []
+        collision = bool(value)
+        hit_q = q
+        hit_alpha = alpha
+        if isinstance(value, dict):
+            collision = bool(value.get("collision", value.get("hit", False)))
+            pairs = [tuple(pair) for pair in value.get("pairs", [])]
+            hit_q = value.get("q", q)
+            hit_alpha = value.get("alpha", alpha)
+        elif isinstance(value, tuple):
+            collision = bool(value[0]) if len(value) >= 1 else False
+            if len(value) >= 2 and value[1] is not None:
+                pairs = [tuple(pair) for pair in value[1]]
+            if len(value) >= 3:
+                hit_q = value[2]
+            if len(value) >= 4:
+                hit_alpha = value[3]
+        return _JointSpaceTestCollisionResult(
+            collision=collision,
+            pairs=pairs,
+            q=None if hit_q is None else np.asarray(hit_q, dtype=float),
+            alpha=None if hit_alpha is None else float(hit_alpha),
+        )
+
+    def check_collision(self, robot_name, q, return_pairs=False):
+        q = np.asarray(q, dtype=float).reshape(self._dof)
+        value = False if self._collision_fn is None else self._collision_fn(q)
+        result = self._coerce_collision_result(value, q=q, alpha=0.0)
+        return result
+
+    def check_edge_collision(self, robot_name, q_from, q_to, return_pairs=False):
+        q_from = np.asarray(q_from, dtype=float).reshape(self._dof)
+        q_to = np.asarray(q_to, dtype=float).reshape(self._dof)
+        if self._edge_collision_fn is not None:
+            value = self._edge_collision_fn(q_from, q_to)
+            return self._coerce_collision_result(value)
+
+        distance = float(np.linalg.norm(q_to - q_from))
+        steps = max(1, int(np.ceil(distance / self._sample_resolution)))
+        for i in range(steps + 1):
+            alpha = i / steps
+            q = (1.0 - alpha) * q_from + alpha * q_to
+            result = self.check_collision(robot_name, q, return_pairs=True)
+            if result.collision:
+                result.q = q
+                result.alpha = float(alpha)
+                return result
+        return _JointSpaceTestCollisionResult(False, [], None, None)
+
+    def sample_configuration(self, robot_name):
+        if self._sample_fn is not None:
+            return np.asarray(self._sample_fn(), dtype=float).reshape(self._dof)
+        return np.random.uniform(self._lo, self._hi)
+
+    def joint_limits_for_metric(self, robot_name, normalize=True):
+        if not normalize:
+            return None, None, None
+        return self._lo.copy(), self._hi.copy(), self._span.copy()
+
+    def normalize_q(self, robot_name, q, normalize=True):
+        q = np.asarray(q, dtype=float).reshape(self._dof)
+        if not normalize:
+            return q.copy()
+        return (q - self._lo) / self._span
+
+    def denormalize_q(self, robot_name, q_norm, normalize=True):
+        q_norm = np.asarray(q_norm, dtype=float).reshape(self._dof)
+        if not normalize:
+            return q_norm.copy()
+        return np.minimum(np.maximum(self._lo + q_norm * self._span, self._lo), self._hi)
+
+    def joint_distance(self, robot_name, q_a, q_b, normalize=True):
+        return float(np.linalg.norm(
+            self.normalize_q(robot_name, q_b, normalize=normalize)
+            - self.normalize_q(robot_name, q_a, normalize=normalize)
+        ))
+
+    def joint_distances(self, robot_name, q_points, q_ref, normalize=True):
+        pts = np.asarray(q_points, dtype=float)
+        ref = np.asarray(q_ref, dtype=float)
+        if pts.ndim == 1:
+            return np.asarray([self.joint_distance(robot_name, pts, ref, normalize=normalize)])
+        return np.linalg.norm(
+            np.asarray([self.normalize_q(robot_name, q, normalize=normalize) for q in pts])
+            - self.normalize_q(robot_name, ref, normalize=normalize),
+            axis=1,
+        )
+
+    def steer_joint_state(self, robot_name, from_state, to_state, step_size, normalize=True):
+        from_norm = self.normalize_q(robot_name, from_state, normalize=normalize)
+        to_norm = self.normalize_q(robot_name, to_state, normalize=normalize)
+        direction = to_norm - from_norm
+        length = float(np.linalg.norm(direction))
+        if length < 1e-12:
+            return np.asarray(from_state, dtype=float).copy()
+        new_norm = from_norm + direction / length * min(float(step_size), length)
+        return self.denormalize_q(robot_name, new_norm, normalize=normalize)
+
+    def collision_geometry_summary(self, robot_name):
+        return []
+
+    def collision_pair_summary(
+        self,
+        robot_name,
+        include_robot_self=True,
+        include_static=True,
+        limit=None,
+    ):
+        return []
+
+
 class PlannerBase(ABC):
     """
     Abstract base class for path planning algorithms.
@@ -120,9 +278,14 @@ class PlannerBase(ABC):
         self.robotics_backend = None
         self.robotics_robot_name = None
         self.debug_exploration = False
+        self.debug_convergence = False
         self.debug_output_dir = os.path.join(os.getcwd(), "debug", "planner")
         self.last_exploration_csv = None
         self.last_exploration_plot = None
+        self.last_convergence_csv = None
+        self.last_convergence_plot = None
+        self._convergence_rows = None
+        self._convergence_context = None
         # 어떤 검사 지점/자세/로봇에 대한 계획인지 로그에서 바로 구분할 수 있게 호출부
         # (viewer)가 채워주는 식별 라벨. 예: "Point 2 - Inspection pose 2 / dda_rb10_1300e".
         self.debug_context = None
@@ -130,10 +293,27 @@ class PlannerBase(ABC):
         # 쓰는 FK 기준 frame 이름. None이면(기본) workspace 체크를 하지 않는다 - bounds는
         # 있지만 이 이름이 없으면 기존 동작 그대로다.
         self.workspace_check_frame_name = None
+        self.fixed_joint_indices = []
+        self.fixed_joint_values = None
+        self.fixed_joint_names = []
+        self._fixed_joint_reference_q = None
 
     def _debug_prefix(self):
         context = getattr(self, "debug_context", None)
         return f"[{context}] " if context else ""
+
+    def _debug_output_path(self, fallback_name="planner"):
+        """Return a debug output directory rooted under a folder named debug."""
+        configured = getattr(self, "debug_output_dir", None)
+        path = Path(configured) if configured else Path(fallback_name)
+        parts_lower = [part.lower() for part in path.parts]
+        if path.is_absolute():
+            if "debug" in parts_lower:
+                return path
+            return Path(os.getcwd()) / "debug" / path.name
+        if parts_lower and parts_lower[0] == "debug":
+            return Path(os.getcwd()) / path
+        return Path(os.getcwd()) / "debug" / path
 
     def _debug_file_logger(self):
         """탐색/타이밍 로그 전용 파일 logger. 콘솔/메인 로그와 섞이지 않는 별도 파일에 DEBUG로 남긴다.
@@ -146,7 +326,7 @@ class PlannerBase(ABC):
         if cached is not None:
             return cached
 
-        out_dir = Path(getattr(self, "debug_output_dir", os.path.join(os.getcwd(), "debug", "planner")))
+        out_dir = self._debug_output_path("planner")
         out_dir.mkdir(parents=True, exist_ok=True)
         log_path = out_dir / f"{self.__class__.__name__.lower()}_debug.log"
 
@@ -190,6 +370,10 @@ class PlannerBase(ABC):
         robotics_robot_name=None,
         robot_model=None,
         workspace_check_frame_name=None,
+        fixed_joint_indices=None,
+        fixed_joint_values=None,
+        fixed_joints=None,
+        joint_names=None,
     ):
         """Planner 공통 설정 진입점.
 
@@ -209,6 +393,9 @@ class PlannerBase(ABC):
             workspace_check_frame_name: 지정하면 q-space planner가 이 frame의 FK world
                 position을 bounds로 제한한다(q-space 자체엔 world 제한이 없어서). None(기본)이면
                 기존처럼 workspace 체크를 하지 않는다.
+            fixed_joint_indices/fixed_joint_values/fixed_joints: q-space planning 중
+                특정 joint를 고정하기 위한 설정. fixed_joints는 {index_or_name: value}
+                dict 또는 index/name list를 받을 수 있다. value가 None이면 시작 q 값으로 고정한다.
         """
         if bounds is not None and hasattr(self, "bounds"):
             self.bounds = bounds
@@ -236,6 +423,113 @@ class PlannerBase(ABC):
                 self.pin_data = robot_model.createData()
         if workspace_check_frame_name is not None:
             self.workspace_check_frame_name = workspace_check_frame_name
+        if fixed_joints is not None or fixed_joint_indices is not None or fixed_joint_values is not None:
+            self.configure_fixed_joints(
+                fixed_joints=fixed_joints,
+                fixed_joint_indices=fixed_joint_indices,
+                fixed_joint_values=fixed_joint_values,
+                joint_names=joint_names,
+            )
+
+    def _resolve_joint_index(self, joint, joint_names=None):
+        if isinstance(joint, (int, np.integer)):
+            return int(joint)
+        text = str(joint)
+        if text.strip().isdigit() or (text.startswith("-") and text[1:].isdigit()):
+            return int(text)
+        names = list(joint_names or getattr(self, "fixed_joint_names", []) or [])
+        if text in names:
+            return int(names.index(text))
+        raise ValueError(f"fixed joint not found: {joint}")
+
+    def configure_fixed_joints(
+        self,
+        *,
+        fixed_joints=None,
+        fixed_joint_indices=None,
+        fixed_joint_values=None,
+        joint_names=None,
+    ):
+        """Configure q-space joints that should remain fixed during planning.
+
+        fixed_joints can be a dict of {joint_index_or_name: value_or_None} or a
+        list of indices/names. None values are resolved from start_q per planning run.
+        """
+        if joint_names is not None:
+            self.fixed_joint_names = [str(name) for name in joint_names]
+
+        entries = []
+        if isinstance(fixed_joints, dict):
+            entries.extend(fixed_joints.items())
+        elif fixed_joints is not None:
+            entries.extend((item, None) for item in fixed_joints)
+        if fixed_joint_indices is not None:
+            indices_input = list(fixed_joint_indices)
+            values = fixed_joint_values
+            if values is None or isinstance(values, (str, bytes)) or np.isscalar(values):
+                values = [values] * len(indices_input)
+            else:
+                values = list(values)
+            for idx, value in zip(indices_input, values):
+                entries.append((idx, value))
+
+        indices = []
+        values = []
+        for joint, value in entries:
+            idx = self._resolve_joint_index(joint, joint_names=joint_names)
+            if idx in indices:
+                values[indices.index(idx)] = value
+                continue
+            indices.append(idx)
+            values.append(value)
+
+        self.fixed_joint_indices = indices
+        self.fixed_joint_values = values if indices else None
+        self._fixed_joint_reference_q = None
+
+    def _has_fixed_joint_constraints(self):
+        return bool(getattr(self, "fixed_joint_indices", []) or [])
+
+    def _fixed_joint_value_for(self, local_idx, joint_idx, reference_q=None):
+        values = getattr(self, "fixed_joint_values", None)
+        if values is not None and local_idx < len(values) and values[local_idx] is not None:
+            if isinstance(values[local_idx], str) and values[local_idx].strip().lower() in {"", "start", "current"}:
+                pass
+            else:
+                return float(values[local_idx])
+        ref = reference_q
+        if ref is None:
+            ref = getattr(self, "_fixed_joint_reference_q", None)
+        if ref is None:
+            return None
+        ref = np.asarray(ref, dtype=float).reshape(-1)
+        if 0 <= int(joint_idx) < ref.size:
+            return float(ref[int(joint_idx)])
+        return None
+
+    def _apply_fixed_joints(self, q, reference_q=None):
+        if not self._has_fixed_joint_constraints():
+            return np.asarray(q, dtype=float).copy()
+        arr = np.asarray(q, dtype=float).copy()
+        for local_idx, joint_idx in enumerate(getattr(self, "fixed_joint_indices", []) or []):
+            joint_idx = int(joint_idx)
+            if joint_idx < 0 or joint_idx >= arr.size:
+                continue
+            value = self._fixed_joint_value_for(local_idx, joint_idx, reference_q=reference_q)
+            if value is not None:
+                arr[joint_idx] = value
+        return arr
+
+    def _prepare_fixed_joint_constraints(self, start_q, goal_q):
+        start_q = np.asarray(start_q, dtype=float).copy()
+        goal_q = np.asarray(goal_q, dtype=float).copy()
+        if not self._has_fixed_joint_constraints():
+            return start_q, goal_q
+        self._fixed_joint_reference_q = start_q.copy()
+        return (
+            self._apply_fixed_joints(start_q, reference_q=start_q),
+            self._apply_fixed_joints(goal_q, reference_q=start_q),
+        )
 
     def _workspace_position_ok(self, q):
         """q-space q의 FK world position이 self.bounds 안에 있는지 확인한다.
@@ -278,6 +572,56 @@ class PlannerBase(ABC):
                 config.get("robot_urdf"),
                 config.get("package_dirs"),
             )
+
+    def configure_joint_space_test_environment(
+        self,
+        *,
+        dof: int | None = None,
+        lower_limits=None,
+        upper_limits=None,
+        collision_fn=None,
+        edge_collision_fn=None,
+        sample_fn=None,
+        robot_name: str = "test_robot",
+        sample_resolution: float | None = None,
+        use_joint_space_planning: bool = True,
+    ):
+        """Configure a lightweight q-space backend for planner tests.
+
+        This keeps unit tests independent from Pinocchio/robotics scene setup while
+        exercising the same PlannerBase q-space helpers used by production planners.
+        """
+        if dof is None:
+            if lower_limits is not None:
+                dof = int(np.asarray(lower_limits, dtype=float).reshape(-1).shape[0])
+            elif upper_limits is not None:
+                dof = int(np.asarray(upper_limits, dtype=float).reshape(-1).shape[0])
+            else:
+                raise ValueError("dof is required when joint limits are not provided")
+        dof = int(dof)
+        if lower_limits is None:
+            lower_limits = np.full(dof, -np.pi, dtype=float)
+        if upper_limits is None:
+            upper_limits = np.full(dof, np.pi, dtype=float)
+
+        resolution = (
+            self.pin_collision_sample_resolution
+            if sample_resolution is None
+            else float(sample_resolution)
+        )
+        self.robotics_backend = _JointSpaceTestBackend(
+            dof=dof,
+            lower_limits=lower_limits,
+            upper_limits=upper_limits,
+            collision_fn=collision_fn,
+            edge_collision_fn=edge_collision_fn,
+            sample_fn=sample_fn,
+            sample_resolution=resolution,
+        )
+        self.robotics_robot_name = str(robot_name)
+        self.pin_collision_sample_resolution = max(float(resolution), 1e-9)
+        self.use_joint_space_planning = bool(use_joint_space_planning)
+        return self.robotics_backend
 
     def partition_and_sort_groups(
         self,
@@ -576,6 +920,7 @@ class PlannerBase(ABC):
                     f"so generate() must receive q-space states with dof={dof}; "
                     f"got {current_pose.shape[0]}->{target_pose.shape[0]}"
                 )
+            current_pose, target_pose = self._prepare_fixed_joint_constraints(current_pose, target_pose)
             return self._generate_joint_space(current_pose, target_pose, step_callback=step_callback)
 
         return self._generate_workspace(current_pose, target_pose, step_callback=step_callback)
@@ -1324,13 +1669,16 @@ class PlannerBase(ABC):
             try:
                 return backend.joint_distance(
                     robot_name,
-                    q_a,
-                    q_b,
+                    self._apply_fixed_joints(q_a),
+                    self._apply_fixed_joints(q_b),
                     normalize=bool(getattr(self, "normalize_joint_space", True)),
                 )
             except Exception:
                 pass
-        return float(np.linalg.norm(self._normalize_joint_q(q_b) - self._normalize_joint_q(q_a)))
+        return float(np.linalg.norm(
+            self._normalize_joint_q(self._apply_fixed_joints(q_b))
+            - self._normalize_joint_q(self._apply_fixed_joints(q_a))
+        ))
 
     def _joint_distances(self, q_points, q_ref):
         """여러 q와 기준 q 사이의 normalized joint 거리를 한 번에 계산한다.
@@ -1347,7 +1695,11 @@ class PlannerBase(ABC):
             axis=1 norm을 계산한다. 꺼져 있으면 raw q norm을 사용한다.
         """
         pts = np.asarray(q_points, dtype=float)
-        ref = np.asarray(q_ref, dtype=float)
+        ref = self._apply_fixed_joints(q_ref)
+        if pts.ndim == 1:
+            pts = self._apply_fixed_joints(pts)
+        elif self._has_fixed_joint_constraints():
+            pts = np.asarray([self._apply_fixed_joints(q) for q in pts], dtype=float)
         backend = getattr(self, "robotics_backend", None)
         robot_name = getattr(self, "robotics_robot_name", None)
         if backend is not None and robot_name:
@@ -1384,19 +1736,21 @@ class PlannerBase(ABC):
         """
         backend = getattr(self, "robotics_backend", None)
         robot_name = getattr(self, "robotics_robot_name", None)
+        from_state = self._apply_fixed_joints(from_state)
+        to_state = self._apply_fixed_joints(to_state)
         if backend is not None and robot_name:
             try:
-                return backend.steer_joint_state(
+                return self._apply_fixed_joints(backend.steer_joint_state(
                     robot_name,
                     from_state,
                     to_state,
                     step_size,
                     normalize=bool(getattr(self, "normalize_joint_space", True)),
-                )
+                ))
             except Exception:
                 pass
         if not getattr(self, "normalize_joint_space", True) or self.pin_model is None:
-            return self._steer_state(from_state, to_state, step_size)
+            return self._apply_fixed_joints(self._steer_state(from_state, to_state, step_size))
         from_norm = self._normalize_joint_q(from_state)
         to_norm = self._normalize_joint_q(to_state)
         direction = to_norm - from_norm
@@ -1404,7 +1758,7 @@ class PlannerBase(ABC):
         if length < 1e-12:
             return np.asarray(from_state, dtype=float).copy()
         new_norm = from_norm + direction / length * min(float(step_size), length)
-        return self._denormalize_joint_q(new_norm)
+        return self._apply_fixed_joints(self._denormalize_joint_q(new_norm))
 
     def _new_exploration_rows(self):
         """탐색 로그 row 컨테이너를 만든다.
@@ -1419,6 +1773,331 @@ class PlannerBase(ABC):
             planner 구현부가 None 여부만 확인해서 logging 비용을 피할 수 있게 한다.
         """
         return [] if getattr(self, "debug_exploration", False) else None
+
+    def _new_convergence_rows(self):
+        """Planner 수렴 로그 row 컨테이너를 만든다."""
+        return [] if (
+            getattr(self, "debug_convergence", False)
+            or getattr(self, "debug_exploration", False)
+        ) else None
+
+    def _planner_state_distance(self, space, state_a, state_b):
+        """q-space/task-space 상태 사이의 목표 수렴 거리 metric."""
+        if state_a is None or state_b is None:
+            return None
+        a = np.asarray(state_a, dtype=float).reshape(-1)
+        b = np.asarray(state_b, dtype=float).reshape(-1)
+        if a.shape != b.shape:
+            n = min(a.size, b.size)
+            if n <= 0:
+                return None
+            a = a[:n]
+            b = b[:n]
+        if str(space).lower() in {"q", "joint", "joint_space", "q_space"}:
+            try:
+                return float(self._joint_distance(a, b))
+            except Exception:
+                return float(np.linalg.norm(a - b))
+        if str(space).lower() in {"task", "task_space", "workspace"} and a.size >= 3 and b.size >= 3:
+            weights = getattr(self, "weights", {}) or {}
+            w_pos = float(weights.get("pos", 1.0))
+            w_ori = float(weights.get("orient", 0.5))
+            pos = w_pos * float(np.sum((a[:3] - b[:3]) ** 2))
+            ori = 0.0
+            if a.size > 3 and b.size > 3:
+                ori_n = min(a.size, b.size) - 3
+                ori = w_ori * float(np.sum((a[3:3 + ori_n] - b[3:3 + ori_n]) ** 2))
+            return float(np.sqrt(pos + ori))
+        return float(np.linalg.norm(a - b))
+
+    def _begin_convergence_debug(self, space, start_state, goal_state):
+        """현재 planning run의 수렴 로그 컨텍스트를 시작한다."""
+        rows = self._new_convergence_rows()
+        self._convergence_rows = rows
+        self._convergence_context = {
+            "space": str(space),
+            "start": None if start_state is None else np.asarray(start_state, dtype=float).copy(),
+            "goal": None if goal_state is None else np.asarray(goal_state, dtype=float).copy(),
+            "best_distance_to_goal": float("inf"),
+            "start_time": time.perf_counter(),
+        }
+        if rows is not None:
+            self._record_convergence(
+                rows,
+                iteration=-1,
+                phase="start",
+                state=start_state,
+                node_count=1,
+                accepted=True,
+                reason="start_state",
+            )
+        return rows
+
+    def _record_convergence(
+        self,
+        rows,
+        iteration,
+        phase,
+        *,
+        state=None,
+        sample_state=None,
+        node_count=None,
+        cost=None,
+        accepted=False,
+        collision=False,
+        reason="",
+        elapsed_s=None,
+    ):
+        """q/task space planning의 수렴 상태를 CSV row로 기록한다."""
+        if rows is None:
+            return
+        context = getattr(self, "_convergence_context", None) or {}
+        space = str(context.get("space", "unknown"))
+        goal = context.get("goal")
+        state_distance = self._planner_state_distance(space, state, goal)
+        sample_distance = self._planner_state_distance(space, sample_state, goal)
+
+        best_distance = context.get("best_distance_to_goal", float("inf"))
+        if state_distance is not None and np.isfinite(state_distance):
+            best_distance = min(float(best_distance), float(state_distance))
+        context["best_distance_to_goal"] = best_distance
+
+        self._convergence_context = context
+
+        if elapsed_s is None:
+            start_time = context.get("start_time")
+            elapsed_s = "" if start_time is None else time.perf_counter() - float(start_time)
+
+        rows.append({
+            "iteration": int(iteration) if iteration is not None else -1,
+            "space": space,
+            "phase": phase,
+            "elapsed_s": elapsed_s,
+            "distance_to_goal": "" if state_distance is None else float(state_distance),
+            "best_distance_to_goal": (
+                "" if not np.isfinite(best_distance) else float(best_distance)
+            ),
+            "sample_distance_to_goal": "" if sample_distance is None else float(sample_distance),
+            "accepted": bool(accepted),
+            "collision": bool(collision),
+            "reason": reason,
+            "state": self._json_vector(state),
+            "sample_state": self._json_vector(sample_state),
+        })
+
+    def _record_convergence_from_path(self, space, path, status="path"):
+        """완성된 path waypoint들을 수렴 로그로 기록한다."""
+        rows = self._begin_convergence_debug(space, path[0] if path else None, path[-1] if path else None)
+        if rows is None:
+            return rows
+        for idx, state in enumerate(path or []):
+            self._record_convergence(
+                rows,
+                iteration=idx,
+                phase=status,
+                state=state,
+                accepted=True,
+            )
+        return rows
+
+    def _save_convergence_debug(self, rows=None, space=None, status="finished", path_waypoints=None):
+        """Planner 수렴 로그를 CSV와 PNG 그래프로 저장한다."""
+        if rows is None:
+            rows = getattr(self, "_convergence_rows", None)
+        if not rows:
+            return None, None
+        context = getattr(self, "_convergence_context", None) or {}
+        if space is None:
+            space = context.get("space", "unknown")
+
+        out_dir = self._debug_output_path("planner")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        robot_name = "robot"
+        try:
+            robot_name = str(getattr(self, "robotics_robot_name", "") or getattr(self.pin_model, "name", "") or "robot")
+        except Exception:
+            pass
+        planner_name = self.__class__.__name__.lower()
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        base = out_dir / f"{planner_name}_{space}_convergence_{robot_name}_{stamp}_{status}"
+        csv_path = base.with_suffix(".csv")
+        fieldnames = [
+            "iteration",
+            "space",
+            "phase",
+            "elapsed_s",
+            "distance_to_goal",
+            "best_distance_to_goal",
+            "sample_distance_to_goal",
+            "accepted",
+            "collision",
+            "reason",
+            "state",
+            "sample_state",
+        ]
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+
+        plot_path = None
+        try:
+            plot_path = self._save_convergence_plot(rows, base.with_suffix(".png"), path_waypoints)
+        except Exception as exc:
+            print(f"{self.__class__.__name__} convergence plot failed: {exc}")
+
+        self.last_convergence_csv = str(csv_path)
+        self.last_convergence_plot = None if plot_path is None else str(plot_path)
+        self._log_block("convergence debug saved", [
+            f"csv={self.last_convergence_csv}",
+            f"plot={self.last_convergence_plot}",
+        ])
+        return self.last_convergence_csv, self.last_convergence_plot
+
+    def _save_convergence_plot(self, rows, plot_path, path_waypoints=None):
+        """수렴 CSV row를 PNG 그래프로 저장한다."""
+        try:
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+        except Exception as exc:
+            print(f"{self.__class__.__name__} convergence plot skipped: matplotlib unavailable ({exc})")
+            return None
+
+        elapsed = []
+        iterations = []
+        distance = []
+        best_distance = []
+        collisions = []
+        accepted = []
+        states = []
+        goals = []
+        context = getattr(self, "_convergence_context", None) or {}
+        goal_state = context.get("goal")
+        for row in rows:
+            iterations.append(int(row.get("iteration", -1)))
+            try:
+                elapsed.append(float(row.get("elapsed_s", "")))
+            except Exception:
+                elapsed.append(float(iterations[-1]))
+
+            def _float_or_nan(key):
+                try:
+                    value = row.get(key, "")
+                    return np.nan if value == "" else float(value)
+                except Exception:
+                    return np.nan
+
+            distance.append(_float_or_nan("distance_to_goal"))
+            best_distance.append(_float_or_nan("best_distance_to_goal"))
+            collisions.append(bool(row.get("collision", False)))
+            accepted.append(bool(row.get("accepted", False)))
+            try:
+                states.append(np.asarray(json.loads(row.get("state") or "[]"), dtype=float))
+            except Exception:
+                states.append(np.asarray([], dtype=float))
+            goals.append(None if goal_state is None else np.asarray(goal_state, dtype=float).reshape(-1))
+
+        elapsed = np.asarray(elapsed, dtype=float)
+        iterations = np.asarray(iterations, dtype=int)
+        distance = np.asarray(distance, dtype=float)
+        best_distance = np.asarray(best_distance, dtype=float)
+        collisions = np.asarray(collisions, dtype=bool)
+        accepted = np.asarray(accepted, dtype=bool)
+
+        space = str(rows[-1].get("space", "unknown")) if rows else "unknown"
+        valid_states = [state for state in states if state.size > 0]
+        state_dim = max((state.size for state in valid_states), default=0)
+        state_matrix = np.full((len(states), state_dim), np.nan, dtype=float)
+        for idx, state in enumerate(states):
+            n = min(state.size, state_dim)
+            if n > 0:
+                state_matrix[idx, :n] = state[:n]
+        goal = goals[-1] if goals and goals[-1] is not None else None
+
+        if space in {"task_space", "task", "workspace"} and state_dim > 3:
+            fig, axes = plt.subplots(3, 1, figsize=(13, 10), sharex=True)
+        else:
+            fig, axes = plt.subplots(2, 1, figsize=(13, 8), sharex=True)
+        if not isinstance(axes, np.ndarray):
+            axes = np.asarray([axes])
+
+        axes[0].plot(elapsed, distance, color="tab:blue", alpha=0.45, linewidth=1.0, label="distance to goal")
+        axes[0].plot(elapsed, best_distance, color="tab:green", linewidth=1.8, label="best distance")
+        if np.any(collisions):
+            axes[0].scatter(elapsed[collisions], distance[collisions], s=16, color="tab:red", label="collision")
+        axes[0].set_ylabel("Goal Distance")
+        axes[0].grid(True, alpha=0.25)
+        axes[0].legend(loc="best")
+
+        colors = ["tab:blue", "tab:orange", "tab:green", "tab:red", "tab:purple", "tab:brown", "tab:pink"]
+        if space in {"q_space", "q", "joint", "joint_space"}:
+            for dim in range(state_dim):
+                axes[1].plot(
+                    elapsed,
+                    state_matrix[:, dim],
+                    linewidth=1.2,
+                    color=colors[dim % len(colors)],
+                    label=f"q{dim + 1}",
+                )
+                if goal is not None and dim < goal.size:
+                    axes[1].axhline(goal[dim], color=colors[dim % len(colors)], linestyle="--", alpha=0.25)
+            axes[1].set_ylabel("Joint Angle")
+            axes[1].set_xlabel("Elapsed Time (s)")
+            axes[1].legend(loc="best", ncol=min(4, max(1, state_dim)))
+        else:
+            pos_labels = ["x", "y", "z"]
+            for dim in range(min(3, state_dim)):
+                axes[1].plot(
+                    elapsed,
+                    state_matrix[:, dim],
+                    linewidth=1.4,
+                    color=colors[dim % len(colors)],
+                    label=pos_labels[dim],
+                )
+                if goal is not None and dim < goal.size:
+                    axes[1].axhline(goal[dim], color=colors[dim % len(colors)], linestyle="--", alpha=0.25)
+            axes[1].set_ylabel("EF Position")
+            axes[1].legend(loc="best")
+            if len(axes) > 2:
+                ori_labels = ["roll", "pitch", "yaw"]
+                for dim in range(3, min(6, state_dim)):
+                    axes[2].plot(
+                        elapsed,
+                        state_matrix[:, dim],
+                        linewidth=1.2,
+                        color=colors[(dim - 3) % len(colors)],
+                        label=ori_labels[dim - 3],
+                    )
+                    if goal is not None and dim < goal.size:
+                        axes[2].axhline(goal[dim], color=colors[(dim - 3) % len(colors)], linestyle="--", alpha=0.25)
+                axes[2].set_ylabel("EF Orientation")
+                axes[2].set_xlabel("Elapsed Time (s)")
+                axes[2].legend(loc="best")
+            else:
+                axes[1].set_xlabel("Elapsed Time (s)")
+        axes[1].grid(True, alpha=0.25)
+        if len(axes) > 2:
+            axes[2].grid(True, alpha=0.25)
+
+        top = axes[0].twiny()
+        top.set_xlim(axes[0].get_xlim())
+        if len(elapsed) > 1 and float(elapsed[-1] - elapsed[0]) > 1e-9:
+            ticks = axes[0].get_xticks()
+            iter_ticks = np.interp(ticks, elapsed, iterations)
+            top.set_xticks(ticks)
+            top.set_xticklabels([str(int(round(v))) for v in iter_ticks])
+        top.set_xlabel("Iteration (approx.)")
+
+        space_title = "Joint Angles" if space in {"q_space", "q", "joint", "joint_space"} else "EF Pose"
+        title = f"{self.__class__.__name__} Convergence | {space_title}"
+        if path_waypoints is not None:
+            title += f" | path waypoints={path_waypoints}"
+        fig.suptitle(title)
+        fig.tight_layout()
+        fig.savefig(plot_path, dpi=140)
+        plt.close(fig)
+        return plot_path
 
     def _record_exploration(
         self,
@@ -1499,6 +2178,25 @@ class PlannerBase(ABC):
             "sample_q": self._json_vector(sample_q),
         })
 
+        convergence_rows = getattr(self, "_convergence_rows", None)
+        if convergence_rows is not None:
+            state = to_q
+            if state is None:
+                state = collision_q if collision_q is not None else from_q
+            self._record_convergence(
+                convergence_rows,
+                iteration=iteration,
+                phase=phase,
+                state=state,
+                sample_state=sample_q,
+                node_count=node_count,
+                cost=cost,
+                accepted=accepted,
+                collision=collision,
+                reason=reason,
+                elapsed_s=elapsed_s,
+            )
+
     def _save_exploration_debug(self, rows, mode, status, path_waypoints=None):
         """탐색 로그를 CSV와 PNG 그래프로 저장한다.
 
@@ -1516,8 +2214,9 @@ class PlannerBase(ABC):
             CSV를 쓴 뒤 _save_exploration_plot으로 PNG 요약 그래프를 생성한다.
         """
         if not rows:
+            self._save_convergence_debug(status=status, path_waypoints=path_waypoints)
             return None, None
-        out_dir = Path(getattr(self, "debug_output_dir", os.path.join(os.getcwd(), "debug", "planner")))
+        out_dir = self._debug_output_path("planner")
         out_dir.mkdir(parents=True, exist_ok=True)
         robot_name = "robot"
         try:
@@ -1561,6 +2260,7 @@ class PlannerBase(ABC):
             plot_path = self._save_exploration_plot(rows, base.with_suffix(".png"), path_waypoints)
         except Exception as exc:
             print(f"{self.__class__.__name__} exploration plot failed: {exc}")
+        self._save_convergence_debug(status=status, path_waypoints=path_waypoints)
         self.last_exploration_csv = str(csv_path)
         self.last_exploration_plot = None if plot_path is None else str(plot_path)
         self._log_block("exploration debug saved", [
@@ -1758,7 +2458,7 @@ class PlannerBase(ABC):
         robot_name = getattr(self, "robotics_robot_name", None)
         if backend is not None and robot_name:
             try:
-                return backend.sample_configuration(robot_name)
+                return self._apply_fixed_joints(backend.sample_configuration(robot_name))
             except Exception:
                 pass
         if self.pin_model is None:
@@ -1769,7 +2469,7 @@ class PlannerBase(ABC):
         invalid = ~np.isfinite(lo) | ~np.isfinite(hi) | (hi <= lo)
         lo[invalid] = -np.pi
         hi[invalid] = np.pi
-        return np.random.uniform(lo, hi)
+        return self._apply_fixed_joints(np.random.uniform(lo, hi))
 
     def _sample_pinocchio_configuration(self):
         """Backward-compatible alias. Prefer _sample_robot_configuration()."""

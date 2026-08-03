@@ -5,10 +5,10 @@ from typing import List, Union
 
 import numpy as np
 
-from plugins.pluginbase.plannerbase import PlannerBase
+from plugins.pathplanner.ompl.ompl_planner import OMPLPlanner
 
 
-class RRTStar(PlannerBase):
+class RRTStar(OMPLPlanner):
     """RRT* 기반 경로 계획기.
 
     역할:
@@ -18,6 +18,7 @@ class RRTStar(PlannerBase):
     """
 
     use_joint_space_planning = True
+    ompl_algorithm = "rrt_star"
 
     def __init__(self, config_path: str = None):
         """설정 파일을 읽어 RRT* 파라미터를 초기화한다.
@@ -55,6 +56,7 @@ class RRTStar(PlannerBase):
         self.normalize_joint_space = bool(self.config.get("normalize_joint_space", True))
         self.use_joint_space_planning = bool(self.config.get("use_joint_space_planning", self.use_joint_space_planning))
         self.debug_exploration = bool(self.config.get("debug_exploration", False))
+        self.debug_convergence = bool(self.config.get("debug_convergence", self.debug_exploration))
         self.debug_solution_paths = bool(self.config.get("debug_solution_paths", self.debug_exploration))
         self.debug_output_dir = self.config.get(
             "debug_output_dir",
@@ -76,7 +78,13 @@ class RRTStar(PlannerBase):
             "z_max": 10.0,
         })
 
+        self.configure_fixed_joints(
+            fixed_joints=self.config.get("fixed_joints"),
+            fixed_joint_indices=self.config.get("fixed_joint_indices"),
+            fixed_joint_values=self.config.get("fixed_joint_values"),
+        )
         self.configure_collision(self.config, default_sample_resolution=self.step_size)
+        self.configure_ompl(self.config, default_algorithm=self.ompl_algorithm)
 
     def _generate_workspace(self, current_pose, target_pose, step_callback=None):
         """3D workspace에서 RRT* 경로를 생성한다.
@@ -186,7 +194,7 @@ class RRTStar(PlannerBase):
             curr_idx = parents[curr_idx]
         return path[::-1]
 
-    def _generate_joint_space(self, start_q, goal_q, step_callback=None):
+    def _generate_joint_space_legacy(self, start_q, goal_q, step_callback=None):
         """Pinocchio q-space에서 RRT* 경로를 생성한다.
 
         Args:
@@ -209,6 +217,7 @@ class RRTStar(PlannerBase):
             9. parent chain을 따라 start -> goal q path를 복원한다.
         """
         exploration_rows = self._new_exploration_rows()
+        self._begin_convergence_debug("q_space", start_q, goal_q)
         self.last_planning_status = "running"
         self.last_returned_path_reaches_goal = False
         start_goal_dist = self._joint_distance(start_q, goal_q)
@@ -721,18 +730,15 @@ class RRTStar(PlannerBase):
         """iteration 중 발견된 solution path snapshot들을 JSON으로 저장한다."""
         if not getattr(self, "debug_solution_paths", False) or not solution_paths:
             return None
-        out_dir = os.path.abspath(getattr(self, "debug_output_dir", os.path.join(os.getcwd(), "debug", "rrt_star")))
-        os.makedirs(out_dir, exist_ok=True)
+        out_dir = self._debug_output_path("rrt_star")
+        out_dir.mkdir(parents=True, exist_ok=True)
         robot_name = "robot"
         try:
             robot_name = str(getattr(self, "robotics_robot_name", "") or getattr(self.pin_model, "name", "") or "robot")
         except Exception:
             pass
         stamp = time.strftime("%Y%m%d_%H%M%S")
-        path = os.path.join(
-            out_dir,
-            f"{self.__class__.__name__.lower()}_joint_{robot_name}_{stamp}_{status}_solutions.json",
-        )
+        path = out_dir / f"{self.__class__.__name__.lower()}_joint_{robot_name}_{stamp}_{status}_solutions.json"
         serializable = []
         for item in solution_paths:
             serializable.append({
@@ -746,7 +752,7 @@ class RRTStar(PlannerBase):
         with open(path, "w", encoding="utf-8") as f:
             json.dump(serializable, f, indent=2)
             f.write("\n")
-        self.last_solution_paths_json = path
+        self.last_solution_paths_json = str(path)
         self._log_block("solution path snapshots saved", [
             f"json={path}",
             f"count={len(serializable)}",

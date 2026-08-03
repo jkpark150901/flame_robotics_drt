@@ -1,23 +1,25 @@
 import numpy as np
-import json
 import os
 from typing import List, Union
-import sys
 
-# Adjust path to import PlannerBase and RRTStar
-# sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../pluginbase')))
-sys.path.append(os.path.abspath(os.path.dirname(__file__)))
-
-from plugins.pluginbase.plannerbase import PlannerBase
-from rrt_star import RRTStar
+from plugins.pathplanner.rrt_star import RRTStar
 
 class InformedRRTStar(RRTStar):
+    ompl_algorithm = "informed_rrt_star"
+
     def __init__(self, config_path: str = None):
         if config_path is None:
             config_path = os.path.splitext(__file__)[0] + '.json'
         super().__init__(config_path)
+        if "debug_output_dir" not in self.config:
+            self.debug_output_dir = os.path.join(os.getcwd(), "debug", "informed_rrt_star")
 
-    def generate(self, current_pose: Union[List[float], np.ndarray], target_pose: Union[List[float], np.ndarray]) -> List[np.ndarray]:
+    def _generate_workspace(
+        self,
+        current_pose: Union[List[float], np.ndarray],
+        target_pose: Union[List[float], np.ndarray],
+        step_callback=None,
+    ) -> List[np.ndarray]:
         current_pose = np.array(current_pose, dtype=float)
         target_pose = np.array(target_pose, dtype=float)
         

@@ -165,7 +165,9 @@ class AppWindow(QMainWindow):
             if combobox is not None:
                 try:
                     combobox.clear()
-                    
+                    if category["name"] == "Optimizer":
+                        combobox.addItem("None", "")
+
                     root_path = self.__config.get("root_path", "")
                     plugin_path = pathlib.Path(root_path) / category["path"]
                     
@@ -179,7 +181,11 @@ class AppWindow(QMainWindow):
                             try:
                                 module = importlib.import_module(module_name)
                                 for name, obj in inspect.getmembers(module):
-                                    if inspect.isclass(obj) and issubclass(obj, category["base_class"]): 
+                                    if (
+                                        inspect.isclass(obj)
+                                        and issubclass(obj, category["base_class"])
+                                        and obj.__module__ == module.__name__
+                                    ):
                                         if obj is not category["base_class"]:
                                             self.__console.debug(f"Found plugin class: {obj.__name__}")
                                             combobox.addItem(obj.__name__, file_path.stem)
@@ -740,6 +746,18 @@ class AppWindow(QMainWindow):
             planner_name = text.strip().lower() if text else "rrt_connect"
         return planner_name
 
+    def __current_optimizer_module_name(self):
+        if not hasattr(self, 'cbx_plugin_optimizer'):
+            return None
+        module_name = self.cbx_plugin_optimizer.currentData()
+        if module_name:
+            return str(module_name)
+        text = self.cbx_plugin_optimizer.currentText()
+        optimizer_name = text.strip().lower() if text else ""
+        if optimizer_name in {"", "none"}:
+            return None
+        return optimizer_name
+
     def __current_path_robot_name(self):
         if hasattr(self, 'cbx_path_robot'):
             data = self.cbx_path_robot.currentData()
@@ -1155,16 +1173,22 @@ class AppWindow(QMainWindow):
                 self.__set_path_plan_status("[!] ZAPI not available")
                 return
             planner = self.__current_planner_module_name()
+            optimizer = self.__current_optimizer_module_name()
             ik_solver, ik_normalize = self.__current_ik_request_options()
             self.zapi._ZAPI_request_plan_inspection_path(
                 planner=planner,
+                optimizer=optimizer,
                 step_size=0.1,
                 max_iter=5000,
+                planning_timeout=5.0,
                 max_workers=2,
                 ik_solver=ik_solver,
                 ik_normalize=ik_normalize,
                 use_ef_pose_targets=True)
-            self.__set_path_plan_status(f"EF pose path planning requested: {planner}, solver={ik_solver}, normalize={ik_normalize}")
+            opt_text = optimizer or "none"
+            self.__set_path_plan_status(
+                f"EF pose path planning requested: {planner} + {opt_text}, "
+                f"solver={ik_solver}, normalize={ik_normalize}")
         except Exception as e:
             self.__console.error(f"Error requesting inspection path plan: {e}")
             self.__set_path_plan_status(f"[!] {e}")

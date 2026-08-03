@@ -494,6 +494,7 @@ class ZAPI(ZAPIBase):
         summary = {
             "status": result.get("status"),
             "planner": result.get("planner"),
+            "optimizer": result.get("optimizer"),
         }
         if "timing" in result:
             summary["timing"] = result.get("timing")
@@ -752,9 +753,14 @@ class ZAPI(ZAPIBase):
         request_payload = {
             "command": "plan_inspection_path",
             "planner": (kwargs or {}).get("planner", "rrt_connect"),
+            "optimizer": (kwargs or {}).get("optimizer"),
+            "fixed_joints": (kwargs or {}).get("fixed_joints"),
+            "fixed_joint_indices": (kwargs or {}).get("fixed_joint_indices"),
+            "fixed_joint_values": (kwargs or {}).get("fixed_joint_values"),
             "robot": (kwargs or {}).get("robot", "rb20_1900es"),
             "step_size": (kwargs or {}).get("step_size", 0.08),
             "max_iter": (kwargs or {}).get("max_iter", 3000),
+            "planning_timeout": (kwargs or {}).get("planning_timeout", 5.0),
             "max_workers": (kwargs or {}).get("max_workers", 2),
             "use_ef_pose_targets": bool((kwargs or {}).get("use_ef_pose_targets", False)),
             "ik_solver": (kwargs or {}).get("ik_solver", "dls"),

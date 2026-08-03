@@ -24,12 +24,18 @@ class DirectPath(PlannerBase):
 
         self.step_size = self.config.get("step_size", 0.1)
         self.max_iter = self.config.get("max_iter", 1)
+        self.debug_convergence = bool(self.config.get("debug_convergence", True))
         self.bounds = self.config.get("workspace_bounds", {
             "x_min": -10.0, "x_max": 10.0,
             "y_min": -10.0, "y_max": 10.0,
             "z_min": -10.0, "z_max": 10.0,
         })
 
+        self.configure_fixed_joints(
+            fixed_joints=self.config.get("fixed_joints"),
+            fixed_joint_indices=self.config.get("fixed_joint_indices"),
+            fixed_joint_values=self.config.get("fixed_joint_values"),
+        )
         self.configure_collision(self.config, default_sample_resolution=self.step_size)
 
     def generate(
@@ -47,6 +53,7 @@ class DirectPath(PlannerBase):
             and current_pose.shape[0] == dof
             and target_pose.shape[0] == dof
         ):
+            current_pose, target_pose = self._prepare_fixed_joint_constraints(current_pose, target_pose)
             return self._generate_joint_space(current_pose, target_pose, step_callback=step_callback)
         if self._has_robot_q_space_model():
             raise ValueError(
@@ -59,10 +66,16 @@ class DirectPath(PlannerBase):
     def _generate_joint_space(self, start_q, goal_q, step_callback=None):
         start_q = np.asarray(start_q, dtype=float)
         goal_q = np.asarray(goal_q, dtype=float)
+        start_q, goal_q = self._prepare_fixed_joint_constraints(start_q, goal_q)
         # normalized joint 거리 기준으로 step 수를 정해 raw q를 선형 보간한다.
         distance = float(self._joint_distance(start_q, goal_q))
         steps = max(1, int(np.ceil(distance / max(float(self.step_size), 1e-9))))
-        path = [start_q + (goal_q - start_q) * (i / steps) for i in range(steps + 1)]
+        path = [
+            self._apply_fixed_joints(start_q + (goal_q - start_q) * (i / steps))
+            for i in range(steps + 1)
+        ]
+        convergence_rows = self._record_convergence_from_path("q_space", path, status="direct")
+        self._save_convergence_debug(convergence_rows, "q_space", "success", len(path))
         if step_callback is not None:
             try:
                 step_callback({"nodes": [np.asarray(q, dtype=float) for q in path]})
@@ -80,4 +93,7 @@ class DirectPath(PlannerBase):
             goal[3:][nan_mask] = current_pose[3:][nan_mask]
         distance = float(np.linalg.norm((goal[:3] - current_pose[:3])))
         steps = max(1, int(np.ceil(distance / max(float(self.step_size), 1e-9))))
-        return [current_pose + (goal - current_pose) * (i / steps) for i in range(steps + 1)]
+        path = [current_pose + (goal - current_pose) * (i / steps) for i in range(steps + 1)]
+        convergence_rows = self._record_convergence_from_path("task_space", path, status="direct")
+        self._save_convergence_debug(convergence_rows, "task_space", "success", len(path))
+        return path

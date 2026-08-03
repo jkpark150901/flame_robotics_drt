@@ -383,7 +383,28 @@ class InspectionPlanningBase:
         plan_start_q = q_start
         track_prepended = False
         track_restore = None
-        if lock_linear_track:
+        planner_fixed_indices = list(getattr(planner, "fixed_joint_indices", []) or [])
+        planner_fixed_values = list(getattr(planner, "fixed_joint_values", []) or [])
+        if planner_fixed_indices:
+            plan_start_q = q_start.copy()
+            fixed_values = {}
+            for local_idx, joint_idx in enumerate(planner_fixed_indices):
+                joint_idx = int(joint_idx)
+                if not (0 <= joint_idx < plan_start_q.shape[0]):
+                    continue
+                value = None
+                if local_idx < len(planner_fixed_values) and planner_fixed_values[local_idx] is not None:
+                    try:
+                        value = float(planner_fixed_values[local_idx])
+                    except Exception:
+                        value = None
+                if value is None:
+                    value = float(q_start[joint_idx])
+                plan_start_q[joint_idx] = value
+                fixed_values[joint_idx] = value
+            track_prepended = not np.allclose(plan_start_q, q_start)
+            track_restore = self._pin_joint_values(ik_request.robot_name, fixed_values)
+        elif lock_linear_track:
             track_indices = self._linear_track_indices(ik_request.joint_names)
             if track_indices and goal_q.shape[0] == q_start.shape[0]:
                 plan_start_q = q_start.copy()

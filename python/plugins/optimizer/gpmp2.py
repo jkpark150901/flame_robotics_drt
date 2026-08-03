@@ -2,7 +2,6 @@ import numpy as np
 import sys
 import os
 import json
-from scipy.optimize import minimize
 
 # Adjust path to import OptimizerBase
 # sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../pluginbase')))
@@ -26,9 +25,17 @@ class GPMP2(OptimizerBase):
         self.w_gp = self.config.get("w_gp", 1.0) # Smoothness weight
         self.w_obs = self.config.get("w_obs", 10.0) # Obstacle weight
         self.num_iterations = self.config.get("num_iterations", 20)
+        self.verbose = bool(self.config.get("verbose", False))
+        self.last_optimization_status = None
 
     def optimize(self, path: list, planner) -> list:
         if not path or len(path) < 3:
+            self.last_optimization_status = "skipped_short_path"
+            return path
+        try:
+            from scipy.optimize import minimize
+        except ImportError:
+            self.last_optimization_status = "scipy_unavailable"
             return path
             
         # Convert path to numpy flat array for optimization
@@ -143,7 +150,13 @@ class GPMP2(OptimizerBase):
         # Optimize
         # 'BFGS' requires gradient. We don't have explicit gradient unless we approximate.
         # 'L-BFGS-B' supports approx_grad=True
-        res = minimize(cost_fn, x0, method='L-BFGS-B', options={'maxiter': self.num_iterations, 'disp': True})
+        res = minimize(
+            cost_fn,
+            x0,
+            method='L-BFGS-B',
+            options={'maxiter': self.num_iterations, 'disp': self.verbose},
+        )
+        self.last_optimization_status = "success" if bool(res.success) else "optimizer_not_converged"
         
         final_x = res.x
         optimized_path_arr = reconstruct_path(final_x)
