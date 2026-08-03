@@ -39,6 +39,8 @@ _RT_MESH = "_EndEffectorPoseOptimizer__rt_mesh"
 _RT_INV = "_EndEffectorPoseOptimizer__rt_invers_transform_mat"
 _CHECK_COLLISION = "_EndEffectorPoseOptimizer__check_collision"
 _PROCESS_COMBO = "_EndEffectorPoseOptimizer__process_dda_rt_combination"
+_DDA_CENTERLINE_RADIUS = "_EndEffectorPoseOptimizer__dda_candidate_centerline_radius"
+_ADJUST_DDA_SURFACE_DISTANCE = "_EndEffectorPoseOptimizer__adjust_dda_candidates_for_mesh_surface_distance"
 
 
 # ============================================================================
@@ -127,6 +129,40 @@ def test_3pair_normal(monkeypatch, mock_optimizer):
     assert pose_groups[0]["0"]["_actual_deg"] == 0
     assert pose_groups[0]["120"]["_actual_deg"] == 120
     assert pose_groups[0]["240"]["_actual_deg"] == 240
+
+
+def test_target_point_is_used_as_pipe_section_center(monkeypatch):
+    """Pose generation uses target_point as the pipe center point, not a surface point."""
+    optimizer = _make_mock_optimizer()
+    optimizer.debuging_info = {}
+
+    target_center = np.array([0.4, -0.2, 0.7])
+    candidate_radius = 0.5
+
+    monkeypatch.setattr(
+        optimizer,
+        _DDA_CENTERLINE_RADIUS,
+        lambda distance, distance_reference_mesh=None: candidate_radius,
+    )
+    monkeypatch.setattr(
+        optimizer,
+        _ADJUST_DDA_SURFACE_DISTANCE,
+        lambda dda_poses, desired_surface_distance, distance_reference_mesh: dda_poses,
+    )
+    monkeypatch.setattr(optimizer, _CHECK_COLLISION, _make_collision_check(set()))
+    monkeypatch.setattr(optimizer, _PROCESS_COMBO, _fake_process_combo)
+
+    _, pose_groups = optimizer.calculate_DDA_RT_pose_for_taking_xray_3pair_120(
+        target_point=target_center,
+        distance_from_dda_to_surface=0.01,
+        distance_from_dda_to_rt=0.3,
+        angle_of_rt=10.0,
+        candidate_step_deg=120.0,
+        allow_2pair_fallback=False,
+    )
+
+    dda_positions = np.array([slot["DDA"][:3] for slot in pose_groups[0].values()])
+    assert np.allclose(np.mean(dda_positions, axis=0), target_center)
 
 
 # ============================================================================

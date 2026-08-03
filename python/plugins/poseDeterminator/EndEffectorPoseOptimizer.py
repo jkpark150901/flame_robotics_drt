@@ -1177,13 +1177,26 @@ class EndEffectorPoseOptimizer:
 
         # 선택점 주변의 작은 박스에서 normal 추정용 점을 추출한다.
         if not isinstance(target_point, np.ndarray):
-            target_point = np.array(target_point)
+            target_point = np.array(target_point, dtype=float)
+        else:
+            target_point = np.asarray(target_point, dtype=float)
+        input_center_point = target_point.copy()
+        scan_points = np.asarray(self._scan_data.points, dtype=float)
+        if len(scan_points) == 0:
+            raise RuntimeError("scan_data has no points.")
+        nearest_surface_point_index = int(
+            np.argmin(np.linalg.norm(scan_points - input_center_point, axis=1))
+        )
+        target_point = scan_points[nearest_surface_point_index]
         gap = np.full(3, sampling_size_for_calculating_normal, dtype=np.float64)
         min_bound = target_point - gap
         max_bound = target_point + gap
         box = o3d.geometry.AxisAlignedBoundingBox(min_bound, max_bound)  # type: ignore
 
         if self.__is_debug_mode:
+            self.debuging_info["pipe_profile_input_center_point"] = input_center_point
+            self.debuging_info["pipe_profile_nearest_surface_point"] = target_point
+            self.debuging_info["pipe_profile_nearest_surface_point_index"] = nearest_surface_point_index
             self.debuging_info["sampling_box"] = [min_bound, max_bound]
 
         indices = box.get_point_indices_within_bounding_box(self._scan_data.points)
@@ -1309,32 +1322,28 @@ class EndEffectorPoseOptimizer:
 
     def __calculate_dda_pose_candidate(
         self,
-        point_on_pipe_surface: np.ndarray,
+        pipe_section_center: np.ndarray,
         radius: float,
         num_candidates: int,
     ) -> np.ndarray:
         """World X축을 기준축으로 DDA TCP 후보를 생성한다."""
         angles = 2.0 * np.pi * np.arange(num_candidates) / num_candidates
         return self.__calculate_dda_pose_candidates_for_angles(
-            point_on_pipe_surface,
+            pipe_section_center,
             radius,
             angles,
         )
 
     def __calculate_dda_pose_candidates_for_angles(
         self,
-        point_on_pipe_surface: np.ndarray,
+        pipe_section_center: np.ndarray,
         radius: float,
         angles_rad: np.ndarray | tuple[float, ...] | list[float],
     ) -> np.ndarray:
         """World X축 기준의 지정 각도들로 DDA TCP 후보를 생성한다."""
-        point_on_pipe_surface = np.asarray(point_on_pipe_surface, dtype=float).reshape(3)
+        center = np.asarray(pipe_section_center, dtype=float).reshape(3)
         angles = np.asarray(angles_rad, dtype=float).reshape(-1)
         candidate_axis_unit = np.asarray([1.0, 0.0, 0.0], dtype=float)
-
-        vec_to_surface = point_on_pipe_surface - self.__pipe_center
-        proj_len = float(np.dot(vec_to_surface, candidate_axis_unit))
-        center = self.__pipe_center + proj_len * candidate_axis_unit
 
         v1 = np.asarray([0.0, 1.0, 0.0], dtype=float)
         v2 = np.asarray([0.0, 0.0, 1.0], dtype=float)
@@ -1364,6 +1373,7 @@ class EndEffectorPoseOptimizer:
             self.debuging_info["dda_pipe_parallel_axis_local"] = self.__dda_pipe_parallel_axis.tolist()
             self.debuging_info["dda_candidate_axis"] = candidate_axis_unit.tolist()
             self.debuging_info["dda_candidate_section_center"] = center.tolist()
+            self.debuging_info["dda_candidate_input_point_semantics"] = "pipe_section_center"
             self.debuging_info["dda_candidate_radial_reference"] = v1.tolist()
             self.debuging_info["dda_candidate_tangent_reference"] = v2.tolist()
             self.debuging_info["dda_configured_facing_dot_pipe_center"] = (
