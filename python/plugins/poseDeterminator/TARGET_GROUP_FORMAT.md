@@ -68,23 +68,28 @@ viewer에서는 `_ef_pose_robot_name(pose_name)`가 이 매핑을 담당하고,
 ]
 ```
 
-## 소비 지점 (viewer)
+## 소비 지점 (viewer / simtool)
 
-이 포맷은 [`python/viewervedo/visualizer.py`](../../viewervedo/visualizer.py)에서만 소비된다.
-구조를 바꿀 때 아래를 함께 확인한다. 모두 `_inspection_group_pose_items()`를 거치도록 되어 있다.
+target group을 (robot_name, pose_name, target_T)로 펼치는 것, 그리고 회전 필요 여부(first/
+second 분류) 판단은 [`python/plugins/robotics/inspection_workflow.py`](../robotics/inspection_workflow.py)의
+`inspection_group_pose_items()` / `group_is_reachable()` / `partition_and_sort_target_groups()`에
+있다 — viewer와 simtool이 이 순수 함수를 공유해서 쓴다(로직 이중화 방지). 구조를 바꿀 때 아래를
+함께 확인한다.
 
-- `_show_ef_target_groups` — EF pose mesh/frame/connector 시각화. positioner 회전 필요 여부를
-  색으로 표시한다(초록=회전 불필요, 주황=회전 필요), 판정은 아래 reachability 기준과 동일하다.
-- `_inspection_group_pose_items` / `_inspection_group_is_reachable_now` / `_inspection_group_rt_position`
-  — first/second 분류 및 정렬 (아래 참고)
-- `_plan_inspection_group_sequence` — 로봇별 경로 계획 제출
-- `_handle_request_plan_inspection_path` — goal pose 시각화 + 계획 시퀀스
-- `_handle_request_check_ef_pose_ik` — IK 가능성 체크
-- ZApi 응답 직렬화 — target group을 그대로 반환(추가 변환 없음, `dda_pose`/`rt_pose`가 이미 list)
+- `python/plugins/robotics/inspection_workflow.py` — first/second 분류/정렬(공유 함수), 로봇 이름 매핑
+- `python/simtool/inspection_sequencer.py` — SimTool이 이 함수들로 나눈 group을 순서대로
+  `plan_single_target` 요청으로 Robot Core에 제출 (ROBOT_CORE_DECOUPLING_PLAN.md)
+- `python/viewervedo/visualizer.py`
+  - `_show_ef_target_groups` — EF pose mesh/frame/connector 시각화. positioner 회전 필요 여부를
+    색으로 표시한다(초록=회전 불필요, 주황=회전 필요), 판정은 위 공유 함수와 동일하다.
+  - `_inspection_group_pose_items` / `_inspection_group_is_reachable_now` — 위 공유 함수에 위임하는 얇은 wrapper
+  - `_handle_request_plan_single_target` — 로봇 하나의 source_q -> target_pose 계획을 Robot Core에 제출
+  - `_handle_request_check_ef_pose_ik` — IK 가능성 체크
+  - ZApi 응답 직렬화 — target group을 그대로 반환(추가 변환 없음, `dda_pose`/`rt_pose`가 이미 list)
 
 ### first/second 분류 (positioner 회전 필요 여부 판단)
 
-이 판단은 optimizer가 아니라 **viewer(base planner)** 가 한다. `_inspection_group_is_reachable_now`:
+이 판단은 optimizer가 아니라 **base planner(viewer/simtool이 공유하는 `group_is_reachable`)** 가 한다:
 
 1. RT의 pipe-facing 로컬 축(설정값, 기본 local -Y)의 반대(back-axis, "상위 링크와 연결되는 방향")를
    RT pose 회전으로 world 변환한다.

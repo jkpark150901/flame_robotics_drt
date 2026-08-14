@@ -33,6 +33,7 @@ from plugins.robotics.backend import (
     RobotDescription,
     RoboticsBackend,
 )
+from plugins.robotics.hppfcl_compat import build_bvh_model
 @dataclass
 class PinocchioRobotHandle:
     description: RobotDescription
@@ -373,7 +374,7 @@ class PinocchioRoboticsBackend(RoboticsBackend):
         target_local_T = np.linalg.inv(handle.description.base_T) @ target_world_T
         target_se3 = pin.SE3(target_local_T[:3, :3], target_local_T[:3, 3])
 
-        solver_name = str(options.solver or "dls").lower()
+        solver_name = str(options.solver or "pybullet").lower()
         use_qp = solver_name in ("qp", "qp_ik")
         use_pybullet = solver_name in ("pybullet", "pybullet_ik")
         # normalized DLS는 pink가 대체하지 못하는 별도 구현이었는데 정리하며 제거했다.
@@ -665,6 +666,75 @@ class PinocchioRoboticsBackend(RoboticsBackend):
                 return result
         return CollisionResult(False, backend=self.name)
 
+    def link_obstacle_distances(self, robot_name: str, q: Sequence[float]) -> List[Dict[str, Any]]:
+        """Minimum distance from every robot link to every static obstacle
+        (pipe, positioner, ...) at configuration q - a clearance metric, not
+        just a boolean collision check. Uses the same collision scene
+        (geom_model/geom_data) check_collision() already relies on, so it
+        must be called with the robot's collision already configured
+        (add_collision_objects()/configure_collision() - same requirement as
+        check_collision()).
+
+        Returns one entry per (robot link, static obstacle) pair actually in
+        the collision model - self-collision pairs (both sides robot links)
+        and static-static pairs are excluded, only robot-vs-static distances
+        matter for clearance:
+            [{"link": str, "obstacle": str, "distance": float}, ...]
+        distance is signed (negative = penetrating, matches hppfcl's
+        DistanceResult.min_distance convention) so an in-collision pose still
+        reports a (negative) number instead of silently omitting it.
+        """
+        handle = self._handle(robot_name)
+        self._require_collision(handle)
+        q = np.asarray(q, dtype=float)
+        try:
+            # Don't rely on computeDistances(..., q)'s q-overload to update
+            # geometry placements internally - in a live WSL run, querying
+            # the same q-varying grid produced bit-identical distances at
+            # every cell, meaning geometry never actually moved with q (this
+            # codebase has repeatedly found this pinocchio/OMPL build not
+            # matching documented "q updates FK automatically" behavior -
+            # see check_collision() above and the OMPL binding notes
+            # elsewhere in this file). Force it explicitly instead.
+            pin.forwardKinematics(handle.model, handle.data, q)
+            pin.updateGeometryPlacements(handle.model, handle.data, handle.geom_model, handle.geom_data)
+            # This build only exposes computeDistances(model, data, geom_model,
+            # geom_data, q) and computeDistances(geom_model, geom_data) - no
+            # 4-arg (model, data, geom_model, geom_data) overload, confirmed by
+            # this exact TypeError at runtime. Use the 2-arg form now that
+            # geometry placements are already up to date from the explicit
+            # forwardKinematics/updateGeometryPlacements above.
+            pin.computeDistances(handle.geom_model, handle.geom_data)
+        except Exception as exc:
+            # This mirrors pin.computeCollisions()'s signature (see
+            # check_collision() above) but that's an assumption, not a
+            # verified fact for every pinocchio build this project has run
+            # against (OMPL bindings in this same environment have
+            # repeatedly turned out to be missing/renamed APIs). Degrade to
+            # "no clearance data" rather than crashing every caller
+            # (benchmark_path_planners.py's smoothness/path-length metrics
+            # still work fine without this).
+            if not getattr(self, "_warned_link_obstacle_distances", False):
+                self._warned_link_obstacle_distances = True
+                print(f"link_obstacle_distances: pin.computeDistances unavailable/failed: {exc}")
+            return []
+        static_ids = set(handle.static_object_ids)
+        results = []
+        for pair_id, pair in enumerate(handle.geom_model.collisionPairs):
+            first_static = int(pair.first) in static_ids
+            second_static = int(pair.second) in static_ids
+            if first_static == second_static:
+                continue  # only robot-vs-static pairs are a "clearance" metric
+            link_id = pair.second if first_static else pair.first
+            obstacle_id = pair.first if first_static else pair.second
+            distance_result = handle.geom_data.distanceResults[pair_id]
+            results.append({
+                "link": str(handle.geom_model.geometryObjects[link_id].name),
+                "obstacle": str(handle.geom_model.geometryObjects[obstacle_id].name),
+                "distance": float(distance_result.min_distance),
+            })
+        return results
+
     def check_mesh_point_cloud_overlap(
         self,
         link_model: Any,
@@ -900,17 +970,7 @@ class PinocchioRoboticsBackend(RoboticsBackend):
         triangles = np.asarray(mesh.triangles if hasattr(mesh, "triangles") else mesh.faces, dtype=np.int32)
         if triangles.shape[1] > 3:
             triangles = triangles[:, :3]
-        vec_vertices = hppfcl.StdVec_Vec3s()
-        vec_triangles = hppfcl.StdVec_Triangle()
-        for vertex in vertices:
-            vec_vertices.append(vertex)
-        for tri in triangles:
-            vec_triangles.append(hppfcl.Triangle(int(tri[0]), int(tri[1]), int(tri[2])))
-        bvh = hppfcl.BVHModelOBBRSS()
-        bvh.beginModel(len(vec_vertices), len(vec_triangles))
-        bvh.addSubModel(vec_vertices, vec_triangles)
-        bvh.endModel()
-        bvh.computeLocalAABB()
+        bvh = build_bvh_model(hppfcl, vertices, triangles)
         # 무한정 커지지 않게 최근 소수만 유지한다. mesh 참조를 같이 보관해 id 재사용을 막는다.
         if len(cache) > 8:
             cache.clear()

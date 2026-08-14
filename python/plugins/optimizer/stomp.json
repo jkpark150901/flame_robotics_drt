@@ -2,5 +2,13 @@
     "num_iterations": 50,
     "num_samples": 20,
     "std_dev_factor": 0.5,
-    "smoothing_factor": 0.1
+    "smoothing_factor": 0.1,
+    "d0": 0.5,
+    "w_obs": 0.2,
+    "k_att": 50,
+    "early_stop_patience": 10,
+    "early_stop_rel_tol": 0.01,
+    "save_playback_trajectory": true,
+    "save_task_space_plot": true,
+    "task_space_axes": [0, 1]
 }

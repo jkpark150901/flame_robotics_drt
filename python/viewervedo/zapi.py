@@ -495,6 +495,7 @@ class ZAPI(ZAPIBase):
             "status": result.get("status"),
             "planner": result.get("planner"),
             "optimizer": result.get("optimizer"),
+            "optimization_enabled": result.get("optimization_enabled"),
         }
         if "timing" in result:
             summary["timing"] = result.get("timing")
@@ -712,6 +713,35 @@ class ZAPI(ZAPIBase):
         else:
             self.push_to_queue(request_payload)
 
+    def zapi_save_planning_snapshot(self, kwargs=None):
+        """Handle save_planning_snapshot request (결정된 EF pose + collision scene을 저장)."""
+        self.__console.info(f"Received zapi_save_planning_snapshot with kwargs: {kwargs}")
+        if not kwargs or "path" not in kwargs:
+            self.__console.warning("[ZAPI_VIEWERVEDO] save_planning_snapshot without path")
+            return
+        request_payload = {
+            "command": "save_planning_snapshot",
+            "path": kwargs.get("path"),
+            "_identity": kwargs.get("_identity"),
+        }
+        if self._visualizer:
+            self._visualizer.push_request(request_payload)
+        else:
+            self.push_to_queue(request_payload)
+
+    def reply_planning_snapshot(self, result: dict, identity=None):
+        """Send save_planning_snapshot outcome back to SimTool."""
+        if self.__router_socket and self.__router_socket.is_joined and identity:
+            payload = json.dumps(result).encode('utf-8')
+            reply_parts = [
+                identity,
+                self.__router_socket.socket_id.encode('utf-8'),
+                "reply_planning_snapshot".encode('utf-8'),
+                payload
+            ]
+            self.__router_socket.dispatch(reply_parts)
+            self.__console.debug(f"[ZAPI_VIEWERVEDO] Sent planning snapshot result: {result}")
+
     def zapi_load_inspection_points(self, kwargs=None):
         """Handle load_inspection_points request (JSON에서 검사 지점들을 복원)."""
         self.__console.info(f"Received zapi_load_inspection_points with kwargs: {kwargs}")
@@ -743,36 +773,107 @@ class ZAPI(ZAPIBase):
         else:
             self.push_to_queue(request_payload)
 
-    def zapi_plan_inspection_path(self, kwargs=None):
-        """통합 검사 경로 계획 요청을 처리한다.
+    def zapi_plan_single_target(self, kwargs=None):
+        """단일 로봇의 source_q -> target_pose 경로 계획 요청을 처리한다.
 
-        use_ef_pose_targets=True이면 저장된 검사 target group 여러 개를 순차 계획하고,
-        False이면 수동으로 선택한 검사점 하나를 계획한다.
+        target-group 분할/정렬/positioner 회전 결정은 이제 SimTool이 하고, 여기서는
+        받은 대로 한 target만 Robot Core에 넘긴다 (ROBOT_CORE_DECOUPLING_PLAN.md).
+        request_id는 SimTool이 여러 개의 동시 진행 중인 target 요청을 구분하기 위한
+        상관관계 id로, 그대로 왕복(echo)된다.
         """
-        self.__console.info(f"Received zapi_plan_inspection_path with kwargs: {kwargs}")
+        kwargs = kwargs or {}
+        self.__console.info(f"Received zapi_plan_single_target with kwargs: {kwargs}")
         request_payload = {
-            "command": "plan_inspection_path",
-            "planner": (kwargs or {}).get("planner", "rrt_connect"),
-            "optimizer": (kwargs or {}).get("optimizer"),
-            "fixed_joints": (kwargs or {}).get("fixed_joints"),
-            "fixed_joint_indices": (kwargs or {}).get("fixed_joint_indices"),
-            "fixed_joint_values": (kwargs or {}).get("fixed_joint_values"),
-            "robot": (kwargs or {}).get("robot", "rb20_1900es"),
-            "step_size": (kwargs or {}).get("step_size", 0.08),
-            "max_iter": (kwargs or {}).get("max_iter", 3000),
-            "planning_timeout": (kwargs or {}).get("planning_timeout", 5.0),
-            "max_workers": (kwargs or {}).get("max_workers", 2),
-            "use_ef_pose_targets": bool((kwargs or {}).get("use_ef_pose_targets", False)),
-            "ik_solver": (kwargs or {}).get("ik_solver", "dls"),
-            "ik_normalize": (kwargs or {}).get("ik_normalize", False),
-            "_identity": (kwargs or {}).get("_identity"),
+            "command": "plan_single_target",
+            "robot": kwargs.get("robot"),
+            "start_q": kwargs.get("start_q"),
+            "target_pose": kwargs.get("target_pose"),
+            "planner": kwargs.get("planner", "rrt_connect"),
+            "step_size": kwargs.get("step_size", 0.08),
+            "max_iter": kwargs.get("max_iter", 3000),
+            "fixed_joints": kwargs.get("fixed_joints"),
+            "fixed_joint_indices": kwargs.get("fixed_joint_indices"),
+            "fixed_joint_values": kwargs.get("fixed_joint_values"),
+            "context_label": kwargs.get("context_label"),
+            "request_id": kwargs.get("request_id"),
+            "ik_solver": kwargs.get("ik_solver", "pybullet"),
+            "ik_normalize": kwargs.get("ik_normalize", False),
+            "optimizer": kwargs.get("optimizer"),
+            "optimize_path": kwargs.get("optimize_path", bool(kwargs.get("optimizer"))),
+            "obstacle_rotation_T": kwargs.get("obstacle_rotation_T"),
+            "lock_linear_track": kwargs.get("lock_linear_track", False),
+            "_identity": kwargs.get("_identity"),
         }
-        if isinstance((kwargs or {}).get("target_groups"), list):
-            request_payload["target_groups"] = (kwargs or {}).get("target_groups")
+        if kwargs.get("planning_timeout") is not None:
+            request_payload["planning_timeout"] = float(kwargs.get("planning_timeout"))
         if self._visualizer:
             self._visualizer.push_request(request_payload)
         else:
             self.push_to_queue(request_payload)
+
+    def reply_plan_single_target(self, result: dict, identity=None, client_request_id=None):
+        """Send a plan_single_target result back to SimTool."""
+        if self.__router_socket and self.__router_socket.is_joined and identity:
+            payload = dict(result or {})
+            payload["request_id"] = client_request_id
+            reply_parts = [
+                identity,
+                self.__router_socket.socket_id.encode('utf-8'),
+                "reply_plan_single_target".encode('utf-8'),
+                json.dumps(payload).encode('utf-8'),
+            ]
+            self.__router_socket.dispatch(reply_parts)
+            self.__console.debug(
+                f"[ZAPI_VIEWERVEDO] Sent plan_single_target result: "
+                f"request_id={client_request_id}, status={result.get('status')}")
+
+    def zapi_prepare_next_inspection_phase(self, kwargs=None):
+        """InspectionSequencer가 회전-필요 phase로 넘어가기 전에 보내는 요청을 처리한다.
+
+        주어진 로봇들을 안전 자세(track 제외 전 joint 0)로 접고, 포지셔너를
+        r_deg_delta만큼 돌린다 - 실제 계산은 _handle_request_prepare_next_
+        inspection_phase(joint_names/현재 q에 접근 가능한 Viewer 쪽)에서 한다.
+        """
+        kwargs = kwargs or {}
+        self.__console.info(f"Received zapi_prepare_next_inspection_phase with kwargs: {kwargs}")
+        request_payload = {
+            "command": "prepare_next_inspection_phase",
+            "robots": kwargs.get("robots") or [],
+            "r_deg_delta": kwargs.get("r_deg_delta", 180.0),
+            "request_id": kwargs.get("request_id"),
+            "_identity": kwargs.get("_identity"),
+        }
+        if self._visualizer:
+            self._visualizer.push_request(request_payload)
+        else:
+            self.push_to_queue(request_payload)
+
+    def reply_prepare_next_inspection_phase(self, result: dict, identity=None, client_request_id=None):
+        """Send a prepare_next_inspection_phase result back to SimTool."""
+        if self.__router_socket and self.__router_socket.is_joined and identity:
+            payload = dict(result or {})
+            payload["request_id"] = client_request_id
+            reply_parts = [
+                identity,
+                self.__router_socket.socket_id.encode('utf-8'),
+                "reply_prepare_next_inspection_phase".encode('utf-8'),
+                json.dumps(payload).encode('utf-8'),
+            ]
+            self.__router_socket.dispatch(reply_parts)
+            self.__console.debug(
+                f"[ZAPI_VIEWERVEDO] Sent prepare_next_inspection_phase result: "
+                f"request_id={client_request_id}, status={result.get('status')}")
+
+    def robot_core_completed(self, payload):
+        """Bridge a Robot Core completion onto the Viewer render queue."""
+        self.__console.debug(
+            "Received Robot Core completion: "
+            f"request_id={(payload or {}).get('request_id')}, "
+            f"status={(payload or {}).get('status')}")
+        if self._visualizer:
+            self._visualizer.push_request(dict(payload or {}))
+        else:
+            self.push_to_queue(dict(payload or {}))
 
     def zapi_check_ef_pose_ik(self, kwargs=None):
         """Handle IK-only validation request for the determined EF poses."""
@@ -783,7 +884,7 @@ class ZAPI(ZAPIBase):
             "step_size": (kwargs or {}).get("step_size", 0.08),
             "max_iter": (kwargs or {}).get("max_iter", 3000),
             "max_workers": (kwargs or {}).get("max_workers", 2),
-            "ik_solver": (kwargs or {}).get("ik_solver", "dls"),
+            "ik_solver": (kwargs or {}).get("ik_solver", "pybullet"),
             "ik_normalize": (kwargs or {}).get("ik_normalize", False),
             "_identity": (kwargs or {}).get("_identity"),
         }
@@ -852,6 +953,7 @@ class ZAPI(ZAPIBase):
         self.__console.info(f"Received zapi_determine_ef_pose with kwargs: {kwargs}")
         request_payload = {
             "command": "determine_ef_pose",
+            "inspection_points": (kwargs or {}).get("inspection_points"),
             "_identity": (kwargs or {}).get("_identity"),
         }
         if self._visualizer:
@@ -877,6 +979,8 @@ class ZAPI(ZAPIBase):
         request_payload = {
             "command": "execute_inspection_path",
             "speed": (kwargs or {}).get("speed", 0.2),
+            "plan_sequence": (kwargs or {}).get("plan_sequence"),
+            "playback_initial_r_deg": (kwargs or {}).get("playback_initial_r_deg"),
             "_identity": (kwargs or {}).get("_identity") if kwargs else None,
         }
         if self._visualizer:

@@ -8,6 +8,7 @@ try:
     from PyQt6.QtGui import QImage, QPixmap, QCloseEvent, QStandardItem, QStandardItemModel
     from PyQt6.QtWidgets import QApplication, QFrame, QMainWindow, QLabel, QPushButton, QCheckBox, QComboBox, QDialog
     from PyQt6.QtWidgets import QMessageBox, QProgressBar, QFileDialog, QComboBox, QLineEdit, QSlider, QVBoxLayout
+    from PyQt6.QtWidgets import QInputDialog
     from PyQt6.uic import loadUi
     from PyQt6.QtCore import QObject, Qt, QTimer, QThread, pyqtSignal, QRegularExpression
 except ImportError:
@@ -25,6 +26,11 @@ from util.logger.console import ConsoleLogger
 from common.config_loader import load_config
 from plugins.pluginbase.plannerbase import PlannerBase
 from plugins.pluginbase.optimizerbase import OptimizerBase
+from plugins.pathplanner import Q_SPACE_PLANNER_MODULES
+from plugins.pathplanner.ompl import SUPPORTED_ALGORITHMS as OMPL_SUPPORTED_ALGORITHMS
+from plugins.robotics.inspection_workflow import InspectionWorkflowState
+from simtool.inspection_path_handler import InspectionPathHandler
+from simtool.inspection_sequencer import InspectionSequencer
 from simtool.param import SimParameterMap
 
 
@@ -69,6 +75,15 @@ class AppWindow(QMainWindow):
         self.zapi = None
         self._chuck_mount_points = []
         self._chuck_mount_local_points = []
+        rt_frame_cfg = (
+            ((config.get("ef_pose", {}) or {}).get("frames", {}) or {}).get("rt", {}) or {}
+        )
+        self._inspection_workflow = InspectionWorkflowState(
+            rt_pipe_facing_axis=list(rt_frame_cfg.get("pipe_facing_axis", [0.0, -1.0, 0.0]))
+        )
+        self._inspection_path_handler = InspectionPathHandler(
+            config, self._inspection_workflow)
+        self._inspection_sequencer = InspectionSequencer(self.__console)
 
         try:            
             if "gui" in config:
@@ -167,6 +182,11 @@ class AppWindow(QMainWindow):
                     combobox.clear()
                     if category["name"] == "Optimizer":
                         combobox.addItem("None", "")
+                    elif category["name"] == "PathPlanner":
+                        for algorithm in OMPL_SUPPORTED_ALGORITHMS:
+                            combobox.addItem(f"OMPL: {algorithm}", algorithm)
+                        # falls through below to also add the legacy per-file
+                        # q-space planners (rrt, rrt_connect, direct_path, ...)
 
                     root_path = self.__config.get("root_path", "")
                     plugin_path = pathlib.Path(root_path) / category["path"]
@@ -176,6 +196,11 @@ class AppWindow(QMainWindow):
                         
                         for file_path in files:
                             if file_path.name == "__init__.py":
+                                continue
+                            if (
+                                category["name"] == "PathPlanner"
+                                and file_path.stem not in Q_SPACE_PLANNER_MODULES
+                            ):
                                 continue
                             module_name = f"{category['package_prefix']}.{file_path.stem}"
                             try:
@@ -246,6 +271,9 @@ class AppWindow(QMainWindow):
             self.btn_test_async_zapi_request.clicked.connect(self.on_btn_test_async_zapi_request_clicked)
         if hasattr(self, 'btn_start_simulation'):
             self.btn_start_simulation.clicked.connect(self.__on_btn_start_simulation_clicked)
+        self.__ensure_load_playback_button()
+        if hasattr(self, 'btn_load_playback_result'):
+            self.btn_load_playback_result.clicked.connect(self.__on_btn_load_playback_result_clicked)
         if hasattr(self, 'btn_pick_inspection_point'):
             self.btn_pick_inspection_point.clicked.connect(self.__on_btn_pick_inspection_point_clicked)
         self.__ensure_determine_ef_pose_button()
@@ -257,6 +285,8 @@ class AppWindow(QMainWindow):
             self.btn_save_inspection_points.clicked.connect(self.__on_btn_save_inspection_points_clicked)
         if hasattr(self, 'btn_load_inspection_points'):
             self.btn_load_inspection_points.clicked.connect(self.__on_btn_load_inspection_points_clicked)
+        if hasattr(self, 'btn_save_planning_snapshot'):
+            self.btn_save_planning_snapshot.clicked.connect(self.__on_btn_save_planning_snapshot_clicked)
         self.__ensure_chuck_mount_pick_button()
         if hasattr(self, 'btn_align_f_column'):
             self.btn_align_f_column.clicked.connect(self.__on_btn_align_f_column_clicked)
@@ -437,12 +467,31 @@ class AppWindow(QMainWindow):
         except (ValueError, AttributeError) as e:
             self.__console.error(f"Error moving positioner R: {e}")
 
+    # Positioner clamp joint (f_column_r_to_f_column_passive_clamp) URDF
+    # limit is -0.9..0.0 m; UI convention sends this as 0..0.9 and negates it
+    # before writing the joint (see visualizer.py's
+    # "prismatic y-axis, range -0.9~0; UI value 0~0.9 maps to joint =
+    # -position" comment). The automatic F-column alignment solver already
+    # clips to this range (visualizer.py bounds[3]=(0.0, 0.9)); manual text
+    # entry here had no such check, so a typo/out-of-range value went
+    # straight to the joint with no rejection or clamping.
+    _CLAMP_POS_MIN = 0.0
+    _CLAMP_POS_MAX = 0.9
+
+    def __clamp_positioner_clamp_value(self, pos: float) -> float:
+        clamped = max(self._CLAMP_POS_MIN, min(self._CLAMP_POS_MAX, pos))
+        if clamped != pos:
+            self.__console.warning(
+                f"positioner clamp value {pos} out of range "
+                f"[{self._CLAMP_POS_MIN}, {self._CLAMP_POS_MAX}] - clamped to {clamped}")
+        return clamped
+
     def __on_btn_positioner_clamp_move_clicked(self):
         try:
             if bool(getattr(self, '_spool_mount_fixed', False)):
                 self.__set_path_plan_status("Mount fixed: only R/Z axes can move")
                 return
-            pos = float(self.edit_positioner_clamp_pos.text() or "0")
+            pos = self.__clamp_positioner_clamp_value(float(self.edit_positioner_clamp_pos.text() or "0"))
             vel = float(self.edit_positioner_clamp_vel.text() or "0")
             fix_f, fix_z = self.__get_spool_fix_flags()
             if self.zapi:
@@ -472,7 +521,7 @@ class AppWindow(QMainWindow):
             "x": float(self.edit_positioner_x_pos.text() or "0"),
             "z": float(self.edit_positioner_z_pos.text() or "0"),
             "r": float(self.edit_positioner_r_pos.text() or "0"),
-            "clamp": float(self.edit_positioner_clamp_pos.text() or "0"),
+            "clamp": self.__clamp_positioner_clamp_value(float(self.edit_positioner_clamp_pos.text() or "0")),
         }
 
     def __set_positioner_pose_to_ui(self, pose):
@@ -758,6 +807,11 @@ class AppWindow(QMainWindow):
             return None
         return optimizer_name
 
+    def __path_optimization_enabled(self):
+        if hasattr(self, 'chk_path_optimization'):
+            return bool(self.chk_path_optimization.isChecked())
+        return self.__current_optimizer_module_name() is not None
+
     def __current_path_robot_name(self):
         if hasattr(self, 'cbx_path_robot'):
             data = self.cbx_path_robot.currentData()
@@ -781,7 +835,7 @@ class AppWindow(QMainWindow):
             text = self.cbx_ik_solver.currentText()
             if text:
                 return str(text).strip().lower()
-        return "dls"
+        return "pybullet"
 
     def __current_ik_request_options(self):
         solver = self.__current_ik_solver_name()
@@ -800,7 +854,10 @@ class AppWindow(QMainWindow):
         parent = self.btn_clear_inspection_path.parent()
         if parent is not None and hasattr(parent, 'geometry'):
             parent_geo = parent.geometry()
-            target_height = 528
+            # Must clear btn_save_planning_snapshot's bottom edge (y=522, h=32)
+            # plus a bit of margin, or that button gets visually clipped by
+            # the group box's border.
+            target_height = 594
             if parent_geo.height() < target_height:
                 parent.setGeometry(parent_geo.x(), parent_geo.y(), parent_geo.width(), target_height)
         self.btn_pick_inspection_point.setGeometry(10, 348, 101, 32)
@@ -814,6 +871,11 @@ class AppWindow(QMainWindow):
         self.btn_check_inspection_ik.setGeometry(10, 386, 153, 32)
         if hasattr(self, 'btn_plan_inspection_path'):
             self.btn_plan_inspection_path.setGeometry(168, 386, 153, 32)
+        if not hasattr(self, 'chk_path_optimization'):
+            self.chk_path_optimization = QCheckBox("Optimize", parent)
+            self.chk_path_optimization.setObjectName("chk_path_optimization")
+            self.chk_path_optimization.setChecked(True)
+        self.chk_path_optimization.setGeometry(245, 280, 80, 26)
         if not hasattr(self, 'label_ik_solver'):
             self.label_ik_solver = QLabel("IK Solver", parent)
             self.label_ik_solver.setObjectName("label_ik_solver")
@@ -824,33 +886,52 @@ class AppWindow(QMainWindow):
             self.cbx_ik_solver.addItem("DLS", "dls")
             self.cbx_ik_solver.addItem("QP IK", "qp")
             self.cbx_ik_solver.addItem("PyBullet IK", "pybullet")
-            self.cbx_ik_solver.setCurrentIndex(0)
+            self.cbx_ik_solver.setCurrentIndex(2)  # default: PyBullet IK
         self.cbx_ik_solver.setGeometry(92, 424, 125, 24)
         if not hasattr(self, 'chk_ik_normalize'):
             self.chk_ik_normalize = QCheckBox("Normalize IK joints", parent)
             self.chk_ik_normalize.setObjectName("chk_ik_normalize")
             self.chk_ik_normalize.setChecked(True)
         self.chk_ik_normalize.setGeometry(224, 424, 97, 24)
+        if not hasattr(self, 'chk_lock_linear_track'):
+            self.chk_lock_linear_track = QCheckBox("Lock track to target X", parent)
+            self.chk_lock_linear_track.setObjectName("chk_lock_linear_track")
+            self.chk_lock_linear_track.setChecked(False)
+            self.chk_lock_linear_track.setToolTip(
+                "체크하면 linear_track을 target pose의 world x 위치로 먼저 이동/고정한 뒤 "
+                "나머지 joint만 path planning (탐색 공간 축소 - "
+                "InspectionPlanningBase.plan_q_path_for_robot의 lock_linear_track). "
+                "팔이 큰 자세 차이 중일 때 이 중간 자세가 실제로 충돌할 수 있으니 기본은 꺼짐.")
+        # Own row (not appended to the IK-solver row) - that row already runs
+        # edge-to-edge with the group box's width, so a widget tacked on to
+        # its right was rendered past the visible border and never showed up.
+        self.chk_lock_linear_track.setGeometry(10, 452, 311, 24)
         self.btn_clear_inspection_path.setGeometry(222, 348, 99, 32)
         if hasattr(self, 'edit_inspection_point'):
-            self.edit_inspection_point.setGeometry(10, 456, 171, 22)
+            self.edit_inspection_point.setGeometry(10, 484, 171, 22)
         if hasattr(self, 'label_path_plan_status'):
-            self.label_path_plan_status.setGeometry(188, 456, 133, 22)
+            self.label_path_plan_status.setGeometry(188, 484, 133, 22)
         if not hasattr(self, 'btn_save_inspection_points'):
             self.btn_save_inspection_points = QPushButton("Save Points", parent)
             self.btn_save_inspection_points.setObjectName("btn_save_inspection_points")
-        self.btn_save_inspection_points.setGeometry(10, 486, 155, 32)
+        self.btn_save_inspection_points.setGeometry(10, 514, 155, 32)
         if not hasattr(self, 'btn_load_inspection_points'):
             self.btn_load_inspection_points = QPushButton("Load Points", parent)
             self.btn_load_inspection_points.setObjectName("btn_load_inspection_points")
-        self.btn_load_inspection_points.setGeometry(168, 486, 153, 32)
+        self.btn_load_inspection_points.setGeometry(168, 514, 153, 32)
+        if not hasattr(self, 'btn_save_planning_snapshot'):
+            self.btn_save_planning_snapshot = QPushButton("Save Planning Snapshot", parent)
+            self.btn_save_planning_snapshot.setObjectName("btn_save_planning_snapshot")
+            self.btn_save_planning_snapshot.setToolTip(
+                "결정된 EF pose + collision scene을 벤치마킹용 snapshot(.pkl)으로 저장")
+        self.btn_save_planning_snapshot.setGeometry(10, 550, 311, 32)
         display_group = getattr(self, 'groupBox_3', None)
         if display_group is not None:
             geo = display_group.geometry()
-            target_y = 510
+            target_y = 546
             if parent is not None and hasattr(parent, 'geometry'):
                 parent_geo = parent.geometry()
-                target_y = parent_geo.y() + parent_geo.height() + 14
+                target_y = max(target_y, parent_geo.y() + parent_geo.height() + 14)
             if geo.y() < target_y:
                 display_group.setGeometry(geo.x(), target_y, geo.width(), geo.height())
         self.btn_determine_ef_pose.show()
@@ -860,6 +941,30 @@ class AppWindow(QMainWindow):
         self.chk_ik_normalize.show()
         self.btn_save_inspection_points.show()
         self.btn_load_inspection_points.show()
+        self.btn_save_planning_snapshot.show()
+
+    def __ensure_load_playback_button(self):
+        """Grow the "Operation" groupBox (btn_start_simulation's parent) to
+        fit a new button below it - same pattern as __ensure_save_planning_
+        snapshot_button/__ensure_chuck_mount_pick_button."""
+        if not hasattr(self, 'btn_start_simulation'):
+            return
+        parent = self.btn_start_simulation.parent()
+        sim_geo = self.btn_start_simulation.geometry()
+        if parent is not None and hasattr(parent, 'geometry'):
+            group_geo = parent.geometry()
+            target_height = sim_geo.y() + sim_geo.height() + 8 + 36 + 10
+            if group_geo.height() < target_height:
+                parent.setGeometry(group_geo.x(), group_geo.y(), group_geo.width(), target_height)
+        if not hasattr(self, 'btn_load_playback_result'):
+            self.btn_load_playback_result = QPushButton("Load Playback Result...", parent)
+            self.btn_load_playback_result.setObjectName("btn_load_playback_result")
+            self.btn_load_playback_result.setToolTip(
+                "test_ompl_planning.py --target all이 저장한 debug/<method>_<timestamp>/ "
+                "폴더를 선택해 Start Simulation으로 재생 가능하게 불러온다")
+        self.btn_load_playback_result.setGeometry(
+            sim_geo.x(), sim_geo.y() + sim_geo.height() + 8, sim_geo.width(), 36)
+        self.btn_load_playback_result.show()
 
     def __ensure_chuck_mount_pick_button(self):
         if not hasattr(self, 'btn_spool_pose_load'):
@@ -1118,6 +1223,25 @@ class AppWindow(QMainWindow):
             self.__console.error(f"Error saving inspection points: {e}")
             self.__set_path_plan_status(f"[!] {e}")
 
+    def __on_btn_save_planning_snapshot_clicked(self):
+        try:
+            if not self.zapi:
+                self.__set_path_plan_status("[!] ZAPI not available")
+                return
+            file_name, _ = QFileDialog.getSaveFileName(
+                self,
+                "Save Planning Snapshot",
+                str(pathlib.Path(self.__config.get("root_path", "")) / "sample"),
+                "Planning Snapshot Files (*.pkl)"
+            )
+            if not file_name:
+                return
+            self.zapi._ZAPI_request_save_planning_snapshot(file_name)
+            self.__set_path_plan_status(f"Planning snapshot save requested -> {pathlib.Path(file_name).name}")
+        except Exception as e:
+            self.__console.error(f"Error saving planning snapshot: {e}")
+            self.__set_path_plan_status(f"[!] {e}")
+
     def __on_btn_load_inspection_points_clicked(self):
         try:
             if not self.zapi:
@@ -1142,7 +1266,11 @@ class AppWindow(QMainWindow):
             if not self.zapi:
                 self.__set_path_plan_status("[!] ZAPI not available")
                 return
-            self.zapi._ZAPI_request_determine_ef_pose()
+            if not self._inspection_workflow.selected_points:
+                self.__set_path_plan_status("[!] Inspection point is not selected")
+                return
+            self.zapi._ZAPI_request_determine_ef_pose(
+                inspection_points=self._inspection_workflow.selected_points)
             self.__set_path_plan_status("EF pose requested")
         except Exception as e:
             self.__console.error(f"Error requesting EF pose determination: {e}")
@@ -1172,31 +1300,97 @@ class AppWindow(QMainWindow):
             if not self.zapi:
                 self.__set_path_plan_status("[!] ZAPI not available")
                 return
+            # No is_running guard here on purpose: InspectionSequencer.start()
+            # already tolerates being called while a previous sequence is
+            # still pending (e.g. wedged because robot core died mid-request
+            # and never replied) - it just supersedes it, and the stale
+            # reply (if it ever arrives) is dropped by request_id mismatch.
+            # Blocking the retry here would leave the user with no way to
+            # recover from a wedged sequence except restarting SimTool.
             planner = self.__current_planner_module_name()
             optimizer = self.__current_optimizer_module_name()
+            optimize_path = self.__path_optimization_enabled()
             ik_solver, ik_normalize = self.__current_ik_request_options()
-            self.zapi._ZAPI_request_plan_inspection_path(
+            lock_linear_track = bool(
+                hasattr(self, 'chk_lock_linear_track') and self.chk_lock_linear_track.isChecked())
+            target_groups = self._inspection_workflow.planner_target_groups()
+            # NOTE: previously auto-cleared visuals here before starting a
+            # new sequence, but clear_inspection_path also wipes the
+            # determined target-pose markers (_clear_inspection_goal_pose_
+            # visuals), not just the TCP path line - made target poses
+            # disappear the moment planning started. Reverted - use the
+            # "Clear Inspection Path" button explicitly if you want a clean
+            # slate; _handle_plan_single_target_completed still appends
+            # (clear=False) so this run's own targets accumulate correctly,
+            # just on top of whatever was already drawn.
+            self._inspection_sequencer.start(
+                self.zapi, target_groups,
                 planner=planner,
-                optimizer=optimizer,
-                step_size=0.1,
-                max_iter=5000,
-                planning_timeout=5.0,
-                max_workers=2,
-                ik_solver=ik_solver,
-                ik_normalize=ik_normalize,
-                use_ef_pose_targets=True)
-            opt_text = optimizer or "none"
-            self.__set_path_plan_status(
-                f"EF pose path planning requested: {planner} + {opt_text}, "
-                f"solver={ik_solver}, normalize={ik_normalize}")
+                planner_options={
+                    "step_size": 0.1, "max_iter": 5000,
+                    "optimizer": optimizer, "optimize_path": optimize_path,
+                    "ik_solver": ik_solver, "ik_normalize": ik_normalize,
+                    "lock_linear_track": lock_linear_track,
+                },
+                rt_pipe_facing_axis=self._inspection_workflow.rt_pipe_facing_axis,
+                positioner_second_group_r_deg=float(
+                    (self.__config.get("path_planning", {}) or {}).get(
+                        "positioner_second_group_r_deg", 180.0)),
+                on_progress=lambda text: self.__set_path_plan_status(text),
+                on_finished=self.__on_inspection_sequence_finished,
+            )
         except Exception as e:
             self.__console.error(f"Error requesting inspection path plan: {e}")
             self.__set_path_plan_status(f"[!] {e}")
+
+    def __on_inspection_sequence_finished(self, summary: dict):
+        n_planned = summary.get("n_planned", 0)
+        n_total = summary.get("n_total", 0)
+        deferred = summary.get("deferred_groups") or []
+        results = summary.get("results") or []
+        n_warning = sum(1 for r in results if r.get("status_kind") == "warning")
+        n_failed = sum(1 for r in results if r.get("status_kind") == "failed")
+        text = (
+            f"Inspection sequence {summary.get('status')}: {n_planned}/{n_total} planned"
+            + (f", {n_warning} warning(s) (unreachable target - tolerated)" if n_warning else "")
+            + (f", {n_failed} failed" if n_failed else "")
+        )
+        if deferred:
+            text += f", deferred (needs positioner rotation): {deferred}"
+        if summary.get("status") == "failed" or (deferred and n_total == 0):
+            self.__console.warning(text)
+        else:
+            self.__console.info(text)
+        # Per-target success/warning/failed breakdown - InspectionSequencer
+        # already logged this once (same console instance) when the
+        # sequence finished; shown again here since __set_path_plan_status
+        # only takes the one-line summary above.
+        for line in summary.get("summary_lines") or []:
+            self.__console.info(line)
+        self.__set_path_plan_status(text)
+
+        # Wire whatever this run planned into "Start Simulation" playback -
+        # reuses the pre-existing InspectionPathHandler.accept_result()/
+        # workflow.plan_sequence machinery (Visualizer._start_path_playback()
+        # already knows how to play a plan_sequence; only the sequencer's
+        # results were never converted into that shape before now).
+        plan_sequence = self._inspection_sequencer.to_plan_sequence()
+        if plan_sequence:
+            self._inspection_path_handler.accept_result({
+                "plan_sequence": plan_sequence,
+                "playback_initial_r_deg": 0.0,
+            })
+            self.__console.info(
+                f"Inspection sequence: {len(plan_sequence)} group(s) available for "
+                "playback (Start Simulation)")
+        else:
+            self._inspection_workflow.set_planning_result({})
 
     def __on_btn_clear_inspection_path_clicked(self):
         try:
             if self.zapi:
                 self.zapi._ZAPI_request_clear_inspection_path()
+            self._inspection_workflow.clear()
             if hasattr(self, 'edit_inspection_point'):
                 self.edit_inspection_point.clear()
             self.__set_path_plan_status("Inspection path cleared")
@@ -1210,10 +1404,82 @@ class AppWindow(QMainWindow):
             if not self.zapi:
                 self.__set_path_plan_status("[!] ZAPI not available")
                 return
-            self.zapi._ZAPI_request_execute_inspection_path(speed=1.0)
+            self._inspection_path_handler.request_playback(self.zapi, speed=1.0)
             self.__set_path_plan_status("Simulation playback requested")
         except Exception as e:
             self.__console.error(f"Error starting simulation: {e}")
+            self.__set_path_plan_status(f"[!] {e}")
+
+    def __on_btn_load_playback_result_clicked(self):
+        """Load a test_ompl_planning.py run folder and wire it into the same
+        plan_sequence/"Start Simulation" playback machinery a live
+        InspectionSequencer run uses - see playback_loader.py and
+        __on_inspection_sequence_finished's identical accept_result() call.
+
+        Supports both output shapes test_ompl_planning.py can produce:
+        - --target all: debug/<method>_<timestamp>/, has summary.csv +
+          per-target <idx>_<robot>_<pose>/joint_states.csv subfolders
+          (load_playback_plan_sequence).
+        - --target N (a single target - e.g. checking just one or two before
+          committing to a full-sequence run): joint_states.csv directly in
+          the folder, no summary.csv. Falls back to
+          load_playback_single_target(), which needs the robot name (not
+          recoverable from the folder) - prompted for below.
+        """
+        try:
+            from simtool.playback_loader import load_playback_plan_sequence, load_playback_single_target
+
+            root_path = self.__config.get("root_path", "")
+            default_dir = str(pathlib.Path(root_path) / self.__config.get("debug_dir", "debug"))
+            run_dir = QFileDialog.getExistingDirectory(
+                self, "Select test_ompl_planning.py run folder (debug/<method>_<timestamp>/)",
+                default_dir)
+            if not run_dir:
+                return
+            if (pathlib.Path(run_dir) / "summary.csv").exists():
+                result = load_playback_plan_sequence(run_dir)
+            else:
+                robot_names = [str(getattr(m, "name", "")) for m in getattr(self, "_robot_models", [])
+                               if getattr(m, "name", None)]
+                robot_name, ok = QInputDialog.getItem(
+                    self, "Single-target playback",
+                    f"{run_dir} has no summary.csv (looks like a --target N single-target run).\n"
+                    "Which robot was this planned for?",
+                    robot_names, 0, False)
+                if not ok or not robot_name:
+                    return
+                # Not recoverable from the folder - check this run's console
+                # log for "target[N] needed a positioner rotation" (see
+                # test_ompl_planning.py's _resolve_positioner_r_deg). Wrong
+                # angle here still plays the robot's q_path correctly, just
+                # shows the pipe/positioner at the wrong attitude.
+                r_deg, ok = QInputDialog.getDouble(
+                    self, "Single-target playback",
+                    "Positioner angle (deg) this target was planned against "
+                    "(0 if it did not need a positioner rotation):",
+                    0.0, -360.0, 360.0, 2)
+                if not ok:
+                    return
+                result = load_playback_single_target(run_dir, robot_name, positioner_r_deg=r_deg)
+            plan_sequence = result["plan_sequence"]
+            if not plan_sequence:
+                self.__set_path_plan_status(f"[!] no playable targets found in {run_dir}")
+                return
+            self._inspection_path_handler.accept_result({
+                "plan_sequence": plan_sequence,
+                "playback_initial_r_deg": 0.0,
+            })
+            n_skipped = len(result["skipped"])
+            text = (
+                f"Loaded {result['n_loaded']}/{result['n_targets']} target(s) from {run_dir} "
+                f"for playback (Start Simulation)"
+                + (f" - {n_skipped} skipped (missing/empty joint_states.csv)" if n_skipped else ""))
+            self.__console.info(text)
+            if result["skipped"]:
+                self.__console.warning(f"skipped: {result['skipped']}")
+            self.__set_path_plan_status(text)
+        except Exception as e:
+            self.__console.error(f"Error loading playback result: {e}")
             self.__set_path_plan_status(f"[!] {e}")
 
     def __on_btn_load_spool_clicked(self):
@@ -1334,6 +1600,7 @@ class AppWindow(QMainWindow):
             if topic == "update_inspection_point":
                 try:
                     point = json.loads(msg)
+                    self._inspection_workflow.set_selected_points(point)
                     xyz = point.get("point", point)
                     points = point.get("points", []) if isinstance(point, dict) else []
                     if hasattr(self, 'edit_inspection_point'):
@@ -1344,9 +1611,24 @@ class AppWindow(QMainWindow):
                 except Exception:
                     pass
 
+            if topic == "reply_plan_single_target":
+                try:
+                    payload = json.loads(msg)
+                    self._inspection_sequencer.on_reply(payload)
+                except Exception:
+                    self.__console.error("Failed to process reply_plan_single_target")
+
+            if topic == "reply_prepare_next_inspection_phase":
+                try:
+                    payload = json.loads(msg)
+                    self._inspection_sequencer.on_phase_prepared(payload)
+                except Exception:
+                    self.__console.error("Failed to process reply_prepare_next_inspection_phase")
+
             if topic == "reply_inspection_path":
                 try:
                     result = json.loads(msg)
+                    self._inspection_path_handler.accept_result(result)
                     status = result.get("status", "unknown")
                     if status in ("success", "partial"):
                         mode = result.get("mode")
@@ -1370,6 +1652,18 @@ class AppWindow(QMainWindow):
                                 f"{float(result.get('elapsed', 0.0)):.2f}s")
                     else:
                         self.__set_path_plan_status(f"Path failed: {result.get('message', status)}")
+                except Exception:
+                    pass
+
+            if topic == "reply_planning_snapshot":
+                try:
+                    result = json.loads(msg)
+                    if result.get("status") == "success":
+                        self.__set_path_plan_status(
+                            f"Planning snapshot saved -> {pathlib.Path(result.get('path', '')).name}")
+                    else:
+                        self.__set_path_plan_status(
+                            f"Planning snapshot save failed: {result.get('message', 'unknown')}")
                 except Exception:
                     pass
 
@@ -1419,7 +1713,8 @@ class AppWindow(QMainWindow):
                     result = json.loads(msg)
                     status = result.get("status", "unknown")
                     if status == "success":
-                        count = len(result.get("poses", {}))
+                        self._inspection_workflow.set_pose_result(result)
+                        count = len(self._inspection_workflow.target_groups)
                         self.__set_path_plan_status(
                             f"EF pose ready: {count} pose(s), {float(result.get('elapsed', 0.0)):.2f}s")
                     else:

@@ -5,10 +5,10 @@ from typing import List, Union
 
 import numpy as np
 
-from plugins.pathplanner.ompl.ompl_planner import OMPLPlanner
+from plugins.pluginbase.plannerbase import PlannerBase
 
 
-class RRTStar(OMPLPlanner):
+class RRTStar(PlannerBase):
     """RRT* 기반 경로 계획기.
 
     역할:
@@ -18,7 +18,6 @@ class RRTStar(OMPLPlanner):
     """
 
     use_joint_space_planning = True
-    ompl_algorithm = "rrt_star"
 
     def __init__(self, config_path: str = None):
         """설정 파일을 읽어 RRT* 파라미터를 초기화한다.
@@ -54,7 +53,16 @@ class RRTStar(OMPLPlanner):
         self.terminate_on_first_solution = self.early_stop_on_goal
         self.solution_patience = int(self.config.get("solution_patience", 0))
         self.normalize_joint_space = bool(self.config.get("normalize_joint_space", True))
-        self.use_joint_space_planning = bool(self.config.get("use_joint_space_planning", self.use_joint_space_planning))
+        # PlannerBase initializes the instance flag to False. Use the concrete
+        # planner class default here so subclasses such as InformedRRTStar and
+        # BITStar do not accidentally fall back to their legacy 3D workspace
+        # implementations when their JSON omits this option.
+        class_joint_space_default = bool(
+            getattr(type(self), "use_joint_space_planning", RRTStar.use_joint_space_planning)
+        )
+        self.use_joint_space_planning = bool(
+            self.config.get("use_joint_space_planning", class_joint_space_default)
+        )
         self.debug_exploration = bool(self.config.get("debug_exploration", False))
         self.debug_convergence = bool(self.config.get("debug_convergence", self.debug_exploration))
         self.debug_solution_paths = bool(self.config.get("debug_solution_paths", self.debug_exploration))
@@ -84,7 +92,6 @@ class RRTStar(OMPLPlanner):
             fixed_joint_values=self.config.get("fixed_joint_values"),
         )
         self.configure_collision(self.config, default_sample_resolution=self.step_size)
-        self.configure_ompl(self.config, default_algorithm=self.ompl_algorithm)
 
     def _generate_workspace(self, current_pose, target_pose, step_callback=None):
         """3D workspace에서 RRT* 경로를 생성한다.
@@ -194,7 +201,7 @@ class RRTStar(OMPLPlanner):
             curr_idx = parents[curr_idx]
         return path[::-1]
 
-    def _generate_joint_space_legacy(self, start_q, goal_q, step_callback=None):
+    def _generate_joint_space(self, start_q, goal_q, step_callback=None):
         """Pinocchio q-space에서 RRT* 경로를 생성한다.
 
         Args:

@@ -3,7 +3,7 @@ import os
 import json
 import math
 from plugins.pluginbase.plannerbase import PlannerBase
-from task_space_rrt import TaskSpaceRRT
+from plugins.pathplanner.task_space_rrt import TaskSpaceRRT
 
 class TaskSpaceTRRT(TaskSpaceRRT):
     def __init__(self):

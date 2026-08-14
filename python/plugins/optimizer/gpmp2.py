@@ -6,6 +6,7 @@ import json
 # Adjust path to import OptimizerBase
 # sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../pluginbase')))
 from plugins.pluginbase.optimizerbase import OptimizerBase
+from plugins.optimizer import apf
 
 class GPMP2(OptimizerBase):
     def __init__(self, config_path: str = None):
@@ -23,10 +24,13 @@ class GPMP2(OptimizerBase):
         self.epsilon = self.config.get("epsilon", 0.1) # Prediction error weight
         self.sigma_obs = self.config.get("sigma_obs", 0.02) # Obstacle variance
         self.w_gp = self.config.get("w_gp", 1.0) # Smoothness weight
-        self.w_obs = self.config.get("w_obs", 10.0) # Obstacle weight
+        self.w_obs = self.config.get("w_obs", 10.0) # Obstacle weight (eta)
+        self.d0 = self.config.get("d0", apf.DEFAULT_D0) # APF influence distance (m)
+        self.k_att = self.config.get("k_att", apf.DEFAULT_K_ATT) # attractive gain (goal pull)
         self.num_iterations = self.config.get("num_iterations", 20)
         self.verbose = bool(self.config.get("verbose", False))
         self.last_optimization_status = None
+        self.last_cost_breakdown = None
 
     def optimize(self, path: list, planner) -> list:
         if not path or len(path) < 3:
@@ -86,66 +90,22 @@ class GPMP2(OptimizerBase):
             acc = curr_path[2:] - 2*curr_path[1:-1] + curr_path[:-2]
             gp_cost = 0.5 * np.sum(acc**2) * self.w_gp
             
-            # 2. Obstacle Cost
-            # Signed Distance Field or discrete checks.
-            # Since we don't have SDF, we use a simple penalty if collision.
-            # To define a gradient, we need distance. 
-            # planner._check_collision is boolean. 
-            # We can't use gradient descent effectively on boolean.
-            # However, `scipy.optimize.minimize` with 'Nelder-Mead' or 'Powell' is derivative free.
-            # But high dim...
-            # If we utilize `o3d.RaycastingScene`, we CAN get distance!
-            # Let's assume planner has `scene` which is `o3d.t.geometry.RaycastingScene`
-            
-            obs_cost = 0.0
-            
-            # Check if planner has scene attribute
-            has_scene = hasattr(planner, 'scene') and planner.scene is not None
-            
-            if has_scene:
-                # Query SD (Signed Distance)
-                # Need tensor points
-                # curr_path shape (N, D). Raycasting only supports 3D pos.
-                pos_3d = curr_path[:, :3] # (N, 3)
-                
-                # Convert to o3d Tensor
-                import open3d as o3d
-                query_points = o3d.core.Tensor(pos_3d, dtype=o3d.core.Dtype.Float32)
-                
-                # Compute distance
-                # compute_distance returns unsigned distance? compute_signed_distance?
-                # RaycastingScene usually has compute_distance.
-                dist = planner.scene.compute_distance(query_points)
-                dist_np = dist.numpy() # (N,)
-                
-                # Hinge loss or Gaussian potential
-                # Cost increases as dist -> 0
-                # c(d) = exp(- d^2 / 2sigma^2) ? 
-                # or c(d) = max(epsilon - d, 0)
-                
-                # Let's use Hinge-like: if dist < obstacle_margin, penalize.
-                obstacle_margin = 10.0 # Safety radius
-                
-                # Identify points inside or close
-                # Open3D compute_distance is usually distance to nearest surface.
-                # If internal, it might be 0.
-                
-                # Simple repelling field
-                penalty = np.zeros_like(dist_np)
-                mask = dist_np < obstacle_margin
-                if np.any(mask):
-                    # Cost = (margin - dist)^2
-                    penalty[mask] = (obstacle_margin - dist_np[mask])**2
-                    
-                obs_cost = np.sum(penalty) * self.w_obs
-                
-            else:
-                # Fallback: Discrete collision checks (no gradient -> flat regions)
-                # This will make optimization fail if using gradient methods.
-                # For this assignment, we assume we can get distance or just rely on smoothness.
-                pass
-                
-            return gp_cost + obs_cost
+            # 2. Obstacle Cost - Artificial Potential Field (Khatib repulsive
+            # potential) built from real robot-link/obstacle distances
+            # (Pinocchio, via plugins/optimizer/apf.py), evaluated on every
+            # joint-space waypoint of curr_path (not a 3D-position slice -
+            # curr_path[:, :3] would be the first 3 joint values, meaningless
+            # as xyz for a joint-space path).
+            obs_cost = float(np.sum(apf.path_repulsive_cost(curr_path, planner, self.d0, self.w_obs)))
+
+            # 3. Attractive Cost - pulls each free waypoint toward its
+            # straight-line target between start/goal (apf.py's
+            # straight_line_targets), the multi-waypoint analogue of
+            # Khatib's attractive-to-goal term - pulling every waypoint
+            # straight at goal_conf instead would collapse the trajectory.
+            att_cost = float(np.sum(apf.path_attractive_cost(curr_path, self.k_att)))
+
+            return gp_cost + obs_cost + att_cost
 
         # Optimize
         # 'BFGS' requires gradient. We don't have explicit gradient unless we approximate.
@@ -160,5 +120,7 @@ class GPMP2(OptimizerBase):
         
         final_x = res.x
         optimized_path_arr = reconstruct_path(final_x)
-        
+        self.last_cost_breakdown = apf.path_cost_breakdown(
+            optimized_path_arr, planner, d0=self.d0, eta=self.w_obs, w_smooth=self.w_gp, k_att=self.k_att)
+
         return [p for p in optimized_path_arr]

@@ -3,11 +3,11 @@ import os
 
 import numpy as np
 
-from plugins.pathplanner.ompl.ompl_planner import OMPLPlanner
+from plugins.pluginbase.plannerbase import PlannerBase
 
 
-class RRT(OMPLPlanner):
-    """OMPL RRT joint-space planner."""
+class RRT(PlannerBase):
+    """Workspace RRT planner."""
 
     def __init__(self, config_path=None):
         super().__init__()
@@ -28,7 +28,6 @@ class RRT(OMPLPlanner):
             fixed_joint_values=self.config.get("fixed_joint_values"),
         )
         self.configure_collision(self.config, default_sample_resolution=self.step_size)
-        self.configure_ompl(self.config, default_algorithm="rrt")
 
     def _generate_workspace(self, current_pose, target_pose, step_callback=None):
         current_pose = np.asarray(current_pose, dtype=float)

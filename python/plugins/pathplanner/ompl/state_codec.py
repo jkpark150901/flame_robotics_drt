@@ -4,7 +4,7 @@ import numpy as np
 
 
 class JointStateCodec:
-    """Convert full raw robot configurations to normalized active-joint states."""
+    """Map full raw robot configurations to normalized active-joint states."""
 
     def __init__(
         self,
@@ -24,8 +24,6 @@ class JointStateCodec:
             raise ValueError("OMPL joint upper bounds must be greater than lower bounds")
 
         self.active_indices = np.asarray(list(active_indices), dtype=int)
-        if self.active_indices.size == 0:
-            raise ValueError("OMPL state must contain at least one active joint")
         if len(set(self.active_indices.tolist())) != self.active_indices.size:
             raise ValueError("active joint indices must be unique")
         if np.any(self.active_indices < 0) or np.any(self.active_indices >= self.full_dof):
@@ -54,8 +52,10 @@ class JointStateCodec:
 
     def full_q_to_state_values(self, q_full):
         q = self.apply_fixed_joints(q_full)
-        values = (q[self.active_indices] - self.lower[self.active_indices]) / self.span[self.active_indices]
-        return np.minimum(np.maximum(values, 0.0), 1.0)
+        values = (
+            q[self.active_indices] - self.lower[self.active_indices]
+        ) / self.span[self.active_indices]
+        return np.clip(values, 0.0, 1.0)
 
     def state_to_full_q(self, state):
         values = self._state_values(state)
@@ -66,12 +66,10 @@ class JointStateCodec:
         q = self.reference_q.copy()
         indices = self.active_indices
         q[indices] = self.lower[indices] + values * self.span[indices]
-        q = np.minimum(np.maximum(q, self.lower), self.upper)
+        q = np.clip(q, self.lower, self.upper)
         return self.apply_fixed_joints(q)
 
     def _state_values(self, state):
-        if isinstance(state, np.ndarray):
-            return np.asarray(state, dtype=float).reshape(-1)
-        if isinstance(state, (list, tuple)):
+        if isinstance(state, (np.ndarray, list, tuple)):
             return np.asarray(state, dtype=float).reshape(-1)
         return np.asarray([float(state[i]) for i in range(self.dimension)], dtype=float)

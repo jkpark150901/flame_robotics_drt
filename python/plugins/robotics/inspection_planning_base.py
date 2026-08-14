@@ -96,7 +96,7 @@ class InspectionPlanningBase:
         계산 과정:
             solver 이름을 먼저 결정한다. 나머지 수치 파라미터는 config 기본값으로 채운다.
         """
-        solver_name = str(ik_solver or ik_config.get("solver", "dls") or "dls").lower()
+        solver_name = str(ik_solver or ik_config.get("solver", "pybullet") or "pybullet").lower()
         normalize_value = bool(ik_normalize) if ik_normalize is not None else False
         return IKOptions(
             solver=solver_name,
@@ -298,7 +298,8 @@ class InspectionPlanningBase:
     @staticmethod
     def _linear_track_indices(joint_names) -> list:
         """joint 이름 목록에서 linear track(prismatic 레일) joint의 인덱스를 찾는다."""
-        return [i for i, name in enumerate(joint_names or []) if "linear_track" in str(name)]
+        from plugins.robotics.inspection_workflow import linear_track_indices
+        return linear_track_indices(joint_names)
 
     def _pin_joint_values(self, robot_name: str, fixed_values: Dict[int, float]):
         """지정한 joint 인덱스를 고정하도록 로봇 모델의 position limit을 임시로 좁힌다.
@@ -345,7 +346,8 @@ class InspectionPlanningBase:
         ik_request: InspectionIKRequest,
         q_start: Sequence[float],
         planning_timeout: float = 0.0,
-        lock_linear_track: bool = True,
+        lock_linear_track: bool = False,
+        console=None,
     ) -> Dict[str, Any]:
         """IK 목표 q까지 q-space path planning을 수행한다.
 
@@ -354,8 +356,14 @@ class InspectionPlanningBase:
             ik_request: 목표 pose와 IK 설정.
             q_start: path planning 시작 raw q.
             planning_timeout: planner deadline. 0 이하면 비활성화.
-            lock_linear_track: True면 룰베이스로 linear track을 먼저 목표값으로 이동시킨 뒤,
-                그 값에 고정한 상태로 나머지 joint만 path planning한다(탐색 공간 축소로 속도↑).
+            lock_linear_track: 기본 False(권장). True면 룰베이스로 linear track을 먼저
+                목표값으로 이동시킨 뒤, 그 값에 고정한 상태로 나머지 joint만 path planning한다
+                (탐색 공간 축소로 속도↑). 하지만 그 "먼저 이동" 구간은 팔은 이전 자세 그대로
+                둔 채 레일만 검사 없이 옮기는 가상의 중간 자세(plan_start_q)로, 팔이 큰 자세
+                차이(예: positioner 회전 그룹 안에서 target이 바뀔 때)에서 옮겨가는 도중이면
+                이 중간 자세가 positioner 등과 실제로 충돌할 수 있다(start_collision으로 걸림 -
+                레일과 팔을 같이 보간하는 일반 경로였다면 안 걸렸을 충돌). False면 track도 다른
+                joint와 똑같이 planner가 함께 보간하므로 이 문제가 없다.
 
         Returns:
             dict: IK check 결과에 q_path, verification, planning timing을 추가한 결과.
@@ -414,6 +422,19 @@ class InspectionPlanningBase:
                 track_restore = self._pin_joint_values(
                     ik_request.robot_name, {i: float(goal_q[i]) for i in track_indices})
 
+        if console is not None:
+            ik_result = result.get("ik_result", {}) or {}
+            console.debug(
+                f"inspection path IK result: robot={ik_request.robot_name}\n"
+                f"  ik_success       = {ik_result.get('success')}\n"
+                f"  ik_fallback      = {result.get('ik_fallback')}\n"
+                f"  position_error   = {ik_result.get('position_error')}\n"
+                f"  orientation_error= {ik_result.get('orientation_error')}\n"
+                f"  goal_q           = {np.round(goal_q, 5).tolist()}\n"
+                f"  plan_start_q     = {np.round(plan_start_q, 5).tolist()} "
+                f"(track_prepended={track_prepended})\n"
+                f"  plan_start_q==goal_q -> {np.allclose(plan_start_q, goal_q)}")
+
         if planning_timeout > 0 and hasattr(planner, "planning_deadline"):
             planner.planning_deadline = time.monotonic() + float(planning_timeout)
         stage_t0 = time.perf_counter()
@@ -438,6 +459,8 @@ class InspectionPlanningBase:
                 q_path = [q_start] + list(q_path)
         result["elapsed"] = time.time() - wall_t0
         result["timing"]["planning"] = time.perf_counter() - stage_t0
+        result["plan_start_q"] = plan_start_q
+        result["track_prepended"] = track_prepended
 
         returned_reaches_goal = bool(getattr(planner, "last_returned_path_reaches_goal", True))
         planner_status = getattr(planner, "last_planning_status", None)
@@ -472,5 +495,10 @@ class InspectionPlanningBase:
             "fallback_reason": fallback_reason,
             "collision_preview_reason": collision_preview_reason,
             "reached_T": result.get("ik_reached_T"),
+            # OMPL-backed planners populate this with iterations/solve_time/
+            # max_iter/timeout_sec/state_validity_calls/collision_rejects
+            # (see OMPLPlannerBase._generate_joint_space); legacy planners
+            # leave it empty.
+            "planner_stats": dict(getattr(planner, "last_ompl_stats", {}) or {}),
         })
         return result

@@ -14,6 +14,8 @@ class DirectPath(PlannerBase):
     선형 보간한다. 다른 planner와 비교/디버깅할 때 baseline으로 쓴다.
     """
 
+    use_joint_space_planning = True
+
     def __init__(self, config_path: str = None):
         super().__init__()
         if config_path is None:

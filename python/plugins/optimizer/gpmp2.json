@@ -2,6 +2,8 @@
     "epsilon": 0.1,
     "sigma_obs": 0.02,
     "w_gp": 1.0,
-    "w_obs": 10.0,
-    "num_iterations": 20
+    "w_obs": 0.2,
+    "d0": 0.5,
+    "num_iterations": 20,
+    "k_att": 50
 }

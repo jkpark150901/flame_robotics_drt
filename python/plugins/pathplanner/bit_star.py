@@ -6,8 +6,6 @@ import heapq
 from plugins.pathplanner.rrt_star import RRTStar
 
 class BITStar(RRTStar):
-    ompl_algorithm = "bit_star"
-
     def __init__(self, config_path: str = None):
         if config_path is None:
             config_path = os.path.splitext(__file__)[0] + '.json'

@@ -22,7 +22,7 @@ class RobotDescription:
 class IKOptions:
     """Common IK options passed from UI/planner code."""
 
-    solver: str = "dls"
+    solver: str = "pybullet"
     normalize: Optional[bool] = None
     damping: float = 1e-3
     dt: float = 0.35
@@ -237,6 +237,12 @@ class RoboticsBackend(ABC):
         limit: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """Return backend-neutral collision pair summary for diagnostics."""
+        return []
+
+    def link_obstacle_distances(self, robot_name: str, q: Sequence[float]) -> List[Dict[str, Any]]:
+        """Minimum distance from every robot link to every static obstacle at
+        q - a clearance metric (not a boolean check). Optional: backends that
+        don't support distance queries return []."""
         return []
 
     @abstractmethod

@@ -1,0 +1,30 @@
+{
+    "timeout_sec": 5.0,
+    "normalized_resolution": 0.005,
+    "goal_tolerance": 1e-3,
+    "simplify": false,
+    "max_iter": 0,
+    "collision_sample_resolution": null,
+
+    "_comment_max_iter": "0 = no iteration cap, only timeout_sec bounds solve() (the old behavior). >0 wires a custom ob.PlannerTerminationCondition into planner.solve() that stops once state_validity_calls reaches max_iter or the time budget runs out, whichever first - see _generate_joint_space(). This binding doesn't export ob.IterationTerminationCondition, so state_validity_calls (already tracked for is_valid() calls) is used as the iteration proxy instead. Actually reached count is reported back in the result as planner_stats.iterations. Note tree-connect algorithms (RRTConnect etc.) usually stop with a low iteration count regardless of max_iter/timeout_sec - they return success the moment the start/goal trees connect via any edge their own (normalized_resolution-governed) motion validator accepts, not when the budget runs out. If that accepted edge later fails our finer verify_path() recheck (final_verification_failed), it's not a timeout/max_iter issue - the fix is a finer normalized_resolution so OMPL itself rejects that edge during search and looks for another connection.",
+
+    "_comment_collision_sample_resolution": "null (default, recommended): verify_path()'s edge re-sampling uses normalized_resolution directly, in the exact same normalized-space metric OMPL's own internal motion validator uses (see OMPLPlannerBase._normalized_edge_step_count) - so our post-solve safety check now genuinely matches what OMPL itself already checked, not an approximation of it. This field only matters as a raw-joint-radian fallback for the rare case _joint_limits_for_metric() can't produce joint ranges (no robotics backend/model configured) - set a number here (raw radians) to control that fallback case specifically.",
+
+    "_comment_algorithms": "Optional per-algorithm overrides, applied on top of the defaults above. Any key from the top level (timeout_sec/normalized_resolution/goal_tolerance/simplify/max_iter/collision_sample_resolution) can be overridden per algorithm. Leave an algorithm's entry empty ({}) to just use the defaults.",
+    "algorithms": {
+        "AORRTC": {},
+        "BFMT": {},
+        "BITstar": {},
+        "BKPIECE1": {},
+        "FMT": {},
+        "InformedRRTstar": {},
+        "KPIECE1": {},
+        "LBKPIECE1": {},
+        "PRM": {},
+        "PRMstar": {},
+        "RRT": {},
+        "RRTConnect": {},
+        "RRTstar": {},
+        "SORRTstar": {}
+    }
+}

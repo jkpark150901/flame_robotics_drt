@@ -6,9 +6,9 @@ import sys
 
 # Adjust path to import PlannerBase
 # sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../pluginbase')))
-from plugins.pathplanner.ompl.ompl_planner import OMPLPlanner
+from plugins.pluginbase.plannerbase import PlannerBase
 
-class RRTConnect(OMPLPlanner):
+class RRTConnect(PlannerBase):
     use_joint_space_planning = True
 
     def __init__(self, config_path: str = None):
@@ -37,7 +37,6 @@ class RRTConnect(OMPLPlanner):
             fixed_joint_values=self.config.get("fixed_joint_values"),
         )
         self.configure_collision(self.config, default_sample_resolution=self.step_size)
-        self.configure_ompl(self.config, default_algorithm="rrt_connect")
 
     def generate(
         self,
@@ -279,7 +278,7 @@ class RRTConnect(OMPLPlanner):
             idx = parents[idx]
         return path
 
-    def _generate_joint_space_legacy(self, start_q, goal_q, step_callback=None):
+    def _generate_joint_space(self, start_q, goal_q, step_callback=None):
         start_q, goal_q = self._prepare_fixed_joint_constraints(start_q, goal_q)
         convergence_rows = self._begin_convergence_debug("q_space", start_q, goal_q)
         if self.check_robot_collision(start_q):

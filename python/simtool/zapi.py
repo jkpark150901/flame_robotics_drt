@@ -198,6 +198,14 @@ class ZAPI(QObject, ZAPIBase):
         else:
             self.__console.warning("[ZAPI] Cannot send save_inspection_points: Socket not connected")
 
+    def _ZAPI_request_save_planning_snapshot(self, file_path: str):
+        """결정된 EF pose + collision scene을 벤치마킹용 snapshot(pickle)으로 저장 요청."""
+        if self.__dealer_socket and self.__dealer_socket.is_joined:
+            self.call(self.__dealer_socket, "zapi_save_planning_snapshot", {"path": file_path})
+            self.__console.info(f"[ZAPI] Sent save_planning_snapshot request: {file_path}")
+        else:
+            self.__console.warning("[ZAPI] Cannot send save_planning_snapshot: Socket not connected")
+
     def _ZAPI_request_load_inspection_points(self, file_path: str):
         """JSON 파일에서 검사 지점들을 읽어 복원."""
         if self.__dealer_socket and self.__dealer_socket.is_joined:
@@ -304,48 +312,84 @@ class ZAPI(QObject, ZAPIBase):
         else:
             self.__console.warning("[ZAPI] Cannot send clear_chuck_mount_points: Socket not connected")
 
-    def _ZAPI_request_plan_inspection_path(self, planner: str, robot: str = "rb20_1900es",
-                                           optimizer: str = None,
-                                           fixed_joints=None,
-                                           fixed_joint_indices=None,
-                                           fixed_joint_values=None,
-                                           step_size: float = 0.08, max_iter: int = 3000,
-                                           planning_timeout: float = 5.0,
-                                           max_workers: int = 2,
-                                           ik_solver: str = "dls",
-                                           ik_normalize: bool = False,
-                                           use_ef_pose_targets: bool = False):
-        """Request unified inspection path planning."""
+    def _ZAPI_request_plan_single_target(self, robot: str, target_pose, planner: str,
+                                         request_id: str,
+                                         start_q=None,
+                                         step_size: float = 0.08, max_iter: int = 3000,
+                                         planning_timeout: float = None,
+                                         fixed_joints=None,
+                                         fixed_joint_indices=None,
+                                         fixed_joint_values=None,
+                                         ik_solver: str = "pybullet",
+                                         ik_normalize: bool = False,
+                                         optimizer: str = None,
+                                         optimize_path: bool = None,
+                                         context_label: str = None,
+                                         obstacle_rotation_T=None,
+                                         lock_linear_track: bool = False):
+        """Request a single robot's source_q -> target_pose plan from Robot Core.
+
+        Target-group splitting/sorting/positioner-rotation decisions are made
+        by the caller (InspectionSequencer) - this only carries one target.
+        request_id is echoed back on the reply so the caller can match it to
+        the right in-flight job.
+        """
         if self.__dealer_socket and self.__dealer_socket.is_joined:
             kwargs = {
-                "planner": planner,
                 "robot": robot,
+                "target_pose": target_pose,
+                "planner": planner,
+                "request_id": request_id,
                 "step_size": step_size,
                 "max_iter": max_iter,
-                "planning_timeout": planning_timeout,
-                "max_workers": max_workers,
                 "ik_solver": ik_solver,
                 "ik_normalize": bool(ik_normalize),
-                "use_ef_pose_targets": bool(use_ef_pose_targets),
+                "optimize_path": (
+                    bool(optimizer) if optimize_path is None else bool(optimize_path)),
+                "lock_linear_track": bool(lock_linear_track),
             }
             if optimizer:
                 kwargs["optimizer"] = str(optimizer)
+            if start_q is not None:
+                kwargs["start_q"] = start_q
+            if planning_timeout is not None:
+                kwargs["planning_timeout"] = float(planning_timeout)
             if fixed_joints is not None:
                 kwargs["fixed_joints"] = fixed_joints
             if fixed_joint_indices is not None:
                 kwargs["fixed_joint_indices"] = fixed_joint_indices
             if fixed_joint_values is not None:
                 kwargs["fixed_joint_values"] = fixed_joint_values
-            self.call(self.__dealer_socket, "zapi_plan_inspection_path", kwargs)
-            self.__console.info(f"[ZAPI] Sent plan_inspection_path: {kwargs}")
+            if context_label is not None:
+                kwargs["context_label"] = context_label
+            if obstacle_rotation_T is not None:
+                kwargs["obstacle_rotation_T"] = obstacle_rotation_T
+            self.call(self.__dealer_socket, "zapi_plan_single_target", kwargs)
+            self.__console.info(f"[ZAPI] Sent plan_single_target: {kwargs}")
         else:
-            self.__console.warning("[ZAPI] Cannot send plan_inspection_path: Socket not connected")
+            self.__console.warning("[ZAPI] Cannot send plan_single_target: Socket not connected")
+
+    def _ZAPI_request_prepare_next_inspection_phase(self, robots, r_deg_delta: float, request_id: str):
+        """Ask the Viewer to retreat the given robots to a safe posture and
+        rotate the positioner by r_deg_delta - InspectionSequencer calls this
+        between the "reachable" phase and a rotation-needed phase."""
+        if self.__dealer_socket and self.__dealer_socket.is_joined:
+            kwargs = {
+                "robots": list(robots),
+                "r_deg_delta": float(r_deg_delta),
+                "request_id": request_id,
+            }
+            self.call(self.__dealer_socket, "zapi_prepare_next_inspection_phase", kwargs)
+            self.__console.info(f"[ZAPI] Sent prepare_next_inspection_phase: {kwargs}")
+        else:
+            self.__console.warning(
+                "[ZAPI] Cannot send prepare_next_inspection_phase: Socket not connected")
 
     def _ZAPI_request_check_ef_pose_ik(self, planner: str,
                                        step_size: float = 0.08,
                                        max_iter: int = 3000,
                                        max_workers: int = 2,
-                                       ik_solver: str = "dls",
+                                       ik_solver: str = "pybullet",
                                        ik_normalize: bool = False):
         """Request IK-only validation/visualization for the determined DDA/RT EF poses."""
         if self.__dealer_socket and self.__dealer_socket.is_joined:
@@ -362,10 +406,13 @@ class ZAPI(QObject, ZAPIBase):
         else:
             self.__console.warning("[ZAPI] Cannot send check_ef_pose_ik: Socket not connected")
 
-    def _ZAPI_request_determine_ef_pose(self):
+    def _ZAPI_request_determine_ef_pose(self, inspection_points=None):
         """Request EF pose determination for the currently picked inspection point."""
         if self.__dealer_socket and self.__dealer_socket.is_joined:
-            self.call(self.__dealer_socket, "zapi_determine_ef_pose", {})
+            kwargs = {}
+            if inspection_points is not None:
+                kwargs["inspection_points"] = inspection_points
+            self.call(self.__dealer_socket, "zapi_determine_ef_pose", kwargs)
             self.__console.info("[ZAPI] Sent determine_ef_pose")
         else:
             self.__console.warning("[ZAPI] Cannot send determine_ef_pose: Socket not connected")
@@ -378,10 +425,15 @@ class ZAPI(QObject, ZAPIBase):
         else:
             self.__console.warning("[ZAPI] Cannot send clear_inspection_path: Socket not connected")
 
-    def _ZAPI_request_execute_inspection_path(self, speed: float = 0.2):
-        """Start viewer-side simulation playback for the last planned EF path."""
+    def _ZAPI_request_execute_inspection_path(self, speed: float = 0.2, plan_sequence=None,
+                                              playback_initial_r_deg=None):
+        """Ask the viewer to render playback for the SimTool-owned plan sequence."""
         if self.__dealer_socket and self.__dealer_socket.is_joined:
             kwargs = {"speed": float(speed)}
+            if plan_sequence is not None:
+                kwargs["plan_sequence"] = plan_sequence
+            if playback_initial_r_deg is not None:
+                kwargs["playback_initial_r_deg"] = float(playback_initial_r_deg)
             self.call(self.__dealer_socket, "zapi_execute_inspection_path", kwargs)
             self.__console.info(f"[ZAPI] Sent execute_inspection_path: {kwargs}")
         else:

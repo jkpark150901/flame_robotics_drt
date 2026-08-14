@@ -1562,7 +1562,21 @@ class EndEffectorPoseOptimizer:
 
         Returns:
             충돌하면 True, 충돌하지 않으면 False.
+
+        계산 과정:
+            self.__collision_checker가 설정돼 있으면(set_collision_checker) 그쪽에
+            위임한다 - PyBulletCollisionChecker처럼 실제 solid mesh-vs-mesh 충돌
+            검사(getClosestPoints)를 쓰는 checker를 주입할 수 있게 하기 위함이다.
+            이전에는 set_collision_checker로 뭘 넣어도 이 메서드가 항상 아래의
+            point-cloud proximity 방식(배관 원시 스캔 점군과 EF mesh 샘플링 점 사이
+            최단거리)을 직접 다시 계산해서 무시하고 있었다 - 주입 지점이 있었지만
+            실제로는 한 번도 안 쓰이던 상태였다.
         """
+        if self.__collision_checker is not None:
+            return bool(self.__collision_checker(
+                link_model, tcp_pose, tcp_to_link_pose_T,
+                margin=margin, sample_count=sample_count))
+
         # TCP pose와 TCP-to-link 변환으로 link mesh world pose를 계산한다.
         tcp_pose_T = np.eye(4)
         tcp_pose_T[:3, :3] = R.from_euler("xyz", tcp_pose[3:]).as_matrix()

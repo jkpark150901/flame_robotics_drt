@@ -1,6 +1,7 @@
 pyqt6
 pyqtdarktheme
-numpy
+# Pinocchio 4.1 Windows bindings use the NumPy 2 ABI.
+numpy>=2.1,<3
 scipy
 scikit-image
 pyzmq
@@ -15,11 +16,13 @@ lxml
 pycollada
 matplotlib
 
-# OMPL joint-space path planners. Version is pinned to the migration baseline.
-# Official OMPL 2.0.0 wheels support Linux/macOS (CPython 3.10+), but not Windows.
-# On Windows, build the official OMPL tag 2.0.0 Python binding and install it
-# into this environment manually before selecting an OMPL-backed planner.
-ompl==2.0.0; python_version >= "3.10" and platform_system != "Windows"
-
 # Robotics Pinocchio. PyPI package `pin` currently provides pip wheels on Linux only.
 pin; platform_system == "Linux"
+
+# EF pose determination's real mesh-vs-mesh collision check
+# (plugins/robotics/pybullet_collision.py) and pybullet_ik.py's IK solve.
+pybullet
+
+
+urdf-parser-py
+ompl

@@ -6,8 +6,7 @@ from scipy.optimize import minimize
 
 # sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../pluginbase')))
 from plugins.pluginbase.optimizerbase import OptimizerBase
-
-import open3d as o3d
+from plugins.optimizer import apf
 
 class TrajOpt(OptimizerBase):
     def __init__(self, config_path: str = None):
@@ -22,10 +21,12 @@ class TrajOpt(OptimizerBase):
             print(f"[TrajOpt] Warning: Could not load config: {e}")
             self.config = {}
             
-        self.safety_margin = self.config.get("safety_margin", 10.0)
+        self.safety_margin = self.config.get("safety_margin", 0.1)  # real meters (APF d0)
         self.w_smooth = self.config.get("w_smooth", 1.0)
-        self.w_collision = self.config.get("w_collision", 20.0)
+        self.w_collision = self.config.get("w_collision", 20.0)  # APF eta
+        self.k_att = self.config.get("k_att", apf.DEFAULT_K_ATT)  # attractive gain (goal pull)
         self.max_iter = self.config.get("max_iter", 20)
+        self.last_cost_breakdown = None
 
     def optimize(self, path: list, planner) -> list:
         if not path or len(path) < 3:
@@ -44,60 +45,39 @@ class TrajOpt(OptimizerBase):
             inner = x.reshape((n_waypoints - 2, dim))
             return np.vstack([start_conf, inner, goal_conf])
             
-        # Cost Function: Smoothness only
-        # Collision handled as constraints or separate penalty
+        # Cost Function: Smoothness + APF obstacle penalty (Khatib repulsive
+        # potential, plugins/optimizer/apf.py, from real robot-link/obstacle
+        # distances - joint-space q, not the dead o3d.RaycastingScene-based
+        # xyz constraint this used to rely on via planner.scene, an attribute
+        # no planner in this codebase ever sets).
         def obj_fn(x):
             curr_path = reconstruct_path(x)
             # Smoothness: Sum of squared distances (shortest path) or accelerations
             # TrajOpt usually does min Sum ||v||^2 or ||a||^2
             # Let's do ||a||^2 (smoothness)
             acc = curr_path[2:] - 2*curr_path[1:-1] + curr_path[:-2]
-            return 0.5 * np.sum(acc**2) * self.w_smooth
+            smooth_cost = 0.5 * np.sum(acc**2) * self.w_smooth
+            obs_cost = float(np.sum(apf.path_repulsive_cost(
+                curr_path[1:-1], planner, self.safety_margin, self.w_collision)))
+            # Attractive Cost - pulls each free waypoint toward its
+            # straight-line target between start/goal (see gpmp2.py's
+            # identical term / apf.straight_line_targets for why not the
+            # literal goal_conf).
+            att_cost = float(np.sum(apf.path_attractive_cost(curr_path, self.k_att)))
+            return smooth_cost + obs_cost + att_cost
 
-        # Constraints
-        # dist(x_i) >= safety_margin
-        # We need equality/inequality constraints for scipy
-        
-        constraints = []
-        
-        if hasattr(planner, 'scene') and planner.scene is not None:
-             # Define constraint for each waypoint?
-             # For intermediate points only (start/goal fixed)
-             # x has (N-2) * D variables
-             # We check distance for each of the (N-2) points.
-             
-             # Constraint function usually takes x and returns vector
-             # SLSQP supports dictionary of constraints
-             
-             def collision_constraint(x):
-                 # Returns vector of (dist - margin)
-                 # Should be >= 0
-                 curr_path = reconstruct_path(x)
-                 inner_pos = curr_path[1:-1, :3] # Only optimize inner 3D collision
-                 
-                 query = o3d.core.Tensor(inner_pos, dtype=o3d.core.Dtype.Float32)
-                 dist = planner.scene.compute_distance(query)
-                 dist_np = dist.numpy()
-                 
-                 return dist_np - self.safety_margin
-                 
-             constraints.append({
-                 'type': 'ineq',
-                 'fun': collision_constraint
-             })
-             
-             # We can also add penalty to objective if constraints are hard to satisfy
-             # But 'Trailer' TrajOpt is constrained optimization.
-        
         # Optimize using SLSQP
         try:
-             res = minimize(obj_fn, x0, method='SLSQP', constraints=constraints, 
+             res = minimize(obj_fn, x0, method='SLSQP',
                             options={'maxiter': self.max_iter, 'disp': True})
              final_x = res.x
         except Exception as e:
              # SLSQP might fail if memory issue or singular
              print(f"[TrajOpt] Optimization failed: {e}")
              final_x = x0
-             
+
         optimized_path_arr = reconstruct_path(final_x)
+        self.last_cost_breakdown = apf.path_cost_breakdown(
+            optimized_path_arr, planner, d0=self.safety_margin, eta=self.w_collision,
+            w_smooth=self.w_smooth, k_att=self.k_att)
         return [p for p in optimized_path_arr]

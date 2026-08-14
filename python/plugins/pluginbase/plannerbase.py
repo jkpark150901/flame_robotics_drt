@@ -22,6 +22,8 @@ except ImportError:
     except ImportError:
         hppfcl = None
 
+from plugins.robotics.hppfcl_compat import build_bvh_model
+
 @dataclass
 class PlanningTarget:
     """계획할 단일 target pose. 하나의 로봇 job 안에서 순서대로 계획된다."""
@@ -1131,19 +1133,7 @@ class PlannerBase(ABC):
         if len(vertices) == 0 or len(triangles) == 0:
             raise ValueError("collision object mesh must have vertices and triangles")
 
-        vec_vertices = hppfcl.StdVec_Vec3s()
-        vec_triangles = hppfcl.StdVec_Triangle()
-        for vertex in vertices:
-            vec_vertices.append(vertex)
-        for tri in triangles:
-            vec_triangles.append(hppfcl.Triangle(int(tri[0]), int(tri[1]), int(tri[2])))
-
-        bvh = hppfcl.BVHModelOBBRSS()
-        bvh.beginModel(len(vec_vertices), len(vec_triangles))
-        bvh.addSubModel(vec_vertices, vec_triangles)
-        bvh.endModel()
-        bvh.computeLocalAABB()
-        return bvh
+        return build_bvh_model(hppfcl, vertices, triangles)
 
     def _extract_mesh_arrays(self, mesh):
         vertices = np.asarray(mesh.vertices, dtype=float)
@@ -1824,7 +1814,7 @@ class PlannerBase(ABC):
         if rows is not None:
             self._record_convergence(
                 rows,
-                iteration=-1,
+                iteration=0,
                 phase="start",
                 state=start_state,
                 node_count=1,
@@ -1868,8 +1858,9 @@ class PlannerBase(ABC):
             start_time = context.get("start_time")
             elapsed_s = "" if start_time is None else time.perf_counter() - float(start_time)
 
+        normalized_iteration = max(0, int(iteration)) if iteration is not None else 0
         rows.append({
-            "iteration": int(iteration) if iteration is not None else -1,
+            "iteration": normalized_iteration,
             "space": space,
             "phase": phase,
             "elapsed_s": elapsed_s,
@@ -1960,6 +1951,7 @@ class PlannerBase(ABC):
             import matplotlib
             matplotlib.use("Agg")
             import matplotlib.pyplot as plt
+            from matplotlib.ticker import MaxNLocator
         except Exception as exc:
             print(f"{self.__class__.__name__} convergence plot skipped: matplotlib unavailable ({exc})")
             return None
@@ -2022,10 +2014,10 @@ class PlannerBase(ABC):
         if not isinstance(axes, np.ndarray):
             axes = np.asarray([axes])
 
-        axes[0].plot(elapsed, distance, color="tab:blue", alpha=0.45, linewidth=1.0, label="distance to goal")
-        axes[0].plot(elapsed, best_distance, color="tab:green", linewidth=1.8, label="best distance")
+        axes[0].plot(iterations, distance, color="tab:blue", alpha=0.45, linewidth=1.0, label="distance to goal")
+        axes[0].plot(iterations, best_distance, color="tab:green", linewidth=1.8, label="best distance")
         if np.any(collisions):
-            axes[0].scatter(elapsed[collisions], distance[collisions], s=16, color="tab:red", label="collision")
+            axes[0].scatter(iterations[collisions], distance[collisions], s=16, color="tab:red", label="collision")
         axes[0].set_ylabel("Goal Distance")
         axes[0].grid(True, alpha=0.25)
         axes[0].legend(loc="best")
@@ -2034,7 +2026,7 @@ class PlannerBase(ABC):
         if space in {"q_space", "q", "joint", "joint_space"}:
             for dim in range(state_dim):
                 axes[1].plot(
-                    elapsed,
+                    iterations,
                     state_matrix[:, dim],
                     linewidth=1.2,
                     color=colors[dim % len(colors)],
@@ -2043,13 +2035,13 @@ class PlannerBase(ABC):
                 if goal is not None and dim < goal.size:
                     axes[1].axhline(goal[dim], color=colors[dim % len(colors)], linestyle="--", alpha=0.25)
             axes[1].set_ylabel("Joint Angle")
-            axes[1].set_xlabel("Elapsed Time (s)")
+            axes[1].set_xlabel("Iteration")
             axes[1].legend(loc="best", ncol=min(4, max(1, state_dim)))
         else:
             pos_labels = ["x", "y", "z"]
             for dim in range(min(3, state_dim)):
                 axes[1].plot(
-                    elapsed,
+                    iterations,
                     state_matrix[:, dim],
                     linewidth=1.4,
                     color=colors[dim % len(colors)],
@@ -2063,7 +2055,7 @@ class PlannerBase(ABC):
                 ori_labels = ["roll", "pitch", "yaw"]
                 for dim in range(3, min(6, state_dim)):
                     axes[2].plot(
-                        elapsed,
+                        iterations,
                         state_matrix[:, dim],
                         linewidth=1.2,
                         color=colors[(dim - 3) % len(colors)],
@@ -2072,22 +2064,16 @@ class PlannerBase(ABC):
                     if goal is not None and dim < goal.size:
                         axes[2].axhline(goal[dim], color=colors[(dim - 3) % len(colors)], linestyle="--", alpha=0.25)
                 axes[2].set_ylabel("EF Orientation")
-                axes[2].set_xlabel("Elapsed Time (s)")
+                axes[2].set_xlabel("Iteration")
                 axes[2].legend(loc="best")
             else:
-                axes[1].set_xlabel("Elapsed Time (s)")
+                axes[1].set_xlabel("Iteration")
         axes[1].grid(True, alpha=0.25)
         if len(axes) > 2:
             axes[2].grid(True, alpha=0.25)
 
-        top = axes[0].twiny()
-        top.set_xlim(axes[0].get_xlim())
-        if len(elapsed) > 1 and float(elapsed[-1] - elapsed[0]) > 1e-9:
-            ticks = axes[0].get_xticks()
-            iter_ticks = np.interp(ticks, elapsed, iterations)
-            top.set_xticks(ticks)
-            top.set_xticklabels([str(int(round(v))) for v in iter_ticks])
-        top.set_xlabel("Iteration (approx.)")
+        for axis in axes:
+            axis.xaxis.set_major_locator(MaxNLocator(integer=True))
 
         space_title = "Joint Angles" if space in {"q_space", "q", "joint", "joint_space"} else "EF Pose"
         title = f"{self.__class__.__name__} Convergence | {space_title}"
@@ -2152,8 +2138,9 @@ class PlannerBase(ABC):
         """
         if rows is None:
             return
+        normalized_iteration = max(0, int(iteration)) if iteration is not None else 0
         rows.append({
-            "iteration": int(iteration) if iteration is not None else -1,
+            "iteration": normalized_iteration,
             "phase": phase,
             "sample_type": sample_type,
             "nearest_idx": "" if nearest_idx is None else int(nearest_idx),
@@ -2288,6 +2275,7 @@ class PlannerBase(ABC):
             import matplotlib
             matplotlib.use("Agg")
             import matplotlib.pyplot as plt
+            from matplotlib.ticker import MaxNLocator
         except Exception as exc:
             print(f"{self.__class__.__name__} exploration plot skipped: matplotlib unavailable ({exc})")
             return None
@@ -2332,10 +2320,10 @@ class PlannerBase(ABC):
         rewire_collision_count = _carry_forward_count("rewire_collision_count")
 
         fig, axes = plt.subplots(4, 1, figsize=(13, 12), sharex=True)
-        axes[0].plot(elapsed, node_counts, color="tab:blue", linewidth=1.5, label="nodes")
+        axes[0].plot(iterations, node_counts, color="tab:blue", linewidth=1.5, label="nodes")
         if np.any(collisions):
             axes[0].scatter(
-                elapsed[collisions],
+                iterations[collisions],
                 node_counts[collisions],
                 color="tab:red",
                 s=18,
@@ -2344,7 +2332,7 @@ class PlannerBase(ABC):
             )
         if np.any(accepted):
             axes[0].scatter(
-                elapsed[accepted],
+                iterations[accepted],
                 node_counts[accepted],
                 color="tab:green",
                 s=10,
@@ -2380,14 +2368,14 @@ class PlannerBase(ABC):
             phase_colors.get(phase, "tab:gray") if collision else ("tab:green" if is_accepted else "tab:gray")
             for phase, collision, is_accepted in zip(phases, collisions, accepted)
         ]
-        axes[1].scatter(elapsed, y, c=colors, s=15, alpha=0.8)
+        axes[1].scatter(iterations, y, c=colors, s=15, alpha=0.8)
         axes[1].set_yticks(list(phase_to_y.values()))
         axes[1].set_yticklabels(list(phase_to_y.keys()))
         axes[1].set_ylabel("Event / Collision Source")
         axes[1].grid(True, alpha=0.25)
 
         axes[2].plot(
-            elapsed,
+            iterations,
             cumulative_collision_time,
             color="tab:red",
             linewidth=1.5,
@@ -2395,27 +2383,27 @@ class PlannerBase(ABC):
         )
         if np.any(collision_time > 0.0):
             axes[2].scatter(
-                elapsed[collision_time > 0.0],
+                iterations[collision_time > 0.0],
                 cumulative_collision_time[collision_time > 0.0],
                 c=["tab:red" if c else "tab:blue" for c in collisions[collision_time > 0.0]],
                 s=12,
                 alpha=0.65,
                 label="collision checks",
             )
-        axes[2].set_xlabel("Elapsed Time (s)")
+        axes[2].set_xlabel("Iteration")
         axes[2].set_ylabel("Collision Check Time (s)")
         axes[2].grid(True, alpha=0.25)
         axes[2].legend(loc="best")
 
         axes[3].plot(
-            elapsed,
+            iterations,
             new_node_collision_count,
             color="tab:red",
             linewidth=1.4,
             label="new-node collisions",
         )
         axes[3].plot(
-            elapsed,
+            iterations,
             random_new_node_collision_count,
             color="tab:pink",
             linewidth=1.2,
@@ -2423,25 +2411,19 @@ class PlannerBase(ABC):
             label="random new-node collisions",
         )
         axes[3].plot(
-            elapsed,
+            iterations,
             rewire_collision_count,
             color="tab:purple",
             linewidth=1.4,
             label="rewire collisions",
         )
-        axes[3].set_xlabel("Elapsed Time (s)")
+        axes[3].set_xlabel("Iteration")
         axes[3].set_ylabel("Collision Count")
         axes[3].grid(True, alpha=0.25)
         axes[3].legend(loc="best")
 
-        top = axes[0].twiny()
-        top.set_xlim(axes[0].get_xlim())
-        if len(elapsed) > 1 and float(elapsed[-1] - elapsed[0]) > 1e-9:
-            ticks = axes[0].get_xticks()
-            iter_ticks = np.interp(ticks, elapsed, iterations)
-            top.set_xticks(ticks)
-            top.set_xticklabels([str(int(round(v))) for v in iter_ticks])
-        top.set_xlabel("Iteration (approx.)")
+        for axis in axes:
+            axis.xaxis.set_major_locator(MaxNLocator(integer=True))
 
         title = f"{self.__class__.__name__} Exploration"
         if path_waypoints is not None:

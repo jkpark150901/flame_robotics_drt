@@ -14,8 +14,6 @@ def _configure_test_q_space(planner):
     goal_q = np.asarray([0.3, -0.2, 0.15, 0.1, -0.1, 0.2], dtype=float)
     planner.step_size = 0.5
     planner.max_iter = 50
-    if hasattr(planner, "planner_backend"):
-        planner.planner_backend = "legacy"
     if hasattr(planner, "search_radius"):
         planner.search_radius = 2.0
     if hasattr(planner, "goal_bias"):
@@ -39,6 +37,13 @@ def _configure_test_q_space(planner):
         sample_resolution=0.2,
     )
     return start_q, goal_q
+
+
+@pytest.mark.parametrize("planner_cls", [RRTStar, InformedRRTStar, BITStar])
+def test_rrt_star_family_defaults_to_joint_space(planner_cls):
+    planner = planner_cls()
+
+    assert planner.use_joint_space_planning is True
 
 
 @pytest.mark.parametrize("planner_cls", [DirectPath, RRTConnect, RRTStar, InformedRRTStar, BITStar])
@@ -82,6 +87,16 @@ def test_q_space_test_environment_reports_collision_pairs():
     assert verification["collision_pairs"] == [["robot_link", "test_obstacle"]]
 
 
+def test_exploration_log_clamps_negative_start_iteration_to_zero():
+    planner = RRTStar()
+    planner.debug_exploration = True
+    rows = planner._new_exploration_rows()
+
+    planner._record_exploration(rows, iteration=-1, phase="start_collision")
+
+    assert rows[0]["iteration"] == 0
+
+
 @pytest.mark.parametrize("planner_cls", [DirectPath, RRTConnect, RRTStar, InformedRRTStar, BITStar])
 def test_q_space_planners_keep_fixed_joint_at_start_value(planner_cls):
     planner = planner_cls()
@@ -89,8 +104,6 @@ def test_q_space_planners_keep_fixed_joint_at_start_value(planner_cls):
     goal_q = np.asarray([0.6, -0.6, 0.3], dtype=float)
     planner.step_size = 0.5
     planner.max_iter = 80
-    if hasattr(planner, "planner_backend"):
-        planner.planner_backend = "legacy"
     if hasattr(planner, "search_radius"):
         planner.search_radius = 2.0
     if hasattr(planner, "goal_bias"):
@@ -146,6 +159,9 @@ def test_direct_path_writes_q_and_task_space_convergence_csv(tmp_path):
         with open(csv_path, newline="", encoding="utf-8") as f:
             rows = list(csv.DictReader(f))
         assert rows
+        iterations = [int(row["iteration"]) for row in rows]
+        assert min(iterations) == 0
+        assert all(iteration >= 0 for iteration in iterations)
         assert rows[-1]["space"] == expected_space
         assert rows[-1]["distance_to_goal"] == "0.0"
         assert "best_distance_to_goal" in rows[-1]

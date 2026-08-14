@@ -35,7 +35,7 @@ class PRM(PlannerBase):
         # Point validity is intentionally left to the shared edge collision check.
         return True
 
-    def generate(self, current_pose: Union[List[float], np.ndarray], target_pose: Union[List[float], np.ndarray]) -> List[np.ndarray]:
+    def generate(self, current_pose: Union[List[float], np.ndarray], target_pose: Union[List[float], np.ndarray], step_callback=None) -> List[np.ndarray]:
         current_pose = np.array(current_pose, dtype=float)
         target_pose = np.array(target_pose, dtype=float)
         

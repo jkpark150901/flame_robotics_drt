@@ -5,8 +5,6 @@ from typing import List, Union
 from plugins.pathplanner.rrt_star import RRTStar
 
 class InformedRRTStar(RRTStar):
-    ompl_algorithm = "informed_rrt_star"
-
     def __init__(self, config_path: str = None):
         if config_path is None:
             config_path = os.path.splitext(__file__)[0] + '.json'
