@@ -826,6 +826,19 @@ class ZAPI(ZAPIBase):
             self.__console.debug(
                 f"[ZAPI_VIEWERVEDO] Sent plan_single_target result: "
                 f"request_id={client_request_id}, status={result.get('status')}")
+        else:
+            # Silent before this log existed - if any of the three
+            # conditions failed, the result was just dropped with nothing to
+            # show for it, and SimTool's InspectionSequencer would wait for a
+            # reply that will never arrive: no error, no summary, no trace of
+            # why. Whichever job this was stays permanently pending on the
+            # SimTool side once this happens.
+            self.__console.error(
+                "[ZAPI_VIEWERVEDO] Dropped plan_single_target reply - "
+                f"request_id={client_request_id}, status={result.get('status') if result else None}, "
+                f"router_socket={'ok' if self.__router_socket else 'missing'}, "
+                f"is_joined={bool(self.__router_socket and self.__router_socket.is_joined)}, "
+                f"identity={'present' if identity else 'MISSING'}")
 
     def zapi_prepare_next_inspection_phase(self, kwargs=None):
         """InspectionSequencer가 회전-필요 phase로 넘어가기 전에 보내는 요청을 처리한다.
@@ -863,6 +876,16 @@ class ZAPI(ZAPIBase):
             self.__console.debug(
                 f"[ZAPI_VIEWERVEDO] Sent prepare_next_inspection_phase result: "
                 f"request_id={client_request_id}, status={result.get('status')}")
+        else:
+            # See reply_plan_single_target()'s matching branch - a dropped
+            # reply here means the retreat+rotate phase-transition never
+            # completes on the SimTool side, and phase 2 is never dispatched.
+            self.__console.error(
+                "[ZAPI_VIEWERVEDO] Dropped prepare_next_inspection_phase reply - "
+                f"request_id={client_request_id}, status={result.get('status') if result else None}, "
+                f"router_socket={'ok' if self.__router_socket else 'missing'}, "
+                f"is_joined={bool(self.__router_socket and self.__router_socket.is_joined)}, "
+                f"identity={'present' if identity else 'MISSING'}")
 
     def robot_core_completed(self, payload):
         """Bridge a Robot Core completion onto the Viewer render queue."""

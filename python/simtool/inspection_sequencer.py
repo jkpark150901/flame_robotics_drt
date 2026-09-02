@@ -178,7 +178,25 @@ class InspectionSequencer:
     def on_reply(self, payload: dict) -> bool:
         """Feed a reply_plan_single_target payload in. Returns True if it was
         consumed (matched the currently pending request)."""
-        if not self._active or payload.get("request_id") != self._pending_request_id:
+        if not self._active:
+            self._console.warning(
+                "InspectionSequencer: dropping reply_plan_single_target - no sequence is "
+                f"active (request_id={payload.get('request_id')}) - if a sequence was "
+                "expected to still be running, this reply never advanced/finished it")
+            return False
+        if payload.get("request_id") != self._pending_request_id:
+            # Silent before this log existed - a mismatched/late/duplicate
+            # reply was just dropped with no trace, so if it happened to be
+            # the LAST job's reply, _job_index never reached len(self._jobs),
+            # _advance_or_finish()/_finish() never ran, and the sequence sat
+            # "finished" from every individual target's own log but with no
+            # final [OK]/[FAIL] summary and no error anywhere to explain why.
+            self._console.warning(
+                "InspectionSequencer: dropping reply_plan_single_target - request_id mismatch "
+                f"(got {payload.get('request_id')}, expected {self._pending_request_id}) - "
+                f"job {self._job_index + 1}/{len(self._jobs)} is still pending and will never "
+                "be retried; the sequence is now stuck with no final summary unless a matching "
+                "reply eventually arrives")
             return False
 
         job = self._jobs[self._job_index]
@@ -194,6 +212,12 @@ class InspectionSequencer:
             "pose_name": job["pose_name"], "status": status, "status_kind": status_kind,
             "message": payload.get("message"), "elapsed": payload.get("elapsed"),
             "q_path": q_path, "positioner_r_deg": self._current_phase_r_deg,
+            # Which waypoint/edge actually collided (OMPLPlannerBase.
+            # verify_path()'s shape) - carried through so to_plan_sequence()
+            # can feed it to the Viewer's existing collision-pair-highlight
+            # playback machinery (_warn_collision_preview_playback/
+            # _highlight_collision_pairs), not just animate the path blindly.
+            "verification": payload.get("verification") or {},
         })
         if status == "success" and q_path:
             self._console.info(
@@ -263,6 +287,15 @@ class InspectionSequencer:
         request)."""
         if not self._active or not self._preparing_phase \
                 or payload.get("request_id") != self._pending_phase_request_id:
+            # See on_reply()'s matching warning - a dropped/mismatched reply
+            # here means the retreat+rotate step never completes and phase 2
+            # is never dispatched, with nothing but silence to show for it.
+            self._console.warning(
+                "InspectionSequencer: dropping reply_prepare_next_inspection_phase - "
+                f"active={self._active}, preparing_phase={self._preparing_phase}, "
+                f"request_id got={payload.get('request_id')} "
+                f"expected={self._pending_phase_request_id} - phase 2 will never be "
+                "dispatched unless a matching reply eventually arrives")
             return False
         self._preparing_phase = False
 
@@ -325,36 +358,58 @@ class InspectionSequencer:
         self._preparing_phase = False
         n_ok = sum(1 for r in self._results if r["status"] == "success")
         summary_lines = self._human_readable_lines()
+        status = (
+            "success" if n_ok == self._total_job_count and self._total_job_count
+            else "partial" if n_ok else "failed"
+        )
         summary = {
-            "status": (
-                "success" if n_ok == self._total_job_count and self._total_job_count
-                else "partial" if n_ok else "failed"
-            ),
+            "status": status,
             "results": self._results,
             "deferred_groups": [g.get("name") for g in self._deferred_groups],
             "n_planned": n_ok,
             "n_total": self._total_job_count,
             "summary_lines": summary_lines,
         }
-        # Not logged here - on_finished (window.py's __on_inspection_
-        # sequence_finished) both logs and surfaces these lines, logging
-        # here too would just duplicate every line.
+        # Log the summary here unconditionally, THEN hand it to on_finished
+        # (window.py's __on_inspection_sequence_finished, which prints its
+        # own copy - a deliberate duplicate now, not a bug). This used to be
+        # the only place the summary was ever logged; if on_finished was
+        # never wired up, threw partway through, or its output went
+        # somewhere the user wasn't looking, the whole sequence went totally
+        # silent at the very end with no error anywhere to explain why -
+        # exactly the "no summary, no error" symptom this was chasing.
+        self._console.info(
+            f"InspectionSequencer: sequence {status} - {n_ok}/{self._total_job_count} planned")
+        for line in summary_lines:
+            self._console.info(line)
         on_finished, self._on_finished = self._on_finished, None
         if on_finished:
-            on_finished(summary)
+            try:
+                on_finished(summary)
+            except Exception as exc:
+                self._console.error(f"InspectionSequencer: on_finished callback failed: {exc!r}")
 
     def to_plan_sequence(self):
         """Convert self._results (flat per-target list) into the group-keyed
         "plan_sequence" shape Visualizer._start_inspection_sequence_path_
         playback() expects: [{"name", "positioner_r_deg", "plans": {robot:
-        {"q_path": [...]}}}, ...], in group order. Feed the return value into
-        InspectionPathHandler.accept_result({"plan_sequence": ...}) to wire
-        up "Start Simulation" playback for whatever this sequencer planned.
+        {"q_path": [...], "status": ..., "status_kind": ...}}}, ...], in
+        group order. Feed the return value into InspectionPathHandler.
+        accept_result({"plan_sequence": ...}) to wire up "Start Simulation"
+        playback for whatever this sequencer planned.
 
-        Only successful targets are included - a group missing a robot here
-        (because that target failed and stopped the sequence, or was never
-        reached) just won't move that robot during playback for that group,
-        rather than blocking playback of everything planned before it.
+        Failed targets are included too, as long as they carry a q_path -
+        goal_collision/start_collision/goal_not_connected/
+        final_verification_failed all attach the actual (colliding) q_path
+        the planner found (see OMPLPlannerBase.last_failed_q_path and
+        plan_single_target's except-block in path_planning_service.py), so
+        playing it back is exactly how to SEE where/what it collided with,
+        instead of only reading a text reason in the log. Only a result with
+        an empty q_path (e.g. iteration_cap_reached/timeout/planner_failed -
+        solve() never found anything, not even an invalid one, to report) is
+        skipped, since there's nothing to play back. A group missing a robot
+        here (never reached at all) just won't move that robot during
+        playback for that group.
 
         positioner_r_deg comes from each result's own recorded value (0.0 for
         the reachable phase, the rotated angle for a rotation-needed phase -
@@ -365,7 +420,7 @@ class InspectionSequencer:
         order = []
         groups = {}
         for r in self._results:
-            if r.get("status") != "success" or not r.get("q_path"):
+            if not r.get("q_path"):
                 continue
             name = r["group_name"]
             if name not in groups:
@@ -374,5 +429,22 @@ class InspectionSequencer:
                     "plans": {},
                 }
                 order.append(name)
-            groups[name]["plans"][r["robot"]] = {"q_path": r["q_path"]}
+            verification = r.get("verification") or {}
+            is_failure = r.get("status") != "success"
+            groups[name]["plans"][r["robot"]] = {
+                "q_path": r["q_path"],
+                "status": r.get("status"),
+                "status_kind": r.get("status_kind"),
+                "verification": verification,
+                # Feeds Visualizer._inspection_plan_collision_reason()/
+                # _warn_collision_preview_playback(), the SAME machinery a
+                # collision_preview=True optimizer result already uses to
+                # highlight the actual colliding geometry pairs during
+                # playback (_highlight_collision_pairs) instead of just
+                # animating the path with no visual indication of what
+                # went wrong.
+                "collision_preview": is_failure,
+                "edge_collisions": verification.get("edge_collisions") or [],
+                "planning_error": r.get("message") if is_failure else None,
+            }
         return [groups[name] for name in order]

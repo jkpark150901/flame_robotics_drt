@@ -1327,7 +1327,7 @@ class AppWindow(QMainWindow):
                 self.zapi, target_groups,
                 planner=planner,
                 planner_options={
-                    "step_size": 0.1, "max_iter": 5000,
+                    "step_size": 0.1, "max_iter": 8000,
                     "optimizer": optimizer, "optimize_path": optimize_path,
                     "ik_solver": ik_solver, "ik_normalize": ik_normalize,
                     "lock_linear_track": lock_linear_track,
@@ -1362,9 +1362,11 @@ class AppWindow(QMainWindow):
         else:
             self.__console.info(text)
         # Per-target success/warning/failed breakdown - InspectionSequencer
-        # already logged this once (same console instance) when the
-        # sequence finished; shown again here since __set_path_plan_status
-        # only takes the one-line summary above.
+        # already logged this once (same console instance, InspectionSequencer.
+        # _finish()) before calling this callback, as a guaranteed fallback in
+        # case this callback never ran or threw partway through. Deliberately
+        # duplicated here too since __set_path_plan_status only takes the
+        # one-line summary above and this is also where playback gets wired up.
         for line in summary.get("summary_lines") or []:
             self.__console.info(line)
         self.__set_path_plan_status(text)

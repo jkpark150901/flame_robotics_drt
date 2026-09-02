@@ -48,10 +48,23 @@ except ImportError:
 # (see listavailableplanners.py) so there is no separate name-mapping table to
 # keep in sync with the installed OMPL version.
 SUPPORTED_ALGORITHMS = (
-    "AORRTC", "BFMT", "BITstar", "BKPIECE1", "FMT", "InformedRRTstar",
+    "BFMT", "BITstar", "BKPIECE1", "FMT", "InformedRRTstar",
     "KPIECE1", "LBKPIECE1", "PRM", "PRMstar", "RRT", "RRTConnect",
     "RRTstar", "SORRTstar",
 )
+# AORRTC (internally "AOXRRTConnect" in its own log output) is EXCLUDED here,
+# not just untested: it reproducibly throws "AORRTC: Zero-length path found.
+# May have a common start/goal." (AORRTC.cpp:210) while building its very
+# first solution - not during any later "keep optimizing past a satisfied
+# objective" pass, since a generous setCostThreshold() (see below) made no
+# difference and it still fails on live start/goal states that are provably
+# distinct. That rules out every workaround available from this wrapper; it
+# is a native, unconditional bug in this OMPL build's AORRTC implementation.
+# Excluded from SUPPORTED_ALGORITHMS (not just left out of the UI) so both
+# the SimTool dropdown (populated from this tuple) and any direct
+# configure_ompl(algorithm="AORRTC") caller fail fast with a clear
+# ValueError instead of silently burning several seconds per target on a
+# guaranteed native error.
 
 # KPIECE-family planners require a projection evaluator on the state space
 # before si.setup(), otherwise OMPL raises at planner.setup() time.
@@ -414,10 +427,25 @@ class OMPLPlannerBase(PlannerBase):
 
         si = ob.SpaceInformation(space)
         stats = {"state_validity_calls": 0, "collision_rejects": 0, "workspace_rejects": 0}
+        # Heartbeat so a slow/hung solve() is diagnosable WHILE it's running,
+        # not just after the fact - a request that never returns (see
+        # EmbeddedRobotCoreClient._watch_stale_requests, which only learns
+        # "wedged" after its own ~120s wall-clock timeout) gives zero
+        # visibility otherwise into whether is_valid() is even still being
+        # called, or how fast, before that point.
+        heartbeat = {"t0": time.perf_counter(), "last_log": time.perf_counter()}
 
         def is_valid(state):
             self._check_planning_deadline()
             stats["state_validity_calls"] += 1
+            now = time.perf_counter()
+            if now - heartbeat["last_log"] >= 2.0:
+                heartbeat["last_log"] = now
+                _console.info(
+                    f"OMPLPlannerBase: still searching, algorithm={self.algorithm} "
+                    f"elapsed={now - heartbeat['t0']:.1f}s calls={stats['state_validity_calls']} "
+                    f"collision_rejects={stats['collision_rejects']} "
+                    f"workspace_rejects={stats['workspace_rejects']}")
             q = codec.state_to_full_q(state)
             if not self._workspace_position_ok(q):
                 stats["workspace_rejects"] += 1
@@ -461,7 +489,25 @@ class OMPLPlannerBase(PlannerBase):
             start_state[i] = float(start_values[i])
             goal_state[i] = float(goal_values[i])
         pdef.setStartAndGoalStates(start_state, goal_state, float(self.goal_tolerance))
-        pdef.setOptimizationObjective(ob.PathLengthOptimizationObjective(si))
+        objective = ob.PathLengthOptimizationObjective(si)
+        # Anytime-optimal planners (the AO-* family - AORRTC/AOXRRTConnect
+        # among them) don't stop at the first solution: they keep refining it
+        # until the objective reports isSatisfied() or the time/iteration
+        # budget runs out. PathLengthOptimizationObjective's default cost
+        # threshold is 0 - essentially unreachable for any real path - so
+        # every AO-* run keeps trying to shorten an already-valid solution
+        # for no functional benefit here (this project doesn't care about
+        # path-length optimality, just a valid path), and that further
+        # refinement pass is where AORRTC's own "Zero-length path found" bug
+        # (AORRTC.cpp:210) gets triggered - never on the first solution
+        # itself, only once it tries to improve past it. A generous
+        # threshold makes isSatisfied() true as soon as ANY solution is
+        # found, so AO-* planners stop right there instead of ever reaching
+        # the buggy refinement pass. No effect on non-anytime planners
+        # (RRTConnect etc.) - they already return on first connection and
+        # never consult the objective's threshold.
+        objective.setCostThreshold(ob.Cost(1e6))
+        pdef.setOptimizationObjective(objective)
 
         planner = self._create_ompl_planner(si)
         planner.setProblemDefinition(pdef)
@@ -540,7 +586,24 @@ class OMPLPlannerBase(PlannerBase):
         # Section 13.2/13.4: only exact solutions are treated as success in
         # production; approximate solutions are surfaced via status, not path.
         if not solved:
-            self.last_planning_status = "timeout"
+            # planner.solve() returning false doesn't always mean it actually
+            # ran out of its time/iteration budget - some algorithms (e.g.
+            # AORRTC/AOXRRTConnect's own "Zero-length path found" bug, hit
+            # during its internal anytime cost-improvement pass - see its
+            # OMPL_ERROR console output) give up well before the deadline due
+            # to a native, algorithm-internal failure. Labeling that
+            # "timeout" is misleading (elapsed=2.7s on a 30s budget is not a
+            # timeout) and hides the real cause from anyone reading the
+            # status/log. Only call it "timeout" if solve() actually used
+            # up (most of) its allotted budget.
+            budget_margin = max(0.5, budget * 0.05)
+            used_full_budget = solve_elapsed >= (budget - budget_margin)
+            if iteration_cap_active and stats["state_validity_calls"] >= max_iter and not used_full_budget:
+                self.last_planning_status = "iteration_cap_reached"
+            elif used_full_budget:
+                self.last_planning_status = "timeout"
+            else:
+                self.last_planning_status = "planner_failed"
             return []
         if pdef.hasApproximateSolution():
             self.last_planning_status = "timeout_approximate"
@@ -553,6 +616,20 @@ class OMPLPlannerBase(PlannerBase):
                 og.PathSimplifier(si).simplifyMax(path)
             except Exception:
                 pass
+
+        # The path-length cost this planner actually returned - only
+        # meaningful now that setCostThreshold() above lets anytime/AO-*
+        # planners stop at their first solution instead of continuing to
+        # optimize; without a way to see the returned cost there'd be no way
+        # to tell whether that first solution is any good. Computed AFTER
+        # simplify() so it reflects the path actually handed back below, not
+        # the pre-simplification one.
+        path_cost = None
+        try:
+            path_cost = float(path.cost(pdef.getOptimizationObjective()).value())
+        except Exception as exc:
+            _console.debug(f"OMPLPlannerBase: path cost unavailable: {exc!r}")
+        self.last_ompl_stats["path_cost"] = path_cost
 
         q_path = []
         for i in range(path.getStateCount()):

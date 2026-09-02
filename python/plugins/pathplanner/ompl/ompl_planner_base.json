@@ -1,5 +1,5 @@
 {
-    "timeout_sec": 5.0,
+    "timeout_sec": 15.0,
     "normalized_resolution": 0.005,
     "goal_tolerance": 1e-3,
     "simplify": false,
@@ -12,7 +12,6 @@
 
     "_comment_algorithms": "Optional per-algorithm overrides, applied on top of the defaults above. Any key from the top level (timeout_sec/normalized_resolution/goal_tolerance/simplify/max_iter/collision_sample_resolution) can be overridden per algorithm. Leave an algorithm's entry empty ({}) to just use the defaults.",
     "algorithms": {
-        "AORRTC": {},
         "BFMT": {},
         "BITstar": {},
         "BKPIECE1": {},

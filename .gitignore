@@ -172,3 +172,8 @@ cython_debug/
 *.ply
 *.pcd
 /sample
+
+# experiment / benchmark scratch output (path planning logs, graphs, run dirs)
+/test_tmp*/
+/*_paths/
+/benchmark_planning*/
