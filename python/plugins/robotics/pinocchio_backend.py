@@ -735,6 +735,49 @@ class PinocchioRoboticsBackend(RoboticsBackend):
             })
         return results
 
+    def set_link_clearance(
+        self,
+        robot_name: str,
+        link_names: Optional[Sequence[str]],
+        margin: float,
+    ) -> int:
+        """Per-pair hppfcl security_margin on (link, static obstacle) pairs:
+        pin.computeCollisions() then reports a collision whenever the pair is
+        closer than `margin`, so every planner/optimizer/verify_path that
+        already goes through check_collision() picks the constraint up with no
+        changes of its own. Every other pair (including this robot's other
+        links) is reset to 0 - the margin is applied to *only* link_names.
+
+        geom_data outlives a call (configure_collision() reuses it when the
+        obstacle meshes are unchanged), so callers must clear the margin
+        themselves once done - see InspectionPlanningBase.link_clearance().
+
+        link_names match geometry names exactly or as "<link>_<n>" (pinocchio
+        suffixes URDF collision geometries, e.g. "dda_link_end" ->
+        "dda_link_end_0")."""
+        handle = self._handle(robot_name)
+        self._require_collision(handle)
+        margin = max(float(margin or 0.0), 0.0)
+        names = [str(n) for n in (link_names or [])]
+
+        def selected(geom_id: int) -> bool:
+            geom_name = str(handle.geom_model.geometryObjects[geom_id].name)
+            return any(geom_name == n or geom_name.startswith(n + "_") for n in names)
+
+        static_ids = set(handle.static_object_ids)
+        touched = 0
+        for pair_id, pair in enumerate(handle.geom_model.collisionPairs):
+            first_static = int(pair.first) in static_ids
+            second_static = int(pair.second) in static_ids
+            if first_static == second_static:
+                continue
+            link_id = int(pair.second) if first_static else int(pair.first)
+            pair_margin = margin if (margin > 0.0 and names and selected(link_id)) else 0.0
+            handle.geom_data.collisionRequests[pair_id].security_margin = pair_margin
+            if pair_margin > 0.0:
+                touched += 1
+        return touched
+
     def check_mesh_point_cloud_overlap(
         self,
         link_model: Any,

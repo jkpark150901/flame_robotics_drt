@@ -1,7 +1,7 @@
 {
-    "safety_margin": 0.5,
+    "safety_margin": 0.15,
     "w_smooth": 1.0,
-    "w_collision": 0.2,
+    "w_collision": 1.0,
     "max_iter": 20,
     "k_att": 50
 }

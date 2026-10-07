@@ -7,6 +7,7 @@
 """
 
 import threading
+import contextlib
 from collections import deque
 import time
 import importlib
@@ -51,7 +52,7 @@ except ImportError:
     OMPL_SUPPORTED_ALGORITHMS = ()
 from plugins.robotics.backend import RobotDescription
 from plugins.robotics.inspection_experiment_logger import InspectionExperimentLogger
-from plugins.robotics.inspection_planning_base import InspectionIKRequest, InspectionPlanningBase
+from plugins.robotics.inspection_planning_base import ApproachSpec, InspectionIKRequest, InspectionPlanningBase
 from plugins.robotics.inspection_workflow import to_jsonable, resolve_target_groups_with_rotation
 from plugins.robotics.pinocchio_backend import PinocchioRoboticsBackend
 from plugins.poseDeterminator.EndEffectorPoseOptimizer import EndEffectorPoseOptimizer
@@ -3226,20 +3227,31 @@ class Visualizer:
                 return obj()
         raise RuntimeError(f"Planner plugin class not found: {module_name}")
 
-    def _load_path_optimizer(self, module_name):
+    def _load_path_optimizer(self, module_name, overrides=None):
+        """overrides: {attribute: value}로 옵티마이저 인스턴스의 설정을 이 호출 한정으로 덮어쓴다
+        (예: {"w_obs": 0, "k_att": 0}으로 APF를 끈 대조군). 각 옵티마이저는 JSON 설정을
+        같은 이름의 속성으로 읽어 두므로 속성 이름이 곧 설정 키다. JSON 파일은 건드리지 않는다.
+        존재하지 않는 키는 오타로 조용히 무시되지 않도록 예외로 처리한다."""
         if not module_name:
             return None
         from plugins.pluginbase.optimizerbase import OptimizerBase
         module = importlib.import_module(f"plugins.optimizer.{module_name}")
         for _, obj in inspect.getmembers(module, inspect.isclass):
             if issubclass(obj, OptimizerBase) and obj is not OptimizerBase:
-                return obj()
+                optimizer = obj()
+                for key, value in (overrides or {}).items():
+                    if key not in vars(optimizer) or key == "config":
+                        valid = sorted(k for k in vars(optimizer) if k != "config" and not k.startswith("_"))
+                        raise ValueError(
+                            f"unknown {module_name} optimizer setting {key!r} - valid: {valid}")
+                    setattr(optimizer, key, value)
+                return optimizer
         raise RuntimeError(f"Optimizer plugin class not found: {module_name}")
 
-    def _apply_path_optimizer(self, optimizer_name, q_path, planner):
+    def _apply_path_optimizer(self, optimizer_name, q_path, planner, overrides=None):
         if not optimizer_name:
             return list(q_path or []), None
-        optimizer = self._load_path_optimizer(optimizer_name)
+        optimizer = self._load_path_optimizer(optimizer_name, overrides)
         optimized_path = optimizer.optimize(list(q_path or []), planner)
         status = getattr(optimizer, "last_optimization_status", None)
         return [np.asarray(q, dtype=float) for q in (optimized_path or [])], status
@@ -3248,6 +3260,39 @@ class Visualizer:
     def _path_optimization_requested(request_data):
         optimizer_name = request_data.get("optimizer")
         return bool(request_data.get("optimize_path", bool(optimizer_name)))
+
+    def _dda_approach_spec(self, request_data, robot_name):
+        """DDA를 표면 수직으로만 진입시키는 ApproachSpec. 해당 로봇이 아니거나 꺼져 있으면 None.
+
+        기본값은 path_planning.cfg의 path_planning.dda_approach. 요청의 "approach"로 이 호출만 덮어쓴다:
+        False=끔, True=켬, dict=해당 키만 덮어쓰기(예: {"standoff": 0.2}). facing 축/끝 링크는
+        ef_pose.frames.dda(자세 결정에 쓴 것과 같은 값)에서 가져와 두 곳이 어긋나지 않게 한다.
+        """
+        cfg = dict((self._config.get("path_planning", {}) or {}).get("dda_approach", {}) or {})
+        override = request_data.get("approach")
+        if override is False:
+            return None
+        if override is True:
+            cfg["enabled"] = True
+        elif isinstance(override, dict):
+            cfg.update(override)
+        if not bool(cfg.get("enabled", False)):
+            return None
+        if str(cfg.get("robot_name_contains", "dda")).lower() not in str(robot_name).lower():
+            return None
+        frame_cfg = ((self._config.get("ef_pose", {}) or {}).get("frames", {}) or {}).get("dda", {}) or {}
+        facing_axis = cfg.get("facing_axis") or frame_cfg.get("pipe_facing_axis")
+        if facing_axis is None:
+            raise RuntimeError("dda approach enabled but no facing axis (ef_pose.frames.dda.pipe_facing_axis)")
+        clearance_links = cfg.get("clearance_links") or [frame_cfg.get("end_link", "dda_link_end")]
+        return ApproachSpec(
+            facing_axis_local=facing_axis,
+            standoff=float(cfg.get("standoff", 0.15)),
+            clearance_links=list(clearance_links),
+            min_clearance=float(cfg.get("min_clearance", 0.10)),
+            step=float(cfg.get("step", 0.02)),
+            max_joint_step=float(cfg.get("max_joint_step", 0.3)),
+        )
 
     def _planner_timeout(self, request_data, planner_name=None):
         """Return the timeout explicitly supplied by the ZAPI request."""
@@ -4878,6 +4923,7 @@ class Visualizer:
             planning_timeout=planning_timeout,
             lock_linear_track=bool(request_data.get("lock_linear_track", False)),
             console=self.__console,
+            approach=self._dda_approach_spec(request_data, robot_name),
         )
         if fixed_joint_options.get("fixed_joint_indices"):
             plan["fixed_joint_indices"] = list(fixed_joint_options.get("fixed_joint_indices", []))
@@ -4922,43 +4968,114 @@ class Visualizer:
         planner.debug_obstacle_rotated = request_data.get("obstacle_rotation_T") is not None
         if optimize_path and optimizer_name and q_path:
             stage_t0 = time.perf_counter()
+            approach_info = plan.get("approach") if (plan.get("approach") or {}).get("assembled") else None
+            # Guarantee: whatever base planner produced q_path (RRT*/RRT-Connect
+            # are collision-checked by construction - if OMPL reports success,
+            # every edge already passed collision_pairs_along_edge - so q_path
+            # here is already collision-free under the current model), the
+            # optimizer must never be allowed to make that WORSE. STOMP (or any
+            # optimizer) has no hard collision constraint - it minimizes a soft
+            # APF penalty and can converge to a still-colliding local optimum,
+            # or (see the np.convolve crash on short paths) throw outright. Both
+            # used to be accepted anyway, silently trading a guaranteed-clean
+            # base path for a colliding "optimized" one. Snapshot the
+            # pre-optimization state here so a regression can be reverted below
+            # instead of returned.
+            pre_opt_q_path = q_path
+            pre_opt_collision_preview = bool(plan.get("collision_preview"))
+            pre_opt_collision_reason = plan.get("collision_preview_reason")
             try:
-                optimized_q_path, optimization_status = self._apply_path_optimizer(
-                    optimizer_name,
-                    q_path,
-                    planner,
-                )
-                if optimized_q_path:
-                    q_path = optimized_q_path
-                    plan["q_path"] = q_path
-                    plan["waypoints"] = len(q_path)
-                    plan["optimization_status"] = optimization_status
-                    verification = planner.verify_path(q_path)
-                    if (
-                        verification.get("colliding_edges", 0) != 0
-                        or verification.get("colliding_waypoints", 0) != 0
-                    ):
-                        plan["collision_preview"] = True
-                        plan["collision_preview_reason"] = (
-                            plan.get("collision_preview_reason")
-                            or "optimized_path_collision"
-                        )
-                    plan["verification"] = verification
+                if approach_info is not None:
+                    # 수직 진입 구간(approach)/퇴출 구간(retreat)은 직선으로 고정이므로 옵티마이저가
+                    # 건드리면 안 된다 - free 구간만 최적화하고 앞뒤를 그대로 이어 붙인다. 옵티마이저 안의
+                    # 충돌 판정도 free 구간 규칙(표면 clearance margin)을 따르도록 margin을 켠 채로 돌린다.
+                    free_a, free_b = approach_info["free_start_idx"], approach_info["free_end_idx"]
+                    with service.link_clearance(
+                            robot_name, approach_info["clearance_links"], approach_info["min_clearance"]):
+                        optimized_free, optimization_status = self._apply_path_optimizer(
+                            optimizer_name, q_path[free_a:free_b + 1], planner,
+                            request_data.get("optimizer_config"))
+                    optimized_q_path = (
+                        q_path[:free_a] + optimized_free + q_path[free_b + 1:] if optimized_free else [])
+                    if optimized_free:
+                        approach_info["free_end_idx"] = free_a + len(optimized_free) - 1
                 else:
+                    optimized_q_path, optimization_status = self._apply_path_optimizer(
+                        optimizer_name,
+                        q_path,
+                        planner,
+                        request_data.get("optimizer_config"),
+                    )
+                if optimized_q_path:
+                    candidate_q_path = optimized_q_path
+                    with service.tight_verification_resolution(planner):
+                        verification = (
+                            service.verify_approach_path(planner, candidate_q_path, approach_info)
+                            if approach_info is not None else planner.verify_path(candidate_q_path))
+                    candidate_collision_preview = bool(
+                        verification.get("colliding_edges", 0) or verification.get("colliding_waypoints", 0)
+                        or (approach_info is not None and verification.get("margin_only_violation")))
+                    if candidate_collision_preview and not pre_opt_collision_preview:
+                        # The base planner's path was already guaranteed clean
+                        # (e.g. RRT*/RRT-Connect only ever return collision-
+                        # checked edges) - the optimizer regressed it into a
+                        # colliding one chasing a softer objective (lower APF
+                        # cost, shorter length, ...). Reject the regression and
+                        # keep the guarantee instead of the "improvement".
+                        q_path = pre_opt_q_path
+                        plan["q_path"] = q_path
+                        plan["waypoints"] = len(q_path)
+                        plan["optimization_status"] = f"{optimization_status}_rejected_regression"
+                        plan["collision_preview"] = pre_opt_collision_preview
+                        plan["collision_preview_reason"] = pre_opt_collision_reason
+                        if approach_info is not None:
+                            approach_info["free_end_idx"] = free_b
+                    else:
+                        q_path = candidate_q_path
+                        plan["q_path"] = q_path
+                        plan["waypoints"] = len(q_path)
+                        plan["optimization_status"] = optimization_status
+                        if approach_info is not None:
+                            approach_info["free_min_clearance"] = verification.get("free_min_clearance")
+                            approach_info["margin_only_violation"] = bool(verification.get("margin_only_violation"))
+                        # 옵티마이저 뒤의 검증이 최종 판정이다. 기존에는 옵티마이저가 충돌을 풀어내도 planner
+                        # 단계의 "returned_path_collision" 표시가 그대로 남아 항상 실패로 집계됐다(예: 충돌하는
+                        # 직선 direct_path를 옵티마이저가 고쳐도 성공으로 못 셌다). 그 두 사유는 새 검증으로
+                        # 대체하고, ik_fallback/timeout처럼 옵티마이저가 해결할 수 없는 사유는 그대로 둔다.
+                        if plan.get("collision_preview_reason") in ("returned_path_collision", "dda_min_clearance_violated"):
+                            plan["collision_preview"] = False
+                            plan["collision_preview_reason"] = None
+                        if candidate_collision_preview:
+                            plan["collision_preview"] = True
+                            plan["collision_preview_reason"] = (
+                                plan.get("collision_preview_reason")
+                                or ("dda_min_clearance_violated" if verification.get("margin_only_violation")
+                                    else "optimized_path_collision")
+                            )
+                        plan["verification"] = verification
+                elif pre_opt_collision_preview:
+                    # Optimizer gave up (empty result) and the base path was
+                    # already colliding too - nothing to revert to; report the
+                    # optimizer's own failure as before.
                     plan["optimization_status"] = "optimizer_empty_path"
                     plan["collision_preview"] = True
-                    plan["collision_preview_reason"] = (
-                        plan.get("collision_preview_reason")
-                        or "optimizer_empty_path"
-                    )
+                    plan["collision_preview_reason"] = pre_opt_collision_reason or "optimizer_empty_path"
+                else:
+                    # Optimizer gave up but the base path was already clean -
+                    # keep it and just note the optimizer didn't improve it,
+                    # instead of reporting a guaranteed-clean path as colliding.
+                    plan["optimization_status"] = "optimizer_empty_path_kept_base"
             except Exception as opt_exc:
                 plan["optimization_status"] = "optimizer_failed"
                 plan["optimization_error"] = str(opt_exc)
-                plan["collision_preview"] = True
-                plan["collision_preview_reason"] = (
-                    plan.get("collision_preview_reason")
-                    or f"optimizer_failed: {opt_exc}"
-                )
+                if pre_opt_collision_preview:
+                    plan["collision_preview"] = True
+                    plan["collision_preview_reason"] = pre_opt_collision_reason or f"optimizer_failed: {opt_exc}"
+                # else: base path (still in plan["q_path"]) was already clean -
+                # leave collision_preview/reason as the base planner set them
+                # rather than flagging a guaranteed-clean path as colliding
+                # just because the optimizer itself crashed (e.g. STOMP's
+                # np.convolve kernel-size-vs-path-length crash on short paths).
             timings["optimization"] = time.perf_counter() - stage_t0
         if plan.get("ik_failure"):
             self._last_ik_failure = getattr(self, "_last_ik_failure", {})
@@ -5211,6 +5328,13 @@ class Visualizer:
         optimization_status = None
         optimization_error = None
         optimization_elapsed = 0.0
+        # Same guarantee as _plan_inspection_path_for_robot's optimizer block:
+        # a base planner path with no collision_preview_reason yet is already
+        # collision-checked (RRT*/RRT-Connect only return verified-clean
+        # edges) - don't let the optimizer regress that into a colliding path
+        # or a crash silently keep a worse result.
+        pre_opt_q_path = q_path
+        pre_opt_collision_preview_reason = collision_preview_reason
         if optimize_path and optimizer_name and q_path:
             stage_t0 = time.perf_counter()
             try:
@@ -5220,16 +5344,40 @@ class Visualizer:
                     planner,
                 )
                 if optimized_q_path:
-                    q_path = optimized_q_path
+                    service = getattr(self, "_inspection_planning_base", None)
+                    verify_ctx = (
+                        service.tight_verification_resolution(planner) if service is not None
+                        else contextlib.nullcontext())
+                    with verify_ctx:
+                        candidate_verification = planner.verify_path(optimized_q_path)
+                    candidate_collides = bool(
+                        candidate_verification.get("colliding_edges", 0)
+                        or candidate_verification.get("colliding_waypoints", 0))
+                    if candidate_collides and pre_opt_collision_preview_reason is None:
+                        q_path = pre_opt_q_path
+                        optimization_status = f"{optimization_status}_rejected_regression"
+                    else:
+                        q_path = optimized_q_path
+                        if candidate_collides:
+                            collision_preview_reason = collision_preview_reason or "optimized_path_collision"
                 else:
                     optimization_status = "optimizer_empty_path"
-                    collision_preview_reason = collision_preview_reason or "optimizer_empty_path"
+                    if pre_opt_collision_preview_reason is not None:
+                        collision_preview_reason = pre_opt_collision_preview_reason
             except Exception as opt_exc:
                 optimization_status = "optimizer_failed"
                 optimization_error = str(opt_exc)
-                collision_preview_reason = collision_preview_reason or f"optimizer_failed: {opt_exc}"
+                # q_path is still pre_opt_q_path here (never reassigned on this
+                # path) - only flag it as colliding if it actually already was.
+                if pre_opt_collision_preview_reason is not None:
+                    collision_preview_reason = pre_opt_collision_preview_reason
             optimization_elapsed = time.perf_counter() - stage_t0
-        verification = planner.verify_path(q_path)
+        service = getattr(self, "_inspection_planning_base", None)
+        verify_ctx = (
+            service.tight_verification_resolution(planner) if service is not None
+            else contextlib.nullcontext())
+        with verify_ctx:
+            verification = planner.verify_path(q_path)
         if verification.get("colliding_edges", 0) != 0 or verification.get("colliding_waypoints", 0) != 0:
             collision_preview_reason = collision_preview_reason or "returned_path_collision"
         q_path = [np.asarray(q, dtype=float) for q in q_path]
@@ -5488,9 +5636,47 @@ class Visualizer:
             rotation_T=second_group_rotation_T,
             rt_pipe_facing_axis=self._rt_pipe_facing_axis_config(),
         )
+        # spool_vertices/triangles above are already-baked WORLD-frame geometry
+        # (enough on their own for headless replanning), but that alone loses
+        # which physical spool file this was and how it was aligned (chuck
+        # offset, positioner pose it was set up against, mount points) - a
+        # human reopening this snapshot later to re-inspect it visually in
+        # SimTool has no way to recover that (see _load_spool_alignment_state's
+        # sidecar .json, which lives next to the source file, not in this
+        # snapshot). Save both here too, best-effort, so a snapshot is fully
+        # self-describing: enough on its own to reproduce the exact same
+        # spool/positioner/inspection-point/target-pose conditions across
+        # different optimizer runs, not just the raw collision geometry.
+        try:
+            spool_source_path = str(getattr(self, "_spool_source_path", "") or "")
+            spool_alignment = self._spool_alignment_state_payload()
+        except Exception as exc:
+            self.__console.warning(f"snapshot: could not capture spool alignment metadata: {exc}")
+            spool_source_path = ""
+            spool_alignment = None
+        # _handle_request_load_spool treats a loaded PLY/mesh file's vertices as
+        # already being in spool LOCAL frame (chuck-relative) - it then computes
+        # world = _spool_world_T @ local itself from spool_alignment's positioner/
+        # spool values (see _apply_spool_world_T). spool_vertices above are the
+        # opposite: already-baked WORLD-frame collision geometry. Writing those
+        # straight to a .ply and reloading it through "Load Spool" would silently
+        # apply _spool_world_T a SECOND time (local-vs-world frame mismatch),
+        # placing the pipe somewhere else entirely. Save the exact _spool_world_T
+        # this geometry was captured at so a consumer (export_snapshot_spool.py)
+        # can undo it - local = inv(spool_world_T) @ spool_vertices - before
+        # writing a .ply that round-trips correctly through Load Spool.
+        try:
+            spool_world_T = np.asarray(getattr(self, "_spool_world_T", None), dtype=float)
+            if spool_world_T.shape != (4, 4):
+                spool_world_T = None
+        except Exception:
+            spool_world_T = None
         return {
             "spool_vertices": np.asarray(obstacle_mesh.vertices, dtype=float),
             "spool_triangles": np.asarray(obstacle_mesh.triangles, dtype=np.int32),
+            "spool_world_T": spool_world_T,
+            "spool_source_path": spool_source_path,
+            "spool_alignment": spool_alignment,
             "spool_fix_r": bool(getattr(self, "_spool_fix_r", False)),
             "positioner_r_deg": float(getattr(self, "_positioner_r_deg", 0.0)),
             "positioner_vertices": (
@@ -6420,6 +6606,20 @@ class Visualizer:
             return f"colliding_edges={colliding_edges}"
         if edge_collisions:
             return f"edge_collisions={len(edge_collisions)}"
+        # A plan loaded from a saved playback result (playback_loader.py's
+        # load_playback_plan_sequence) only ever has {"q_path", "status"} -
+        # none of the richer verification/edge_collisions/collision_preview
+        # fields above exist for it (those only ever get attached to a plan
+        # produced by a LIVE plan_single_target call in this same session).
+        # Without this fallback, a loaded "failed" (i.e. actually-colliding)
+        # target's playback ran with no warning at all - it looked identical
+        # to a clean successful path, silently driving the robot through the
+        # pipe. This can't recover WHICH link/edge collided (that detail was
+        # never saved to summary.csv), so no _highlight_collision_pairs data
+        # is available - but the warning banner itself no longer goes silent.
+        status = str(plan.get("status", "")).lower()
+        if status and status != "success":
+            return f"status={status} (loaded playback result)"
         return None
 
     def _warn_collision_preview_playback(self, plans):

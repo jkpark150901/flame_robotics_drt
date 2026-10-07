@@ -1438,6 +1438,19 @@ class AppWindow(QMainWindow):
                 default_dir)
             if not run_dir:
                 return
+            # benchmark_path_planners.py's --save-paths writes spool.ply (+ a
+            # .json alignment sidecar, if the source snapshot had one) next to
+            # summary.csv - see export_snapshot_spool.py's export_spool_from_
+            # snapshot(), called from _run_once(). Auto-load it here so the
+            # pipe/positioner the paths were actually planned against shows up
+            # without a separate manual "Load Spool" step - and, since it's
+            # the exact scene this run used, positioner rotation always
+            # matches what execute_inspection_path's "needs positioner to
+            # rotate but no pipe is loaded" check requires below.
+            spool_path = pathlib.Path(run_dir) / "spool.ply"
+            if spool_path.exists() and self.zapi:
+                self.zapi._ZAPI_request_load_spool(str(spool_path.absolute()))
+                self.__console.info(f"Auto-loading spool from playback result: {spool_path}")
             if (pathlib.Path(run_dir) / "summary.csv").exists():
                 result = load_playback_plan_sequence(run_dir)
             else:

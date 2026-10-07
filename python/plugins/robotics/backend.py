@@ -245,6 +245,21 @@ class RoboticsBackend(ABC):
         don't support distance queries return []."""
         return []
 
+    def set_link_clearance(
+        self,
+        robot_name: str,
+        link_names: Optional[Sequence[str]],
+        margin: float,
+    ) -> int:
+        """Make check_collision()/check_edge_collision() report a collision
+        whenever any of link_names comes within `margin` (m) of a static
+        obstacle, instead of only on actual contact. margin<=0 or empty
+        link_names clears it. Returns how many (link, obstacle) pairs got a
+        margin. Optional: backends without per-pair margins return 0 (the
+        constraint is then silently not enforced - callers that need it must
+        check the return value)."""
+        return 0
+
     @abstractmethod
     def check_mesh_point_cloud_overlap(
         self,

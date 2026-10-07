@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import multiprocessing as mp
 import pathlib
 import pickle
@@ -82,11 +83,58 @@ DEFAULT_PLANNERS = tuple(sorted(Q_SPACE_PLANNER_MODULES)) + tuple(OMPL_SUPPORTED
 DIRECT_PATH_OPTIMIZED_METHODS = tuple(f"direct_path+{name}" for name in sorted(OPTIMIZER_MODULES))
 
 
+def _split_methods(text):
+    """Split a comma-separated --planners string, but not on commas inside
+    "[...]" (optimizer overrides: "direct_path+stomp[w_obs=0,k_att=0]")."""
+    methods, depth, current = [], 0, []
+    for ch in text:
+        if ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+        if ch == "," and depth == 0:
+            methods.append("".join(current).strip())
+            current = []
+        else:
+            current.append(ch)
+    methods.append("".join(current).strip())
+    return [m for m in methods if m]
+
+
 def _parse_method(method_name):
-    """Split a "<planner>+<optimizer>" method name into (planner, optimizer).
-    Plain planner names (no "+") return (method_name, None)."""
-    planner_name, sep, optimizer_name = method_name.partition("+")
-    return planner_name, (optimizer_name or None) if sep else None
+    """Split a method name into (planner, optimizer, optimizer_overrides).
+
+    "direct_path"                          -> ("direct_path", None, {})
+    "direct_path+stomp"                    -> ("direct_path", "stomp", {})
+    "direct_path+stomp[w_obs=0,k_att=0]"   -> ("direct_path", "stomp", {"w_obs": 0, "k_att": 0})
+
+    The bracketed part overrides that optimizer's settings for these runs
+    only (attribute names = the keys in plugins/optimizer/<name>.json - see
+    Visualizer._load_path_optimizer), so an "APF off" control arm is just
+    another method name and never touches the JSON files. Values are parsed
+    as JSON (0, 0.5, true), falling back to a plain string."""
+    planner_name, sep, optimizer_part = method_name.partition("+")
+    if not sep or not optimizer_part:
+        return planner_name, None, {}
+    optimizer_name, bracket, rest = optimizer_part.partition("[")
+    overrides = {}
+    if bracket:
+        if not rest.endswith("]"):
+            raise ValueError(f"unterminated '[' in method {method_name!r}")
+        for item in filter(None, (s.strip() for s in rest[:-1].split(","))):
+            key, eq, raw = item.partition("=")
+            if not eq or not key.strip():
+                raise ValueError(f"bad optimizer override {item!r} in method {method_name!r} (want key=value)")
+            try:
+                overrides[key.strip()] = json.loads(raw)
+            except ValueError:
+                overrides[key.strip()] = raw.strip()
+    return planner_name, (optimizer_name or None), overrides
+
+
+def _safe_name(method_name):
+    """Filesystem-safe form of a method name ("[", "]", "=", "," -> "_")."""
+    return "".join("_" if c in "[]=," else c for c in method_name)
 
 # Failure message path_planning_service.py uses when a group needs a positioner
 # rotation but the snapshot's spool_fix_r was False: the pipe was never actually
@@ -197,6 +245,86 @@ def _path_max_apf_cost(engine, robot_name, q_path, d0, eta):
     return worst_cost, worst_min_dist
 
 
+def _is_dda_robot(robot_name):
+    return "dda" in str(robot_name).lower()
+
+
+def _densify(q_path, max_step=0.05):
+    """Linearly resample every edge so consecutive points are <= max_step
+    apart in q (the way edges are actually traversed - a 2-waypoint
+    direct_path would otherwise look like it never gets near anything)."""
+    arr = [np.asarray(q, dtype=float) for q in q_path]
+    dense = [arr[0]]
+    for a, b in zip(arr[:-1], arr[1:]):
+        n = max(1, int(np.ceil(np.linalg.norm(b - a) / max_step)))
+        dense.extend(a + (b - a) * (k / n) for k in range(1, n + 1))
+    return dense
+
+
+def _dda_path_metrics(engine, config, robot_name, q_path, *, min_clearance, span=0.10):
+    """Independent (planner-agnostic) measurements of what the DDA depth-camera
+    argument cares about, computed the same way for every method - including
+    ones with the perpendicular-approach constraint off, so the constraint's
+    effect is measured rather than assumed.
+
+    - ee_min_clearance_outside_approach / ee_hug_points: distance of the DDA
+      end link (the depth-camera head) to the pipe/positioner along the
+      densified path, ignoring the trailing run of points within
+      min_clearance (that run *is* the final approach, allowed to go close)
+      and the leading run (the retreat off the previous target's pose).
+      ee_hug_points counts densified points closer than min_clearance
+      BETWEEN those runs - i.e. the path hugging the surface somewhere it
+      shouldn't (0 = clean).
+    - final_angle_deg: angle between the end effector's actual motion over
+      its last `span` metres and the facing axis (0 = straight along the
+      surface normal, 90 = sliding along the surface).
+    Must run before the next plan_single_target reconfigures the scene."""
+    backend = getattr(engine, "_robotics_backend", None)
+    frame_cfg = (((config.get("ef_pose") or {}).get("frames") or {}).get("dda")) or {}
+    if backend is None or len(q_path) < 2 or "pipe_facing_axis" not in frame_cfg:
+        return {}
+    links = [str(frame_cfg.get("end_link", "dda_link_end"))]
+    frame = engine._robot_target_link_name(robot_name)
+    facing_local = np.asarray(frame_cfg["pipe_facing_axis"], dtype=float)
+    facing_local = facing_local / np.linalg.norm(facing_local)
+    dense = _densify(q_path)
+
+    clearance = []
+    for q in dense:
+        distances = [
+            e["distance"] for e in backend.link_obstacle_distances(robot_name, q)
+            if any(e["link"] == n or str(e["link"]).startswith(n + "_") for n in links)]
+        clearance.append(min(distances) if distances else None)
+    if any(c is None for c in clearance):
+        return {}
+    # Strip the leading run too: a chained target starts wherever the previous
+    # one ended (at the surface), and leaving that pose is the retreat
+    # segment - allowed to be close, same as the final approach.
+    end = len(clearance)
+    while end > 0 and clearance[end - 1] < min_clearance:
+        end -= 1
+    begin = 0
+    while begin < end and clearance[begin] < min_clearance:
+        begin += 1
+    before_final = clearance[begin:end]
+
+    positions = np.array([backend.frame_world_T(robot_name, q, frame)[:3, 3] for q in dense])
+    goal_T = backend.frame_world_T(robot_name, dense[-1], frame)
+    behind = np.linalg.norm(positions - positions[-1], axis=1) >= span
+    angle = None
+    if behind.any():
+        k = int(np.nonzero(behind)[0][-1])
+        motion = positions[-1] - positions[k]
+        facing = goal_T[:3, :3] @ facing_local
+        cos = float(np.dot(motion, facing) / (np.linalg.norm(motion) * np.linalg.norm(facing)))
+        angle = float(np.degrees(np.arccos(np.clip(cos, -1.0, 1.0))))
+    return {
+        "ee_min_clearance_outside_approach": min(before_final) if before_final else None,
+        "ee_hug_points": sum(1 for c in before_final if c < min_clearance),
+        "final_angle_deg": angle,
+    }
+
+
 def _joint_names_for(engine, robot_name, dof):
     backend = getattr(engine, "_robotics_backend", None)
     robot_backend_model = backend.robot_model(robot_name) if backend is not None else None
@@ -213,22 +341,53 @@ def _save_joint_states_csv(path, joint_names, q_path):
             writer.writerow([i, *[float(v) for v in q]])
 
 
+def _save_collision_sidecar(path, result):
+    """Persist which waypoint/edge actually collided (plannerbase.verify_path's
+    shape, forwarded into plan_single_target's result - see path_planning_
+    service.py) next to a target's joint_states.csv, so a LOADED playback
+    result can warn/highlight collisions exactly like a live plan does instead
+    of going silent (playback_loader.py's load_playback_plan_sequence() reads
+    this back). Only written when there is actually something to say - a
+    clean/successful target has no colliding edges/pairs and needs no file.
+    """
+    edge_collisions = result.get("edge_collisions") or []
+    collision_preview = bool(result.get("collision_preview"))
+    if not edge_collisions and not collision_preview:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({
+            "collision_preview": collision_preview,
+            "edge_collisions": edge_collisions,
+            "verification": result.get("verification") or {},
+        }, f, indent=2)
+
+
 def _write_path_summary_csv(save_paths_dir, path_summary_rows):
     """Write save_paths_dir/summary.csv in exactly test_ompl_planning.py's
     --target all schema, so SimTool's "Load Playback Result" (playback_loader.py)
     can load a benchmark run's saved paths identically to a test script run -
-    no format-specific branching needed on the consumer side."""
+    no format-specific branching needed on the consumer side.
+
+    "positioner_r_deg" is not cosmetic: playback_loader.load_playback_plan_
+    sequence() reads it (defaulting missing/blank to 0.0) to decide what angle
+    to show the pipe/positioner at during playback. Omitting it here (as this
+    function used to) silently played every rotation-needed group back
+    against an UNROTATED pipe - the robot's q_path was correct (planned/
+    verified against the actually-rotated obstacle) but the visualization
+    looked like it drove straight through the pipe, for every group
+    partition_and_sort_target_groups put in the rotated phase."""
     save_paths_dir.mkdir(parents=True, exist_ok=True)
     with open(save_paths_dir / "summary.csv", "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=[
             "index", "group_name", "robot_name", "pose_name", "status", "message", "n_waypoints",
-            "iterations", "max_iter", "solve_time", "iteration_ptc_error"])
+            "iterations", "max_iter", "solve_time", "iteration_ptc_error", "positioner_r_deg"])
         writer.writeheader()
         writer.writerows(path_summary_rows)
 
 
 def _run_once(config, snapshot, planner_name, *, timeout, seed, step_size=0.08, save_paths_dir=None,
-              apf_d0=apf.DEFAULT_D0, apf_eta=apf.DEFAULT_ETA):
+              apf_d0=apf.DEFAULT_D0, apf_eta=apf.DEFAULT_ETA, approach=None, dda_min_clearance=0.10):
     """Plan every target in the snapshot (both phases) with a fresh engine,
     one plan_single_target call per target - mirroring exactly what
     SimTool's InspectionSequencer does, plus the positioner-rotation phase it
@@ -241,6 +400,13 @@ def _run_once(config, snapshot, planner_name, *, timeout, seed, step_size=0.08, 
     optimizer combobox does for a live plan_single_target request
     (visualizer.py._apply_path_optimizer); this script just has to pass the
     same "optimizer"/"optimize_path" request fields through.
+
+    approach: None = follow path_planning.dda_approach in the config, False =
+    force the DDA perpendicular-approach constraint off, dict/True = force it
+    on (dict overrides individual settings, see Visualizer._dda_approach_spec).
+    dda_min_clearance: distance (m) below which a DDA end-link waypoint counts
+    as "hugging the surface" in _dda_path_metrics - applied identically
+    whether or not the constraint is on.
     """
     from robot_core.worker import RobotCoreEngine
     from robot_core.path_planning_service import plan_single_target
@@ -248,7 +414,7 @@ def _run_once(config, snapshot, planner_name, *, timeout, seed, step_size=0.08, 
         inspection_group_pose_items, partition_and_sort_target_groups,
         zero_non_linear_track_joints)
 
-    base_planner_name, optimizer_name = _parse_method(planner_name)
+    base_planner_name, optimizer_name, optimizer_overrides = _parse_method(planner_name)
     np.random.seed(seed)
     wall_t0 = time.perf_counter()
     engine = RobotCoreEngine(config, snapshot)
@@ -263,6 +429,28 @@ def _run_once(config, snapshot, planner_name, *, timeout, seed, step_size=0.08, 
     spool_fix_r = bool(snapshot.get("spool_fix_r", False))
     rotation_T = snapshot.get("second_group_rotation_T")
     initial_r_deg = float(snapshot.get("positioner_r_deg", 0.0))
+
+    if save_paths_dir is not None and snapshot.get("spool_vertices") is not None:
+        # Write the snapshot's spool geometry (+ alignment, if the snapshot has
+        # it) next to summary.csv so SimTool's "Load Playback Result" can
+        # auto-load the matching pipe - see simtool/window.py - without the
+        # user needing to separately track down and load the right spool file
+        # first. Best-effort: a saved-paths run is still useful without this
+        # (playback of the robot's own q_path is unaffected either way).
+        try:
+            from export_snapshot_spool import export_spool_from_snapshot
+            spool_result = export_spool_from_snapshot(snapshot, str(save_paths_dir / "spool.ply"), engine=engine)
+            if spool_result.get("world_frame_uncorrected"):
+                # Old-format snapshot (saved before spool_world_T was added) -
+                # export_spool_from_snapshot falls back to writing already-
+                # WORLD-frame vertices unmodified, which SimTool's "Load Spool"
+                # will mis-position (see its own frame_note for why). Surfaced
+                # here since _run_once has no other reason to print anything
+                # about this snapshot's spool.
+                ConsoleLogger.get_logger().warning(
+                    f"{save_paths_dir}/spool.ply: {spool_result.get('frame_note')}")
+        except Exception as exc:
+            ConsoleLogger.get_logger().warning(f"could not write spool.ply into {save_paths_dir}: {exc}")
 
     start_q_by_robot = {}
     groups = []
@@ -309,7 +497,7 @@ def _run_once(config, snapshot, planner_name, *, timeout, seed, step_size=0.08, 
         # start/goal collision is checked against the wrong pipe position -
         # plan_single_target does that itself given obstacle_rotation_T.
         for robot_name, pose_name, target_pose in inspection_group_pose_items(group):
-            output = plan_single_target(engine, {
+            request = {
                 "robot_name": robot_name,
                 "start_q": _start_q(robot_name),
                 "target_pose": target_pose,
@@ -317,19 +505,25 @@ def _run_once(config, snapshot, planner_name, *, timeout, seed, step_size=0.08, 
                 "step_size": step_size,
                 "optimizer": optimizer_name,
                 "optimize_path": bool(optimizer_name),
+                "optimizer_config": optimizer_overrides or None,
                 "planning_timeout": timeout,
                 "context_label": f"{group.get('name')}:{pose_name}",
                 "obstacle_rotation_T": rotation_T if rotate else None,
-            })
+            }
+            if approach is not None:
+                request["approach"] = approach
+            output = plan_single_target(engine, request)
             result = output.get("result", {})
             total_elapsed += float(result.get("elapsed", 0.0))
             q_path = output.get("q_path") or []
             target_row = {
                 "group_name": group.get("name"), "robot": robot_name, "pose_name": pose_name,
                 "positioner_r_deg": r_deg_label, "status": result.get("status"),
+                "message": result.get("message"),
                 "smoothness": None, "min_clearance": None,
                 "min_clearance_link": None, "min_clearance_obstacle": None,
                 "apf_max_cost": None, "apf_max_cost_min_distance": None,
+                "ee_min_clearance_outside_approach": None, "ee_hug_points": None, "final_angle_deg": None,
             }
             if save_paths_dir is not None and q_path:
                 # Save regardless of status (success or failed) - a failed
@@ -343,6 +537,7 @@ def _run_once(config, snapshot, planner_name, *, timeout, seed, step_size=0.08, 
                 subdir = save_paths_dir / f"{target_index:02d}_{robot_name}_{pose_name}"
                 joint_names = _joint_names_for(engine, robot_name, len(q_path[0]))
                 _save_joint_states_csv(subdir / "joint_states.csv", joint_names, q_path)
+                _save_collision_sidecar(subdir / "collisions.json", result)
                 planner_stats = result.get("planner_stats") or {}
                 path_summary_rows.append({
                     "index": target_index, "group_name": group.get("name"), "robot_name": robot_name,
@@ -350,6 +545,7 @@ def _run_once(config, snapshot, planner_name, *, timeout, seed, step_size=0.08, 
                     "n_waypoints": len(q_path), "iterations": planner_stats.get("iterations"),
                     "max_iter": planner_stats.get("max_iter"), "solve_time": planner_stats.get("solve_time"),
                     "iteration_ptc_error": planner_stats.get("iteration_ptc_error"),
+                    "positioner_r_deg": r_deg_label,
                 })
             target_index += 1
             if result.get("status") == "success" and q_path:
@@ -368,6 +564,9 @@ def _run_once(config, snapshot, planner_name, *, timeout, seed, step_size=0.08, 
                 apf_cost, apf_min_dist = _path_max_apf_cost(engine, robot_name, q_path, apf_d0, apf_eta)
                 target_row["apf_max_cost"] = apf_cost
                 target_row["apf_max_cost_min_distance"] = apf_min_dist
+                if _is_dda_robot(robot_name):
+                    target_row.update(_dda_path_metrics(
+                        engine, config, robot_name, q_path, min_clearance=dda_min_clearance))
             else:
                 n_robot_failures += 1
                 if result.get("ik_failure"):
@@ -452,6 +651,11 @@ def _run_once(config, snapshot, planner_name, *, timeout, seed, step_size=0.08, 
             "mean_smoothness": None,
             "min_clearance": None,
             "max_apf_cost": None,
+            "ee_min_clearance": None,
+            "ee_hug_points": None,
+            "n_dda_targets_hugging": None,
+            "mean_final_angle_deg": None,
+            "max_final_angle_deg": None,
         }
         return row, groups, target_rows
 
@@ -465,6 +669,11 @@ def _run_once(config, snapshot, planner_name, *, timeout, seed, step_size=0.08, 
     smoothness_values = [t["smoothness"] for t in target_rows if t["smoothness"] is not None]
     clearance_values = [t["min_clearance"] for t in target_rows if t["min_clearance"] is not None]
     apf_cost_values = [t["apf_max_cost"] for t in target_rows if t["apf_max_cost"] is not None]
+    ee_clearance_values = [
+        t["ee_min_clearance_outside_approach"] for t in target_rows
+        if t.get("ee_min_clearance_outside_approach") is not None]
+    ee_hug_values = [t["ee_hug_points"] for t in target_rows if t.get("ee_hug_points") is not None]
+    final_angle_values = [t["final_angle_deg"] for t in target_rows if t.get("final_angle_deg") is not None]
     n_plans = sum(g["n_robots_planned"] for g in groups)
     row = {
         "planner": planner_name,
@@ -494,6 +703,17 @@ def _run_once(config, snapshot, planner_name, *, timeout, seed, step_size=0.08, 
         # "how costly would the optimizer find this" number gpmp2.py/
         # trajopt.py actually minimize against (plugins/optimizer/apf.py).
         "max_apf_cost": max(apf_cost_values) if apf_cost_values else None,
+        # DDA depth-camera-head metrics (see _dda_path_metrics) - None when no DDA
+        # target in this run succeeded. ee_min_clearance is the worst case (min)
+        # over targets, ee_hug_points/n_dda_targets_hugging count how much of the
+        # path hugged the surface outside the allowed approach/retreat runs (0 =
+        # clean), final_angle_deg is how far the final approach is from
+        # perpendicular (0 = along the surface normal).
+        "ee_min_clearance": min(ee_clearance_values) if ee_clearance_values else None,
+        "ee_hug_points": sum(ee_hug_values) if ee_hug_values else None,
+        "n_dda_targets_hugging": sum(1 for v in ee_hug_values if v > 0) if ee_hug_values else None,
+        "mean_final_angle_deg": statistics.fmean(final_angle_values) if final_angle_values else None,
+        "max_final_angle_deg": max(final_angle_values) if final_angle_values else None,
     }
     if save_paths_dir is not None:
         _write_path_summary_csv(save_paths_dir, path_summary_rows)
@@ -501,18 +721,19 @@ def _run_once(config, snapshot, planner_name, *, timeout, seed, step_size=0.08, 
 
 
 def _run_once_worker(config, snapshot, planner_name, timeout, seed, step_size, save_paths_dir, apf_d0, apf_eta,
-                      result_queue):
+                      approach, dda_min_clearance, result_queue):
     """Subprocess entry point for _run_once_isolated - see its docstring."""
     try:
         result_queue.put(_run_once(
             config, snapshot, planner_name, timeout=timeout, seed=seed, step_size=step_size,
-            save_paths_dir=save_paths_dir, apf_d0=apf_d0, apf_eta=apf_eta))
+            save_paths_dir=save_paths_dir, apf_d0=apf_d0, apf_eta=apf_eta,
+            approach=approach, dda_min_clearance=dda_min_clearance))
     except BaseException as exc:  # noqa: BLE001 - report it, don't let the process die silently
         result_queue.put(("__error__", str(exc)))
 
 
 def _run_once_isolated(config, snapshot, planner_name, *, timeout, seed, step_size, save_paths_dir, console,
-                        apf_d0=apf.DEFAULT_D0, apf_eta=apf.DEFAULT_ETA):
+                        apf_d0=apf.DEFAULT_D0, apf_eta=apf.DEFAULT_ETA, approach=None, dda_min_clearance=0.10):
     """Run _run_once in a child process so a native crash in the OMPL/Pinocchio
     bindings (observed as exitcode -11/SIGSEGV in the live GUI run this script
     is meant to reproduce - see the "Robot Core process died" log line) kills
@@ -524,13 +745,21 @@ def _run_once_isolated(config, snapshot, planner_name, *, timeout, seed, step_si
     process = ctx.Process(
         target=_run_once_worker,
         args=(config, snapshot, planner_name, timeout, seed, step_size, save_paths_dir, apf_d0, apf_eta,
-              result_queue),
-        name=f"benchmark-{planner_name}",
+              approach, dda_min_clearance, result_queue),
+        name=f"benchmark-{_safe_name(planner_name)}",
     )
     process.start()
     # Generous grace period beyond the planning timeout itself for process
     # startup/teardown and non-planning work (collision mesh setup, etc).
-    join_timeout = max(60.0, timeout * 4.0) if timeout and timeout > 0 else 300.0
+    # The child plans EVERY target in the snapshot, so the hang guard has to scale
+    # with the target count: a fixed max(60, 4*timeout) cut off a 18-target
+    # direct_path+stomp run (~15 s of optimization per target) at 120 s and
+    # reported it as a crash. Budget per target = 2*timeout + 30 s of
+    # non-planning work (optimizers are not bound by the planning timeout).
+    from plugins.robotics.inspection_workflow import inspection_group_pose_items
+    n_targets = max(1, sum(len(list(inspection_group_pose_items(g))) for g in (snapshot.get("target_groups") or [])))
+    per_target = (2.0 * timeout + 30.0) if timeout and timeout > 0 else 120.0
+    join_timeout = max(60.0, per_target * n_targets)
     try:
         result = result_queue.get(timeout=join_timeout)
     except Exception:
@@ -566,12 +795,17 @@ def _run_once_isolated(config, snapshot, planner_name, *, timeout, seed, step_si
         "mean_smoothness": None,
         "min_clearance": None,
         "max_apf_cost": None,
+        "ee_min_clearance": None,
+        "ee_hug_points": None,
+        "n_dda_targets_hugging": None,
+        "mean_final_angle_deg": None,
+        "max_final_angle_deg": None,
     }
     return row, [], []
 
 
 def run_benchmark(config, snapshot, planners, *, repeats, timeout, base_seed, step_size=0.08, save_paths_root=None,
-                   apf_d0=apf.DEFAULT_D0, apf_eta=apf.DEFAULT_ETA):
+                   apf_d0=apf.DEFAULT_D0, apf_eta=apf.DEFAULT_ETA, approach=None, dda_min_clearance=0.10):
     """save_paths_root: if given, every run's planned (and failed-but-attempted)
     q_paths are saved under save_paths_root/<planner>_r<repeat>/ in exactly
     test_ompl_planning.py's --target all shape (summary.csv + per-target
@@ -587,12 +821,13 @@ def run_benchmark(config, snapshot, planners, *, repeats, timeout, base_seed, st
         for repeat in range(repeats):
             console.info(f"[{planner_name}] run {repeat + 1}/{repeats}...")
             save_paths_dir = (
-                pathlib.Path(save_paths_root) / f"{planner_name}_r{repeat}"
+                pathlib.Path(save_paths_root) / f"{_safe_name(planner_name)}_r{repeat}"
                 if save_paths_root else None)
             row, groups, target_rows = _run_once_isolated(
                 config, snapshot, planner_name,
                 timeout=timeout, seed=base_seed + repeat, step_size=step_size,
-                save_paths_dir=save_paths_dir, console=console, apf_d0=apf_d0, apf_eta=apf_eta)
+                save_paths_dir=save_paths_dir, console=console, apf_d0=apf_d0, apf_eta=apf_eta,
+                approach=approach, dda_min_clearance=dda_min_clearance)
             row["repeat"] = repeat
             rows.append(row)
             for group in groups:
@@ -606,6 +841,8 @@ def run_benchmark(config, snapshot, planners, *, repeats, timeout, base_seed, st
                 f"path_length={row['path_length']:.3f} "
                 f"smoothness={row.get('mean_smoothness')} min_clearance={row.get('min_clearance')} "
                 f"max_apf_cost={row.get('max_apf_cost')} "
+                f"ee_min_clearance={row.get('ee_min_clearance')} ee_hug_points={row.get('ee_hug_points')} "
+                f"max_final_angle_deg={row.get('max_final_angle_deg')} "
                 f"rotated_groups={row.get('n_groups_with_rotation', 0)}"
                 + (f" error={row['error']}" if row.get("error") else "")
                 + (f" paths_saved_to={save_paths_dir}" if save_paths_dir else ""))
@@ -632,6 +869,13 @@ def summarize(rows):
         smoothness_values = [r["mean_smoothness"] for r in planner_rows if r.get("mean_smoothness") is not None]
         clearance_values = [r["min_clearance"] for r in planner_rows if r.get("min_clearance") is not None]
         apf_cost_values = [r["max_apf_cost"] for r in planner_rows if r.get("max_apf_cost") is not None]
+        ee_clearance_values = [r["ee_min_clearance"] for r in planner_rows if r.get("ee_min_clearance") is not None]
+        ee_hug_values = [r["ee_hug_points"] for r in planner_rows if r.get("ee_hug_points") is not None]
+        n_hugging_values = [
+            r["n_dda_targets_hugging"] for r in planner_rows if r.get("n_dda_targets_hugging") is not None]
+        angle_values = [r["mean_final_angle_deg"] for r in planner_rows if r.get("mean_final_angle_deg") is not None]
+        max_angle_values = [
+            r["max_final_angle_deg"] for r in planner_rows if r.get("max_final_angle_deg") is not None]
         # Target-level counts, summed across every repeat of this planner -
         # "how many individual (robot, pose) targets were actually planned
         # successfully out of how many were attempted", as opposed to
@@ -659,6 +903,13 @@ def summarize(rows):
             # Worst-case (maximum) APF repulsive cost across all runs - see
             # _path_max_apf_cost / plugins/optimizer/apf.py.
             "max_apf_cost": max(apf_cost_values) if apf_cost_values else None,
+            # DDA depth-camera-head metrics, see _dda_path_metrics. Worst case over runs
+            # for clearance/max angle; hug counts are summed over runs (0 = never hugged).
+            "ee_min_clearance": min(ee_clearance_values) if ee_clearance_values else None,
+            "ee_hug_points": sum(ee_hug_values) if ee_hug_values else None,
+            "n_dda_targets_hugging": sum(n_hugging_values) if n_hugging_values else None,
+            "mean_final_angle_deg": statistics.fmean(angle_values) if angle_values else None,
+            "max_final_angle_deg": max(max_angle_values) if max_angle_values else None,
         })
     summary.sort(key=lambda s: (-s["success_rate"], s["mean_wall_elapsed"]))
     return summary
@@ -750,6 +1001,23 @@ def _print_summary(summary):
             f"{_fmt(row.get('max_apf_cost'), '10.4f')}")
 
 
+def _print_dda_summary(summary):
+    if not any(s.get("ee_hug_points") is not None for s in summary):
+        return
+    header = (
+        f"{'planner':<44}{'ee_min_clr':>11}{'hug_pts':>9}{'hug_tgts':>10}"
+        f"{'ang_mean':>10}{'ang_max':>9}")
+    print(header)
+    print("-" * len(header))
+    for row in summary:
+        def _fmt(value, spec):
+            return "-" if value is None else format(value, spec)
+        print(
+            f"{row['planner']:<44}{_fmt(row.get('ee_min_clearance'), '11.4f')}"
+            f"{_fmt(row.get('ee_hug_points'), '9d')}{_fmt(row.get('n_dda_targets_hugging'), '10d')}"
+            f"{_fmt(row.get('mean_final_angle_deg'), '10.2f')}{_fmt(row.get('max_final_angle_deg'), '9.2f')}")
+
+
 def _write_csv(path, rows, fieldnames):
     with open(path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -772,6 +1040,21 @@ def main():
              "controls direct_path's waypoint spacing - see direct_path.py). Not exposed by "
              "this script before - requests silently used _plan_inspection_path_for_robot's "
              "own 0.08 fallback (visualizer.py) since no 'step_size' key was ever sent.")
+    parser.add_argument(
+        "--approach", choices=["config", "on", "off"], default="config",
+        help="DDA perpendicular-approach constraint (path_planning.dda_approach in path_planning.cfg): "
+             "'config' (default) follows the config file, 'on'/'off' force it for this benchmark. "
+             "Run the same methods once with 'on' and once with 'off' (different --output) to measure "
+             "what the constraint changes.")
+    parser.add_argument(
+        "--standoff", type=float, default=None,
+        help="Override dda_approach.standoff (m): how far back along the facing axis the pre-approach "
+             "pose sits from the target.")
+    parser.add_argument(
+        "--dda-min-clearance", type=float, default=None,
+        help="Override dda_approach.min_clearance (m): DDA end-link distance below which a path point "
+             "outside the approach/retreat runs counts as 'hugging' the surface (metric threshold; "
+             "also the enforced margin when the constraint is on). Default: config value (0.10).")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--verbose-level", default="INFO")
     parser.add_argument(
@@ -806,7 +1089,9 @@ def main():
     console = ConsoleLogger.get_logger()
 
     snapshot = _load_snapshot(args.snapshot, console)
-    planners = [p.strip() for p in args.planners.split(",") if p.strip()]
+    planners = _split_methods(args.planners)
+    for method in planners:
+        _parse_method(method)  # fail fast on a malformed "[...]" override, before hours of runs
     console.info(
         f"Benchmarking {len(planners)} planner(s) x {args.repeats} repeat(s): {planners}")
     console.info(
@@ -817,15 +1102,36 @@ def main():
         f"benchmark_{pathlib.Path(args.snapshot).stem}_{time.strftime('%Y%m%d_%H%M%S')}")
     save_paths_root = f"{output_prefix}_paths" if args.save_paths else None
 
+    approach_cfg = (config.get("path_planning", {}) or {}).get("dda_approach", {}) or {}
+    approach_override = {}
+    if args.standoff is not None:
+        approach_override["standoff"] = args.standoff
+    if args.dda_min_clearance is not None:
+        approach_override["min_clearance"] = args.dda_min_clearance
+    if args.approach == "off":
+        approach_request = False
+    elif args.approach == "on":
+        approach_request = {"enabled": True, **approach_override}
+    else:
+        approach_request = dict(approach_override) if approach_override else None
+    dda_min_clearance = float(approach_override.get("min_clearance", approach_cfg.get("min_clearance", 0.10)))
+    console.info(
+        f"DDA approach: mode={args.approach} override={approach_override or None} "
+        f"config_enabled={approach_cfg.get('enabled', False)} metric_min_clearance={dda_min_clearance}")
+
     rows, group_rows, target_metric_rows = run_benchmark(
         config, snapshot, planners,
         repeats=args.repeats, timeout=args.timeout, base_seed=args.seed, step_size=args.step_size,
-        save_paths_root=save_paths_root, apf_d0=args.apf_d0, apf_eta=args.apf_eta)
+        save_paths_root=save_paths_root, apf_d0=args.apf_d0, apf_eta=args.apf_eta,
+        approach=approach_request, dda_min_clearance=dda_min_clearance)
     summary = summarize(rows)
     rotation_summary = summarize_by_rotation(group_rows)
 
     print()
     _print_summary(summary)
+    print()
+    print("-- DDA surface clearance / approach perpendicularity --")
+    _print_dda_summary(summary)
     print()
     print("-- by positioner rotation --")
     _print_rotation_summary(rotation_summary)
@@ -838,7 +1144,9 @@ def main():
     _write_csv(runs_path, rows, fieldnames=[
         "planner", "repeat", "status", "wall_elapsed", "total_elapsed",
         "path_length", "n_plans", "n_failures", "n_targets", "n_ik_failures",
-        "n_groups_with_rotation", "mean_smoothness", "min_clearance", "max_apf_cost", "error",
+        "n_groups_with_rotation", "mean_smoothness", "min_clearance", "max_apf_cost",
+        "ee_min_clearance", "ee_hug_points", "n_dda_targets_hugging",
+        "mean_final_angle_deg", "max_final_angle_deg", "error",
     ])
     _write_csv(groups_path, group_rows, fieldnames=[
         "planner", "repeat", "group_index", "group_name", "positioner_r_deg",
@@ -850,6 +1158,8 @@ def main():
         "success_rate", "n_targets_planned", "n_targets_total", "target_success_rate",
         "mean_wall_elapsed", "stdev_wall_elapsed", "mean_path_length",
         "mean_smoothness", "min_clearance", "max_apf_cost",
+        "ee_min_clearance", "ee_hug_points", "n_dda_targets_hugging",
+        "mean_final_angle_deg", "max_final_angle_deg",
     ])
     _write_csv(rotation_summary_path, rotation_summary, fieldnames=[
         "planner", "n_groups_no_rotation", "success_rate_no_rotation",
@@ -860,8 +1170,9 @@ def main():
     # find *which* target/robot was the closest call or the roughest path.
     _write_csv(target_metrics_path, target_metric_rows, fieldnames=[
         "planner", "repeat", "group_name", "robot", "pose_name", "positioner_r_deg",
-        "status", "smoothness", "min_clearance", "min_clearance_link", "min_clearance_obstacle",
+        "status", "message", "smoothness", "min_clearance", "min_clearance_link", "min_clearance_obstacle",
         "apf_max_cost", "apf_max_cost_min_distance",
+        "ee_min_clearance_outside_approach", "ee_hug_points", "final_angle_deg",
     ])
     console.info(
         f"Wrote {runs_path}, {groups_path}, {summary_path}, {rotation_summary_path}, "

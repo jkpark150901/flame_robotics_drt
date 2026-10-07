@@ -1,12 +1,65 @@
 from __future__ import annotations
 
+import contextlib
+import math
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 import numpy as np
 
 from plugins.robotics.backend import IKOptions, IKResult, RoboticsBackend
+
+
+@dataclass
+class ApproachSpec:
+    """DDA처럼 표면에 수직으로만 진입해야 하는 end effector의 접근 제약.
+
+    경로는 [retreat] + [free] + [approach] 세 구간으로 만들어진다.
+        approach: 사전접근점(pre) -> 목표. target frame의 facing 축 방향 직선(카르테시안)이라
+                  접근 방향이 구조적으로 표면 수직이다. 여기서만 표면 근처(clearance 미만) 허용.
+        free:     (retreat 끝점) -> pre. 일반 q-space planner/optimizer 구간. 이 구간에서는
+                  clearance_links가 표면에서 min_clearance 안으로 못 들어간다(충돌로 판정).
+        retreat:  시작 자세가 이미 표면 근처(이전 target의 진입 자세를 이어받은 경우)면 그 자세의
+                  facing 축 반대로 물러나는 직선 구간. 아니면 비어 있다.
+
+    Args:
+        facing_axis_local: target frame 기준, end effector가 표면을 바라보는 축(단위 벡터).
+        standoff: 사전접근점을 목표에서 facing 반대로 얼마나 띄울지(m).
+        clearance_links: 표면 근처 통과를 막을 링크(geometry) 이름. 예: ["dda_link_end"].
+        min_clearance: free 구간에서 clearance_links가 지켜야 할 최소 표면 거리(m).
+            standoff보다 작아야 pre/retreat 끝점이 이 조건을 만족한다.
+        step: 직선 구간 IK 보간 간격(m).
+        max_joint_step: 인접 보간점 사이 허용 q 변화 크기. 넘으면 IK 해 가지가 바뀐 것(elbow flip 등)으로 본다.
+    """
+
+    facing_axis_local: Sequence[float]
+    standoff: float = 0.15
+    clearance_links: Sequence[str] = ()
+    min_clearance: float = 0.10
+    step: float = 0.02
+    max_joint_step: float = 0.3
+
+    def __post_init__(self):
+        axis = np.asarray(self.facing_axis_local, dtype=float).reshape(3)
+        norm = float(np.linalg.norm(axis))
+        if norm < 1e-9:
+            raise ValueError("ApproachSpec.facing_axis_local must be non-zero")
+        self.facing_axis_local = (axis / norm).tolist()
+        if not (0.0 < float(self.min_clearance) < float(self.standoff)):
+            raise ValueError(
+                f"ApproachSpec requires 0 < min_clearance < standoff, got "
+                f"min_clearance={self.min_clearance}, standoff={self.standoff}")
+        if not self.clearance_links:
+            raise ValueError("ApproachSpec.clearance_links is required")
+
+
+class ApproachPlanningError(RuntimeError):
+    """진입/퇴출 직선 구간을 만들 수 없을 때(IK 실패, 해 불연속 등). reason은 collision_preview_reason으로 노출된다."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
 
 
 @dataclass
@@ -36,6 +89,21 @@ class InspectionIKRequest:
     ik_config: Dict[str, Any] = field(default_factory=dict)
     ik_solver: Optional[str] = None
     ik_normalize: Optional[bool] = None
+
+
+#: Resolution (rad, q-space) used for the FINAL accept/reject verify_path()
+#: call - deliberately finer than planning's usual step_size (0.08 default).
+#: Search-time edge checking (OMPL's state validity checker during RRT*/RRT-
+#: Connect exploration, STOMP's own cost evaluation) stays at the coarser
+#: step_size for speed; only the one verification pass that actually decides
+#: collision_preview/status uses this. Found in practice: an RRTConnect+STOMP
+#: result verify_path() called clean at 0.08 resolution (0 colliding edges)
+#: turned out to have an actual, if brief (2 samples out of 255), penetration
+#: once independently re-checked at 0.02 - a collision "notch" narrower than
+#: one 0.08 sample interval, invisible to that check by construction. This is
+#: the fix: verify at a resolution fine enough that such a notch can't hide
+#: between two sampled points.
+FINAL_VERIFICATION_RESOLUTION = 0.02
 
 
 class InspectionPlanningBase:
@@ -339,6 +407,223 @@ class InspectionPlanningBase:
 
         return restore
 
+    # ------------------------------------------------------------------
+    # 표면 수직 진입(ApproachSpec) 지원
+    # ------------------------------------------------------------------
+    @contextlib.contextmanager
+    def link_clearance(self, robot_name: str, link_names: Optional[Sequence[str]], margin: float):
+        """with 블록 안에서 link_names가 장애물 margin(m) 안으로 들어가면 충돌로 판정한다.
+
+        블록이 끝나면(예외 포함) 반드시 0으로 되돌린다 - backend의 collision data는 호출 사이에
+        재사용되므로 남겨 두면 다음 target의 계획이 조용히 오염된다. margin이 적용된 pair가
+        하나도 없으면(backend 미지원 등) 제약이 실제로는 안 걸린 것이므로 조용히 넘기지 않고 예외를 낸다.
+        """
+        enabled = bool(link_names) and float(margin or 0.0) > 0.0
+        try:
+            if enabled:
+                applied = int(self.backend.set_link_clearance(robot_name, link_names, margin) or 0)
+                if applied <= 0:
+                    raise ApproachPlanningError("clearance_not_enforced")
+            yield
+        finally:
+            if enabled:
+                with contextlib.suppress(Exception):
+                    self.backend.set_link_clearance(robot_name, [], 0.0)
+
+    def _clear_link_clearance(self, robot_name: str) -> None:
+        with contextlib.suppress(Exception):
+            self.backend.set_link_clearance(robot_name, [], 0.0)
+
+    @contextlib.contextmanager
+    def tight_verification_resolution(self, planner, resolution: float = FINAL_VERIFICATION_RESOLUTION):
+        """Temporarily tighten planner's collision-sampling resolution for one
+        final verify_path()/verify_approach_path() call - see
+        FINAL_VERIFICATION_RESOLUTION for why. Restores the planner's own
+        (usually step_size-derived) resolution afterward regardless of
+        exceptions, since it's shared/reused across the next target's plan."""
+        original = getattr(planner, "pin_collision_sample_resolution", None)
+        if original is None:
+            yield
+            return
+        planner.pin_collision_sample_resolution = float(resolution)
+        try:
+            yield
+        finally:
+            planner.pin_collision_sample_resolution = original
+
+    def link_min_distance(self, robot_name: str, q, link_names: Sequence[str]) -> Optional[float]:
+        """link_names에 해당하는 링크의 장애물까지 최소 거리. 거리 데이터가 없으면 None."""
+        names = [str(n) for n in link_names]
+        distances = [
+            float(e["distance"])
+            for e in self.backend.link_obstacle_distances(robot_name, q)
+            if any(e["link"] == n or str(e["link"]).startswith(n + "_") for n in names)
+        ]
+        return min(distances) if distances else None
+
+    def _linear_ik_segment(
+        self,
+        request: InspectionIKRequest,
+        q_seed: np.ndarray,
+        p_end: np.ndarray,
+        spec: ApproachSpec,
+    ) -> List[np.ndarray]:
+        """q_seed의 TCP 자세를 유지한 채 위치만 p_end까지 직선으로 옮기는 q 목록(q_seed 제외, 끝점 포함).
+
+        step 간격마다 직전 해를 seed로 IK를 다시 풀어 카르테시안 직선을 만든다(관절 보간이 아님).
+        """
+        options = self.ik_options(request.ik_config, request.ik_solver, request.ik_normalize)
+        T_seed = self.backend.frame_world_T(request.robot_name, q_seed, request.frame_name)
+        p_start = T_seed[:3, 3].copy()
+        p_end = np.asarray(p_end, dtype=float).reshape(3)
+        n_steps = max(1, int(math.ceil(float(np.linalg.norm(p_end - p_start)) / max(spec.step, 1e-6))))
+        q_prev = np.asarray(q_seed, dtype=float)
+        segment: List[np.ndarray] = []
+        for k in range(1, n_steps + 1):
+            T_k = T_seed.copy()
+            T_k[:3, 3] = p_start + (p_end - p_start) * (k / n_steps)
+            result = self.backend.solve_ik(
+                request.robot_name, T_k, q_prev, options=options, frame_name=request.frame_name)
+            if result.q is None or not bool(result.success):
+                raise ApproachPlanningError("approach_ik_failed")
+            q_k = np.asarray(result.q, dtype=float)
+            if float(np.linalg.norm(q_k - q_prev)) > spec.max_joint_step:
+                raise ApproachPlanningError("approach_ik_discontinuity")
+            segment.append(q_k)
+            q_prev = q_k
+        return segment
+
+    def _build_approach_segments(
+        self,
+        request: InspectionIKRequest,
+        q_start: np.ndarray,
+        goal_q: np.ndarray,
+        spec: ApproachSpec,
+    ) -> Dict[str, Any]:
+        """retreat(필요 시) / 사전접근점 / approach 구간의 q 목록을 만든다."""
+        robot = request.robot_name
+        facing_local = np.asarray(spec.facing_axis_local, dtype=float)
+
+        # approach: goal에서 facing 반대 방향으로 standoff만큼 IK를 밟아 나간 뒤 뒤집는다.
+        # goal_q를 seed로 시작하므로 approach 끝점이 IK가 정한 goal_q와 정확히 같다.
+        T_goal = self.backend.frame_world_T(robot, goal_q, request.frame_name)
+        facing_world = T_goal[:3, :3] @ facing_local
+        pre_p = T_goal[:3, 3] - float(spec.standoff) * facing_world
+        backward = self._linear_ik_segment(request, goal_q, pre_p, spec)
+        pre_q = backward[-1]
+        approach_qs = list(reversed(backward)) + [np.asarray(goal_q, dtype=float)]
+
+        # retreat: 시작 자세가 이미 표면 근처면 그 자세의 facing 반대로 먼저 물러난다.
+        start_clearance = self.link_min_distance(robot, q_start, spec.clearance_links)
+        if start_clearance is None:
+            raise ApproachPlanningError("clearance_data_unavailable")
+        retreat_qs: List[np.ndarray] = [np.asarray(q_start, dtype=float)]
+        if start_clearance < float(spec.min_clearance):
+            T_start = self.backend.frame_world_T(robot, q_start, request.frame_name)
+            retreat_p = T_start[:3, 3] - float(spec.standoff) * (T_start[:3, :3] @ facing_local)
+            retreat_qs += self._linear_ik_segment(request, q_start, retreat_p, spec)
+
+        return {
+            "retreat_qs": retreat_qs,
+            "pre_q": pre_q,
+            "approach_qs": approach_qs,
+            "start_clearance": float(start_clearance),
+            "facing_world": facing_world.tolist(),
+        }
+
+    def _approach_metrics(
+        self,
+        request: InspectionIKRequest,
+        approach_qs: Sequence[np.ndarray],
+        spec: ApproachSpec,
+    ) -> Dict[str, float]:
+        """approach 구간이 실제로 표면 수직 직선인지 FK로 확인한 수치(각도 편차, 직선 이탈)."""
+        points = np.array([
+            self.backend.frame_world_T(request.robot_name, q, request.frame_name)[:3, 3] for q in approach_qs])
+        T_goal = self.backend.frame_world_T(request.robot_name, approach_qs[-1], request.frame_name)
+        T_pre = self.backend.frame_world_T(request.robot_name, approach_qs[0], request.frame_name)
+        travel = points[-1] - points[0]
+        length = float(np.linalg.norm(travel))
+        if length < 1e-9:
+            return {"length": 0.0, "angle_deg": 0.0, "lateral_dev_max": 0.0, "orientation_dev_deg": 0.0}
+        direction = travel / length
+        # 실제 이동 방향과 target frame facing 축 사이 각도.
+        facing = T_goal[:3, :3] @ np.asarray(spec.facing_axis_local, dtype=float)
+        angle = math.degrees(math.acos(float(np.clip(np.dot(direction, facing), -1.0, 1.0))))
+        offsets = points - points[0]
+        lateral = offsets - np.outer(offsets @ direction, direction)
+        # 자세(회전)가 approach 내내 유지되는지.
+        rot_delta = T_pre[:3, :3].T @ T_goal[:3, :3]
+        orient = math.degrees(math.acos(float(np.clip((np.trace(rot_delta) - 1.0) * 0.5, -1.0, 1.0))))
+        return {
+            "length": length,
+            "angle_deg": angle,
+            "lateral_dev_max": float(np.max(np.linalg.norm(lateral, axis=1))),
+            "orientation_dev_deg": orient,
+        }
+
+    def verify_approach_path(self, planner, q_path: Sequence[Any], info: Dict[str, Any]) -> Dict[str, Any]:
+        """[retreat | free | approach] 경로를 구간별 규칙으로 검증한다.
+
+        free 구간만 clearance margin을 켜고(표면 근처 통과 금지), retreat/approach는 실제 접촉만
+        충돌로 본다(표면 가까이 가는 게 그 구간의 목적이므로). 반환 dict는 PlannerBase.verify_path와
+        같은 키에 segments/margin_only_violation/free_min_clearance를 더한 것이다.
+        """
+        robot = info["robot_name"]
+        links = info["clearance_links"]
+        margin = float(info["min_clearance"])
+        poses = [np.asarray(q, dtype=float) for q in q_path]
+        free_a, free_b = int(info["free_start_idx"]), int(info["free_end_idx"])
+        segments = (
+            ("retreat", 0, free_a, False),
+            ("free", free_a, free_b, True),
+            ("approach", free_b, len(poses) - 1, False),
+        )
+        merged: Dict[str, Any] = {
+            "colliding_edges": 0, "colliding_waypoints": 0, "collision_pairs": [],
+            "edge_collisions": [], "waypoint_collisions": [], "end_link_colliding": False,
+            "backend": None, "segments": {}, "margin_only_violation": False,
+        }
+        self._clear_link_clearance(robot)
+        for name, a, b, with_margin in segments:
+            if b < a or not poses:
+                continue
+            seg = poses[a:b + 1]
+            if with_margin:
+                with self.link_clearance(robot, links, margin):
+                    v = planner.verify_path(seg)
+            else:
+                v = planner.verify_path(seg)
+            hit = bool(v.get("colliding_edges", 0) or v.get("colliding_waypoints", 0))
+            if with_margin and hit:
+                # 접촉 없이 margin만 어긴 경우인지 구분한다(원인 표기용).
+                plain = planner.verify_path(seg)
+                merged["margin_only_violation"] = not bool(
+                    plain.get("colliding_edges", 0) or plain.get("colliding_waypoints", 0))
+            merged["segments"][name] = {"start": a, "end": b, "colliding": hit}
+            merged["colliding_edges"] += int(v.get("colliding_edges", 0))
+            merged["colliding_waypoints"] += int(v.get("colliding_waypoints", 0))
+            merged["end_link_colliding"] = merged["end_link_colliding"] or bool(v.get("end_link_colliding"))
+            merged["backend"] = v.get("backend")
+            for pair in v.get("collision_pairs", []):
+                if list(pair) not in merged["collision_pairs"]:
+                    merged["collision_pairs"].append(list(pair))
+            for item in v.get("edge_collisions", []):
+                shifted = dict(item)
+                shifted["edge"] = int(item["edge"]) + a
+                shifted["from_waypoint"] = int(item["from_waypoint"]) + a
+                shifted["to_waypoint"] = int(item["to_waypoint"]) + a
+                merged["edge_collisions"].append(shifted)
+            for item in v.get("waypoint_collisions", []):
+                shifted = dict(item)
+                shifted["waypoint"] = int(item["waypoint"]) + a
+                merged["waypoint_collisions"].append(shifted)
+
+        free_distances = [
+            d for d in (self.link_min_distance(robot, q, links) for q in poses[free_a:free_b + 1]) if d is not None]
+        merged["free_min_clearance"] = min(free_distances) if free_distances else None
+        return merged
+
     def plan_q_path_for_robot(
         self,
         *,
@@ -348,6 +633,7 @@ class InspectionPlanningBase:
         planning_timeout: float = 0.0,
         lock_linear_track: bool = False,
         console=None,
+        approach: Optional[ApproachSpec] = None,
     ) -> Dict[str, Any]:
         """IK 목표 q까지 q-space path planning을 수행한다.
 
@@ -356,6 +642,8 @@ class InspectionPlanningBase:
             ik_request: 목표 pose와 IK 설정.
             q_start: path planning 시작 raw q.
             planning_timeout: planner deadline. 0 이하면 비활성화.
+            approach: 주어지면 목표 대신 사전접근점까지 planner로 계획하고, 목표까지는 facing 축
+                방향 직선으로 잇는다(ApproachSpec 참고). 결과의 "approach"에 구간 인덱스/수직도 수치가 담긴다.
             lock_linear_track: 기본 False(권장). True면 룰베이스로 linear track을 먼저
                 목표값으로 이동시킨 뒤, 그 값에 고정한 상태로 나머지 joint만 path planning한다
                 (탐색 공간 축소로 속도↑). 하지만 그 "먼저 이동" 구간은 팔은 이전 자세 그대로
@@ -384,6 +672,19 @@ class InspectionPlanningBase:
         # ik_fallback 때문에 강제된 경우 그 사실을 바로 사유에 남긴다(아래 planner 단계
         # 분기들이 있으면 그쪽이 더 구체적이라 그대로 덮어쓴다).
         fallback_reason = "ik_fallback" if forced_collision_preview else None
+
+        # 표면 수직 진입: 목표 대신 사전접근점까지만 planner에 맡기고, 목표까지는 직선 approach로 잇는다.
+        # ik_fallback이면 goal_q 자체가 못 미더우므로 approach 없이 기존 경로(+fallback 표시)로 둔다.
+        approach_segments: Optional[Dict[str, Any]] = None
+        approach_info: Optional[Dict[str, Any]] = None
+        planner_goal_q = goal_q
+        if approach is not None and not forced_collision_preview:
+            try:
+                approach_segments = self._build_approach_segments(ik_request, q_start, goal_q, approach)
+            except ApproachPlanningError as exc:
+                return self._approach_failure_result(result, q_start, exc.reason)
+            q_start = approach_segments["retreat_qs"][-1]
+            planner_goal_q = approach_segments["pre_q"]
 
         # 룰베이스 linear track 고정: track을 먼저 목표값으로 옮긴 자세(plan_start_q)에서
         # planning을 시작하고, 그 로봇 모델의 track limit을 좁혀 track이 planning 중 안
@@ -439,8 +740,17 @@ class InspectionPlanningBase:
             planner.planning_deadline = time.monotonic() + float(planning_timeout)
         stage_t0 = time.perf_counter()
         wall_t0 = time.time()
+        # free 구간 계획은 clearance margin을 켠 채로 한다(표면 근처 통과 금지). 블록을 벗어나면 자동 해제.
+        clearance_ctx = (
+            self.link_clearance(ik_request.robot_name, approach.clearance_links, approach.min_clearance)
+            if approach_segments is not None else contextlib.nullcontext())
+        approach_error: Optional[str] = None
         try:
-            q_path = planner.generate(plan_start_q, goal_q)
+            with clearance_ctx:
+                q_path = planner.generate(plan_start_q, planner_goal_q)
+        except ApproachPlanningError as exc:
+            approach_error = exc.reason
+            q_path = []
         except Exception as exc:
             if "timeout" not in str(exc).lower():
                 raise
@@ -451,6 +761,8 @@ class InspectionPlanningBase:
                 planner.planning_deadline = None
             if track_restore is not None:
                 track_restore()
+        if approach_error is not None:
+            return self._approach_failure_result(result, q_start, approach_error)
         # 레일 이동 구간(q_start -> plan_start_q)을 경로 맨 앞에 붙인다. 이후 verify_path가
         # 이 구간도 함께 충돌 검사한다(레일 이동 중 충돌도 잡힘).
         if track_prepended and q_path:
@@ -476,12 +788,42 @@ class InspectionPlanningBase:
             fallback_reason = fallback_reason or "planner_empty_start_only"
 
         stage_t0 = time.perf_counter()
-        verification = planner.verify_path(q_path)
+        if approach_segments is not None and not forced_collision_preview:
+            retreat_qs = approach_segments["retreat_qs"]
+            free_qs = [np.asarray(q, dtype=float) for q in q_path]
+            free_start_idx = len(retreat_qs) - 1
+            q_path = retreat_qs[:-1] + free_qs + approach_segments["approach_qs"][1:]
+            approach_info = {
+                "enabled": True,
+                "assembled": True,
+                "robot_name": ik_request.robot_name,
+                "clearance_links": list(approach.clearance_links),
+                "min_clearance": float(approach.min_clearance),
+                "standoff": float(approach.standoff),
+                "free_start_idx": free_start_idx,
+                "free_end_idx": free_start_idx + len(free_qs) - 1,
+                "retreat_edges": free_start_idx,
+                "start_clearance": approach_segments["start_clearance"],
+                "facing_world": approach_segments["facing_world"],
+                **{f"approach_{k}": v for k, v in
+                   self._approach_metrics(ik_request, approach_segments["approach_qs"], approach).items()},
+            }
+            with self.tight_verification_resolution(planner):
+                verification = self.verify_approach_path(planner, q_path, approach_info)
+            approach_info["free_min_clearance"] = verification.get("free_min_clearance")
+            approach_info["margin_only_violation"] = bool(verification.get("margin_only_violation"))
+        else:
+            if approach is not None:
+                approach_info = {"enabled": True, "assembled": False}
+            with self.tight_verification_resolution(planner):
+                verification = planner.verify_path(q_path)
         result["timing"]["collision_verification"] = time.perf_counter() - stage_t0
         collision_preview_reason = fallback_reason
         if verification.get("colliding_edges", 0) != 0 or verification.get("colliding_waypoints", 0) != 0:
             forced_collision_preview = True
-            collision_preview_reason = collision_preview_reason or "returned_path_collision"
+            collision_preview_reason = collision_preview_reason or (
+                "dda_min_clearance_violated" if verification.get("margin_only_violation")
+                else "returned_path_collision")
 
         result.update({
             "status": "partial" if (result.get("ik_fallback") or forced_collision_preview) else "success",
@@ -500,5 +842,32 @@ class InspectionPlanningBase:
             # (see OMPLPlannerBase._generate_joint_space); legacy planners
             # leave it empty.
             "planner_stats": dict(getattr(planner, "last_ompl_stats", {}) or {}),
+            # approach를 쓰지 않았으면 None. 쓴 경우 구간 인덱스(free_start_idx/free_end_idx)와
+            # 수직도/clearance 수치 - visualizer가 옵티마이저를 free 구간에만 적용할 때 쓴다.
+            "approach": approach_info,
+        })
+        return result
+
+    @staticmethod
+    def _approach_failure_result(result: Dict[str, Any], q_start: np.ndarray, reason: str) -> Dict[str, Any]:
+        """진입/퇴출 직선을 만들지 못했을 때의 결과. q_path는 start 한 점뿐이라 호출부가 실패로 처리한다."""
+        result["timing"]["planning"] = 0.0
+        result["timing"]["collision_verification"] = 0.0
+        result.update({
+            "status": "partial",
+            "q_path": [np.asarray(q_start, dtype=float)],
+            "edge_collisions": [],
+            "waypoints": 1,
+            "verification": {"colliding_edges": 0, "colliding_waypoints": 0, "collision_pairs": [],
+                             "edge_collisions": [], "waypoint_collisions": []},
+            "robot_links_considered": True,
+            "collision_preview": True,
+            "planning_error": None,
+            "fallback_reason": reason,
+            "collision_preview_reason": reason,
+            "reached_T": result.get("ik_reached_T"),
+            "elapsed": 0.0,
+            "planner_stats": {},
+            "approach": {"enabled": True, "assembled": False, "error": reason},
         })
         return result

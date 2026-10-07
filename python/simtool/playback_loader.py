@@ -15,14 +15,15 @@ live SimTool planning run, so SimTool's "Start Simulation" playback
 Visualizer._start_path_playback) plays a loaded result file identically to a
 just-planned one - no separate playback code path.
 
-Only test_ompl_planning.py saves q_path per target (benchmark_path_planners.py
-doesn't - it only computes summary metrics, see its target_metrics.csv) so
-this loader is specific to that script's output shape.
+benchmark_path_planners.py's --save-paths writes this same shape too (see its
+_write_path_summary_csv/_save_joint_states_csv), so this loader works
+unchanged on either script's output - no format-specific branching needed.
 """
 
 from __future__ import annotations
 
 import csv
+import json
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -93,6 +94,29 @@ def load_playback_plan_sequence(run_dir) -> Dict[str, Any]:
                     "status": status, "reason": "joint_states.csv is empty",
                 })
                 continue
+            # benchmark_path_planners.py's --save-paths writes this sidecar
+            # (see _save_collision_sidecar) next to joint_states.csv whenever
+            # the target actually collided - carries plannerbase.verify_path's
+            # edge_collisions/verification shape, the same thing a LIVE plan
+            # has. Without it, visualizer.py's _inspection_plan_collision_
+            # reason()/_warn_collision_preview_playback() have nothing to see
+            # (a loaded plan otherwise only has q_path/status) and silently
+            # play back a colliding path as if it were clean - see the
+            # "status" fallback added there for runs saved before this sidecar
+            # existed, which still warns but can't highlight the exact links.
+            plan_extra = {}
+            collision_path = subdir / "collisions.json"
+            if collision_path.exists():
+                try:
+                    with open(collision_path, "r", encoding="utf-8") as cf:
+                        collision_data = json.load(cf)
+                    plan_extra = {
+                        "collision_preview": bool(collision_data.get("collision_preview")),
+                        "edge_collisions": collision_data.get("edge_collisions") or [],
+                        "verification": collision_data.get("verification") or {},
+                    }
+                except Exception:
+                    plan_extra = {}
             if group_name not in groups:
                 # Positioner angle this target was actually collision-checked
                 # against (see test_ompl_planning.py's _resolve_positioner_r_deg
@@ -106,7 +130,7 @@ def load_playback_plan_sequence(run_dir) -> Dict[str, Any]:
                     r_deg = 0.0
                 groups[group_name] = {"name": group_name, "positioner_r_deg": r_deg, "plans": {}}
                 order.append(group_name)
-            groups[group_name]["plans"][robot_name] = {"q_path": q_path, "status": status}
+            groups[group_name]["plans"][robot_name] = {"q_path": q_path, "status": status, **plan_extra}
 
     plan_sequence = [groups[name] for name in order]
     return {

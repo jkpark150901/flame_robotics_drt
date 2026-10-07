@@ -41,11 +41,27 @@ class Stomp(OptimizerBase):
         # disables early stopping (always run num_iterations, old behavior).
         self.early_stop_patience = self.config.get("early_stop_patience", 10)
         self.early_stop_rel_tol = self.config.get("early_stop_rel_tol", 0.01)
+        # Wall-clock budget (s) for the WHOLE optimize() call - unlike
+        # early_stop_*, this fires regardless of whether cost is still
+        # improving, so a scene where distance queries (apf.py's dominant
+        # cost - see the timing summary below) are expensive can't blow past
+        # any caller's expectations. self.optimize() previously respected NO
+        # time budget at all: with real APF cost enabled, a single target has
+        # been observed taking 100-700+s (num_iterations=50, num_samples=20),
+        # which silently blew through benchmark_path_planners.py's per-run
+        # subprocess timeout and lost that whole run's data (see git history/
+        # commit notes around the APF-scale fix). None/0/negative disables it
+        # (old unbounded behavior) - default is a safety net, not a tuning
+        # knob callers should rely on for "how well-converged" the result is;
+        # lower num_iterations/num_samples first if convergence quality at a
+        # SHORTER budget matters, this is a last-resort cutoff.
+        self.time_budget_s = self.config.get("time_budget_s", 10.0)
         self.save_playback_trajectory = bool(self.config.get("save_playback_trajectory", True))
         self.save_task_space_plot = bool(self.config.get("save_task_space_plot", True))
         # Which world axes to plot the task-space view on - default x/y.
         self.task_space_axes = list(self.config.get("task_space_axes", [0, 1]))
         self.last_cost_breakdown = None
+        self.last_optimization_status = None
 
     def _is_collision_free(self, path, planner):
         if hasattr(planner, 'check_collision_on_path'): # If planner has efficient bulk check
@@ -106,8 +122,20 @@ class Stomp(OptimizerBase):
         # candidate, which may have been rejected for colliding. This is
         # what a playback should show: how the real trajectory evolved.
         path_history = [(-1, current_path.copy())]
+        optimize_t0 = time.perf_counter()
+        stopped_for_time_budget = False
+
+        def _time_budget_exceeded():
+            return bool(self.time_budget_s) and self.time_budget_s > 0 and \
+                (time.perf_counter() - optimize_t0) > self.time_budget_s
 
         for iter_num in range(self.num_iterations):
+            if _time_budget_exceeded():
+                stopped_for_time_budget = True
+                print(
+                    f"[STOMP] Time budget ({self.time_budget_s}s) exceeded before iter {iter_num} - "
+                    f"stopping with best path found so far.")
+                break
             iter_t0 = time.perf_counter()
 
             # 1. Generate Correlated Noise
@@ -130,6 +158,19 @@ class Stomp(OptimizerBase):
             costs = np.zeros(self.num_samples)
             best_breakdown = None
             for i in range(self.num_samples):
+                # Checked per-sample, not just once per iteration: with the
+                # default num_samples=20, a single iteration's cost-eval loop
+                # can itself take several seconds (each sample walks every
+                # waypoint through link_obstacle_distances - see below), so
+                # only checking at the top of the iteration risks overshooting
+                # the budget by up to one whole iteration's worth of samples.
+                # Bailing here leaves costs[i:] at their np.zeros() init - an
+                # accept/reject decision on that partial array would treat
+                # those as free 0-cost candidates, so this iteration's update
+                # is abandoned entirely (down in step 4) rather than used.
+                if _time_budget_exceeded():
+                    stopped_for_time_budget = True
+                    break
                 cand = candidates[i]
                 diffs = np.diff(cand, axis=0)
                 length_cost = np.sum(np.sqrt(np.sum(diffs**2, axis=1)))
@@ -159,6 +200,16 @@ class Stomp(OptimizerBase):
                 if best_breakdown is None or costs[i] < best_breakdown[0]:
                     best_breakdown = (costs[i], float(length_cost), float(obstacle_cost), att_cost)
             phase_time["cost_eval"] += time.perf_counter() - cost_eval_t0
+
+            if stopped_for_time_budget:
+                # best_breakdown/costs are only partially filled (see the
+                # per-sample check above) - not usable for an accept/reject
+                # decision. Discard this in-progress iteration entirely and
+                # stop with whatever current_path/best_valid_path already is.
+                print(
+                    f"[STOMP] Time budget ({self.time_budget_s}s) exceeded mid-iteration {iter_num} - "
+                    f"stopping with best path found so far.")
+                break
 
             # 4. Update Path
             best_idx = np.argmin(costs)
@@ -261,7 +312,10 @@ class Stomp(OptimizerBase):
         ran_iterations = len(cost_history)
         total_time = sum(phase_time.values())
         if total_time > 0:
-            stop_note = f" (early-stopped, configured for {self.num_iterations})" if stopped_early_at is not None else ""
+            stop_note = (
+                f" (time budget exceeded, configured for {self.num_iterations})" if stopped_for_time_budget
+                else f" (early-stopped, configured for {self.num_iterations})" if stopped_early_at is not None
+                else "")
             print(f"[STOMP] Timing breakdown over {ran_iterations} iterations{stop_note} "
                   f"({apf_call_count} apf distance queries total):")
             for phase, t in sorted(phase_time.items(), key=lambda kv: -kv[1]):
@@ -287,6 +341,10 @@ class Stomp(OptimizerBase):
         final_path = best_valid_path if best_valid_path is not None else current_path
         if best_valid_path is None:
              print("[STOMP] Warning: Could not find any collision-free path.")
+        self.last_optimization_status = (
+            "time_budget_exceeded" if stopped_for_time_budget
+            else "success" if best_valid_path is not None
+            else "no_collision_free_path_found")
         self.last_cost_breakdown = apf.path_cost_breakdown(
             final_path, planner, d0=self.d0, eta=self.w_obs, w_smooth=self.smoothing_factor, k_att=self.k_att)
         return [p for p in final_path]

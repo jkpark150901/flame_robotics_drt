@@ -113,6 +113,8 @@ def plan_single_target(engine, request):
                 # failed) - see OMPLPlannerBase.last_verification/plannerbase.
                 # verify_path()'s waypoint_collisions/edge_collisions shape.
                 "verification": dict(getattr(exc, "verification", None) or {}),
+                "edge_collisions": list((getattr(exc, "verification", None) or {}).get("edge_collisions", [])),
+                "collision_preview": True,
             },
             # The colliding path itself, if the planner captured one before
             # discarding it (see where visualizer.py's "planning failed for
@@ -147,6 +149,20 @@ def plan_single_target(engine, request):
         # collision_rejects for OMPL-backed planners (empty for legacy ones -
         # see OMPLPlannerBase._generate_joint_space's last_ompl_stats).
         "planner_stats": plan.get("planner_stats") or {},
+        # DDA 수직 진입을 쓴 경우 구간 인덱스/수직도/clearance 수치(아니면 None) - 벤치마크 지표용.
+        "approach": plan.get("approach"),
+        # Which waypoint/edge actually collided (plannerbase.verify_path's
+        # shape) and whether the returned q_path is a known-colliding best-
+        # effort result - previously dropped here even though `plan` already
+        # has them (visualizer.py always sets them), so nothing downstream
+        # (a live "preview" collision warning, a saved benchmark run) could
+        # ever tell a genuinely clean path from a colliding one without
+        # re-deriving it. See simtool/window.py's playback-result collision
+        # warning and benchmark_path_planners.py's --save-paths, both of
+        # which now persist/reuse this instead of going silent.
+        "verification": plan.get("verification") or {},
+        "edge_collisions": plan.get("edge_collisions") or [],
+        "collision_preview": bool(plan.get("collision_preview")),
     }
     return {
         "result": result,

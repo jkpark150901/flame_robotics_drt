@@ -168,7 +168,15 @@ def min_distance_at(backend, robot_name: str, q, exclude_links: Optional[Sequenc
 
 def path_repulsive_cost(path_arr: np.ndarray, planner, d0: float = DEFAULT_D0, eta: float = DEFAULT_ETA,
                          exclude_links: Optional[Sequence[str]] = None) -> np.ndarray:
-    """Per-waypoint repulsive cost for a full path, shape (N,)."""
+    """Per-waypoint repulsive cost for a full path, shape (N,).
+
+    eta == 0 (repulsion switched off, e.g. the "APF off" control arm of a
+    benchmark) returns zeros without querying distances - the cost is
+    identically 0, and the per-waypoint distance query is by far the most
+    expensive part of an optimizer iteration, so calling it anyway would make
+    the control arm look as slow as the treatment arm."""
+    if not eta:
+        return np.zeros(len(path_arr))
     return np.array([repulsive_cost(link_distances(planner, q, exclude_links), d0, eta) for q in path_arr])
 
 
