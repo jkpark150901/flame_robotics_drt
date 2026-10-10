@@ -1,0 +1,93 @@
+{
+  "robot_name": "dda_rb10_1300e",
+  "urdf_path": "D:\\flame_robotics_drt\\urdf\\rb10_1300e_DDA.urdf",
+  "base_pose": [
+    0.0,
+    3.75,
+    0.0,
+    0,
+    0,
+    0
+  ],
+  "joint_names": [
+    "dda_joint_linear_track",
+    "dda_joint_carriage",
+    "dda_joint_base",
+    "dda_joint_shoulder",
+    "dda_joint_elbow",
+    "dda_joint_wrist1",
+    "dda_joint_wrist2",
+    "dda_joint_wrist3"
+  ],
+  "target_link_name": "dda_link_end",
+  "csv_path": "experiment\\inspection_ik\\session_20260727_140746\\collision\\inspection_ik_20260727_141223_dda_rb10_1300e_raw_fallback_collision.csv",
+  "plot_path": "experiment\\inspection_ik\\session_20260727_140746\\collision\\inspection_ik_20260727_141223_dda_rb10_1300e_raw_fallback_collision.png",
+  "target_T": [
+    [
+      1.3877787807814457e-17,
+      0.0,
+      1.0000000000000002,
+      2.948278590093023
+    ],
+    [
+      0.8660254037844384,
+      0.5000000000000008,
+      -1.6995388418086138e-33,
+      1.941226686975461
+    ],
+    [
+      -0.5000000000000008,
+      0.8660254037844384,
+      -1.3877787807814457e-17,
+      1.7776179793427527
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "goal_q": [
+    2.706433739268677,
+    -1.0,
+    -0.8621522885730717,
+    -1.0154593689521172,
+    -3.1212817678219102,
+    -3.140000000009978,
+    -0.9734085813609432,
+    2.1884158165439316
+  ],
+  "ik_result": {
+    "success": false,
+    "fallback": true,
+    "position_error": 0.6441720041591563,
+    "orientation_error": 0.29068457393226893,
+    "collision": true,
+    "collision_check_error": null,
+    "collision_pairs": [
+      [
+        "dda_link1_0",
+        "dda_link3_0"
+      ],
+      [
+        "dda_link2_0",
+        "dda_link4_0"
+      ],
+      [
+        "dda_link2_0",
+        "dda_link5_0"
+      ],
+      [
+        "dda_link2_0",
+        "dda_link6_0"
+      ]
+    ],
+    "collision_pair_count": 4,
+    "iterations": 100000,
+    "elapsed": 15.646918400016148,
+    "max_iter": 100000,
+    "solver": "qp",
+    "normalize": false
+  }
+}

@@ -1,0 +1,86 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Viewer (viewervedo)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/python/viewervedo.py",
+            "args": [
+                "--config",
+                "${workspaceFolder}/python/viewervedo.cfg",
+                "--verbose_level",
+                "DEBUG"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "subProcess": true,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder};${workspaceFolder}/python"
+            }
+        },
+        {
+            "name": "SimTool",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/python/simtool.py",
+            "args": [
+                "--config",
+                "${workspaceFolder}/python/simtool.cfg",
+                "--verbose_level",
+                "DEBUG"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "subProcess": true,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder};${workspaceFolder}/python"
+            }
+        },
+        {
+            "name": "ZProxy",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/python/zproxy.py",
+            "args": [
+                "--config",
+                "${workspaceFolder}/python/zproxy.cfg",
+                "--verbose_level",
+                "DEBUG"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "subProcess": true,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder};${workspaceFolder}/python"
+            }
+        },
+        {
+            "name": "Current Python File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "subProcess": true,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder};${workspaceFolder}/python"
+            }
+        }
+    ],
+    "compounds": [
+        {
+            "name": "Viewer + SimTool + ZProxy",
+            "configurations": [
+                "ZProxy",
+                "Viewer (viewervedo)",
+                "SimTool"
+            ],
+            "stopAll": true
+        }
+    ]
+}

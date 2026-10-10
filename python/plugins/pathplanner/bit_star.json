@@ -2,6 +2,7 @@
     "batch_size": 100,
     "eta": 1.1,
     "max_iter": 1000,
+    "use_joint_space_planning": true,
     "workspace_bounds": {
         "x_min": -200.0,
         "x_max": 200.0,

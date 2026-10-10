@@ -63,7 +63,7 @@
     <child link="rt_link0" />
     <origin xyz="0.2 0 0.2" rpy="0 0 0" />
     <axis xyz="0 1 0" />
-    <limit lower="0.0" upper="0.5" effort="1000.0" velocity="1.0" />
+    <limit lower="-1" upper="1" effort="1000.0" velocity="1.0" />
   </joint>
 
   <link name="rt_link0">
@@ -189,6 +189,7 @@
       <inertia ixx="0.150633" iyy="0.230106" izz="0.339619" ixy="0.000105" iyz="-2.9e-05" ixz="-1.1e-05" />
     </inertial>
     <visual>
+      <!-- <origin xyz="-0.0 0.1163 -0.0" rpy="0 0 0" /> -->
       <origin xyz="-0.0 0.1163 -0.0" rpy="0 0 0" />
       <geometry>
         <mesh filename="meshes/link_rt.stl" scale="0.001 0.001 0.001" />
@@ -204,7 +205,6 @@
       </geometry>
     </collision>
   </link>
-  <link name="rt_tcp"/>
   <joint name="rt_base" type="revolute">
     <origin rpy="0 0 1.57079632679" xyz="0 0 0.241"/>
     <parent link="rt_link0"/>
@@ -251,11 +251,6 @@
     <origin xyz="0.0 0.0 0.13" rpy="-1.57079632679 0 0" />
     <parent link="rt_link6" />
     <child link="rt_link_end" />
-  </joint>
-  <joint name="rt_tcp_joint" type="fixed">
-    <origin rpy="0 0 0" xyz="0 -0.1153 0"/>
-    <parent link="rt_link6"/>
-    <child link="rt_tcp"/>
   </joint>
   <ros2_control name="RBPodoHardwareInterface" type="system">
     <hardware>

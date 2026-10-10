@@ -10,6 +10,7 @@ import open3d as o3d
 import zmq
 import argparse
 
+from common.config_loader import load_config
 from util.logger.console import ConsoleLogger
 from viewero3d.visualizer import Open3DVisualizer
 from common.zpipe import zpipe_create_pipe, zpipe_destroy_pipe
@@ -31,29 +32,28 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     try:
-        with open(args.config, "r") as cfile:
-            configure = json.load(cfile)
+        configure = load_config(args.config)
 
-            configure["root_path"] = ROOT_PATH
-            configure["app_path"] = (pathlib.Path(__file__).parent / APP_NAME)
-            configure["verbose_level"] = args.verbose_level.upper()
+        configure["root_path"] = ROOT_PATH
+        configure["app_path"] = (pathlib.Path(__file__).parent / APP_NAME)
+        configure["verbose_level"] = args.verbose_level.upper()
 
-            if configure["verbose_level"] == "DEBUG":
-                console.debug(f"Root Path : {configure['root_path']}")
-                console.debug(f"Application Path : {configure['app_path']}")
-                console.debug(f"Verbose Level : {configure['verbose_level']}")
+        if configure["verbose_level"] == "DEBUG":
+            console.debug(f"Root Path : {configure['root_path']}")
+            console.debug(f"Application Path : {configure['app_path']}")
+            console.debug(f"Verbose Level : {configure['verbose_level']}")
 
-            # create zpipe context
-            n_ctx_value = configure.get("n_io_context", 10)
-            zpipe_instance = zpipe_create_pipe(io_threads=n_ctx_value)
+        # create zpipe context
+        n_ctx_value = configure.get("n_io_context", 10)
+        zpipe_instance = zpipe_create_pipe(io_threads=n_ctx_value)
 
-            # viewer (using open3d)
-            viewer = Open3DVisualizer(config=configure, zpipe=zpipe_instance)
-            viewer.run(60)
+        # viewer (using open3d)
+        viewer = Open3DVisualizer(config=configure, zpipe=zpipe_instance)
+        viewer.run(60)
 
-            # terminate pipeline
-            zpipe_destroy_pipe()
-            console.info(f"Successfully terminated")
+        # terminate pipeline
+        zpipe_destroy_pipe()
+        console.info(f"Successfully terminated")
 
     except json.JSONDecodeError as e:
         console.critical(f"Configuration File Parse Exception : {e}")

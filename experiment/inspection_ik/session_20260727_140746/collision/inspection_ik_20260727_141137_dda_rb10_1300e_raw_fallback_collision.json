@@ -1,0 +1,93 @@
+{
+  "robot_name": "dda_rb10_1300e",
+  "urdf_path": "D:\\flame_robotics_drt\\urdf\\rb10_1300e_DDA.urdf",
+  "base_pose": [
+    0.0,
+    3.75,
+    0.0,
+    0,
+    0,
+    0
+  ],
+  "joint_names": [
+    "dda_joint_linear_track",
+    "dda_joint_carriage",
+    "dda_joint_base",
+    "dda_joint_shoulder",
+    "dda_joint_elbow",
+    "dda_joint_wrist1",
+    "dda_joint_wrist2",
+    "dda_joint_wrist3"
+  ],
+  "target_link_name": "dda_link_end",
+  "csv_path": "experiment\\inspection_ik\\session_20260727_140746\\collision\\inspection_ik_20260727_141137_dda_rb10_1300e_raw_fallback_collision.csv",
+  "plot_path": "experiment\\inspection_ik\\session_20260727_140746\\collision\\inspection_ik_20260727_141137_dda_rb10_1300e_raw_fallback_collision.png",
+  "target_T": [
+    [
+      0.0,
+      0.0,
+      1.0000000000000004,
+      2.254534139404628
+    ],
+    [
+      0.8660254037844379,
+      0.5000000000000018,
+      6.798155367234455e-33,
+      1.9412254863541079
+    ],
+    [
+      -0.5000000000000018,
+      0.8660254037844379,
+      5.551115123125783e-17,
+      1.777618224846454
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "goal_q": [
+    1.9981594595766954,
+    -1.0,
+    -0.7814781853581506,
+    -0.994130697804088,
+    -3.112896100773872,
+    -3.1400000000004047,
+    -1.0311611268377918,
+    2.128514494129292
+  ],
+  "ik_result": {
+    "success": false,
+    "fallback": true,
+    "position_error": 0.6459882507704539,
+    "orientation_error": 0.271726979549673,
+    "collision": true,
+    "collision_check_error": null,
+    "collision_pairs": [
+      [
+        "dda_link1_0",
+        "dda_link3_0"
+      ],
+      [
+        "dda_link2_0",
+        "dda_link4_0"
+      ],
+      [
+        "dda_link2_0",
+        "dda_link5_0"
+      ],
+      [
+        "dda_link2_0",
+        "dda_link6_0"
+      ]
+    ],
+    "collision_pair_count": 4,
+    "iterations": 100000,
+    "elapsed": 15.416680699971039,
+    "max_iter": 100000,
+    "solver": "qp",
+    "normalize": false
+  }
+}

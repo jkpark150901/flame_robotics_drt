@@ -1,0 +1,841 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <author>IAE</author>
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>1280</width><height>900</height></rect>
+  </property>
+  <property name="font">
+   <font><family>NanumSquare</family></font>
+  </property>
+  <property name="windowTitle">
+   <string>Calibration &amp; Verification Tool</string>
+  </property>
+
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QVBoxLayout" name="layout_main">
+    <property name="spacing"><number>4</number></property>
+    <property name="leftMargin"><number>6</number></property>
+    <property name="topMargin"><number>6</number></property>
+    <property name="rightMargin"><number>6</number></property>
+    <property name="bottomMargin"><number>4</number></property>
+
+    <!-- ═══════════════ GLOBAL STATUS STRIP ═══════════════ -->
+    <item>
+     <widget class="QFrame" name="frame_status_bar">
+      <property name="frameShape"><enum>QFrame::StyledPanel</enum></property>
+      <property name="maximumHeight"><number>28</number></property>
+      <property name="styleSheet">
+       <string>QFrame#frame_status_bar { background: #252535; border-bottom: 1px solid #444; }</string>
+      </property>
+      <layout class="QHBoxLayout" name="hl_status_bar">
+       <property name="spacing"><number>10</number></property>
+       <property name="leftMargin"><number>8</number></property>
+       <property name="topMargin"><number>2</number></property>
+       <property name="rightMargin"><number>8</number></property>
+       <property name="bottomMargin"><number>2</number></property>
+
+       <item>
+        <widget class="QLabel" name="lbl_hdr_robot_status">
+         <property name="text"><string>● Robot: disconnected</string></property>
+         <property name="styleSheet"><string>color: #cc2200; font-weight: bold;</string></property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QLabel" name="lbl_hdr_tcp">
+         <property name="text"><string>TCP: ---</string></property>
+         <property name="font"><font><family>Courier New</family><pointsize>9</pointsize></font></property>
+        </widget>
+       </item>
+
+       <item>
+        <widget class="QFrame">
+         <property name="frameShape"><enum>QFrame::VLine</enum></property>
+         <property name="frameShadow"><enum>QFrame::Sunken</enum></property>
+        </widget>
+       </item>
+
+       <item>
+        <widget class="QLabel" name="lbl_hdr_natnet_status">
+         <property name="text"><string>● NatNet: disconnected</string></property>
+         <property name="styleSheet"><string>color: #cc2200; font-weight: bold;</string></property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QLabel" name="lbl_hdr_rb_pos">
+         <property name="text"><string>RB: ---</string></property>
+         <property name="font"><font><family>Courier New</family><pointsize>9</pointsize></font></property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QLabel" name="lbl_hdr_natnet_fps">
+         <property name="text"><string>-- Hz</string></property>
+        </widget>
+       </item>
+
+       <item>
+        <spacer>
+         <property name="orientation"><enum>Qt::Horizontal</enum></property>
+         <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+        </spacer>
+       </item>
+      </layout>
+     </widget>
+    </item>
+
+    <!-- ═══════════════ TAB WIDGET ═══════════════ -->
+    <item>
+     <widget class="QTabWidget" name="tab_widget">
+      <property name="currentIndex"><number>0</number></property>
+
+      <!-- ─────────────────────────────────────────
+           TAB 1 · Calibration
+           ───────────────────────────────────────── -->
+      <widget class="QWidget" name="tab_calibration">
+       <attribute name="title"><string>Calibration</string></attribute>
+       <layout class="QVBoxLayout" name="vl_calib_tab">
+        <property name="spacing"><number>0</number></property>
+        <property name="leftMargin"><number>4</number></property>
+        <property name="topMargin"><number>4</number></property>
+        <property name="rightMargin"><number>4</number></property>
+        <property name="bottomMargin"><number>4</number></property>
+
+        <item>
+         <widget class="QSplitter" name="splitter_calib">
+          <property name="orientation"><enum>Qt::Horizontal</enum></property>
+
+          <!-- ════════════ Left control panel ════════════ -->
+          <widget class="QWidget" name="panel_calib_left">
+           <property name="minimumWidth"><number>370</number></property>
+           <property name="maximumWidth"><number>460</number></property>
+           <layout class="QVBoxLayout" name="vl_calib_left">
+            <property name="spacing"><number>5</number></property>
+            <property name="leftMargin"><number>0</number></property>
+            <property name="topMargin"><number>0</number></property>
+            <property name="rightMargin"><number>4</number></property>
+            <property name="bottomMargin"><number>0</number></property>
+
+            <!-- ── Robot + NatNet side by side ── -->
+            <item>
+             <layout class="QHBoxLayout" name="hl_conn">
+              <property name="spacing"><number>5</number></property>
+
+              <!-- Robot -->
+              <item>
+               <widget class="QGroupBox" name="grp_robot">
+                <property name="title"><string>Robot</string></property>
+                <layout class="QVBoxLayout" name="vl_robot">
+                 <property name="spacing"><number>3</number></property>
+                 <property name="leftMargin"><number>5</number></property>
+                 <property name="topMargin"><number>5</number></property>
+                 <property name="rightMargin"><number>5</number></property>
+                 <property name="bottomMargin"><number>5</number></property>
+
+                 <item>
+                  <widget class="QLineEdit" name="edit_robot_ip">
+                   <property name="text"><string>10.0.2.7</string></property>
+                   <property name="placeholderText"><string>Robot IP</string></property>
+                  </widget>
+                 </item>
+
+                 <item>
+                  <layout class="QHBoxLayout">
+                   <item>
+                    <widget class="QPushButton" name="btn_robot_connect">
+                     <property name="text"><string>Connect</string></property>
+                    </widget>
+                   </item>
+                   <item>
+                    <widget class="QPushButton" name="btn_robot_disconnect">
+                     <property name="text"><string>Disconnect</string></property>
+                     <property name="enabled"><bool>false</bool></property>
+                    </widget>
+                   </item>
+                  </layout>
+                 </item>
+
+                 <item>
+                  <layout class="QHBoxLayout">
+                   <item>
+                    <widget class="QLabel" name="lbl_robot_status">
+                     <property name="text"><string>● disconnected</string></property>
+                     <property name="styleSheet"><string>color: #cc2200; font-weight: bold;</string></property>
+                    </widget>
+                   </item>
+                  </layout>
+                 </item>
+
+                 <item>
+                  <layout class="QHBoxLayout">
+                   <item><widget class="QLabel"><property name="text"><string>Speed Bar</string></property></widget></item>
+                   <item>
+                    <widget class="QDoubleSpinBox" name="spin_speed_bar">
+                     <property name="minimum"><double>0.01</double></property>
+                     <property name="maximum"><double>1.0</double></property>
+                     <property name="singleStep"><double>0.05</double></property>
+                     <property name="decimals"><number>2</number></property>
+                     <property name="value"><double>0.30</double></property>
+                    </widget>
+                   </item>
+                  </layout>
+                 </item>
+
+                </layout>
+               </widget>
+              </item>
+
+              <!-- NatNet -->
+              <item>
+               <widget class="QGroupBox" name="grp_natnet">
+                <property name="title"><string>NatNet</string></property>
+                <layout class="QVBoxLayout" name="vl_natnet">
+                 <property name="spacing"><number>3</number></property>
+                 <property name="leftMargin"><number>5</number></property>
+                 <property name="topMargin"><number>5</number></property>
+                 <property name="rightMargin"><number>5</number></property>
+                 <property name="bottomMargin"><number>5</number></property>
+
+                 <item>
+                  <widget class="QLineEdit" name="edit_natnet_server">
+                   <property name="text"><string>192.168.0.241</string></property>
+                   <property name="placeholderText"><string>Server IP</string></property>
+                  </widget>
+                 </item>
+
+                 <item>
+                  <widget class="QLineEdit" name="edit_natnet_client">
+                   <property name="text"><string>auto</string></property>
+                   <property name="placeholderText"><string>Client IP</string></property>
+                  </widget>
+                 </item>
+
+                 <item>
+                  <layout class="QHBoxLayout">
+                   <item>
+                    <widget class="QLabel">
+                     <property name="text"><string>Rigid Body ID</string></property>
+                     <property name="styleSheet"><string>font-weight: bold; color: #f0c060;</string></property>
+                    </widget>
+                   </item>
+                   <item>
+                    <widget class="QSpinBox" name="spin_rb_id">
+                     <property name="minimum"><number>0</number></property>
+                     <property name="maximum"><number>99</number></property>
+                     <property name="value"><number>1</number></property>
+                     <property name="minimumWidth"><number>70</number></property>
+                     <property name="styleSheet"><string>QSpinBox { font-weight: bold; font-size: 14px; }</string></property>
+                    </widget>
+                   </item>
+                   <item>
+                    <spacer>
+                     <property name="orientation"><enum>Qt::Horizontal</enum></property>
+                     <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+                    </spacer>
+                   </item>
+                  </layout>
+                 </item>
+
+                 <item>
+                  <layout class="QHBoxLayout">
+                   <item>
+                    <widget class="QPushButton" name="btn_natnet_connect">
+                     <property name="text"><string>Connect</string></property>
+                    </widget>
+                   </item>
+                   <item>
+                    <widget class="QPushButton" name="btn_natnet_disconnect">
+                     <property name="text"><string>Disconnect</string></property>
+                     <property name="enabled"><bool>false</bool></property>
+                    </widget>
+                   </item>
+                  </layout>
+                 </item>
+
+                 <item>
+                  <layout class="QHBoxLayout">
+                   <item>
+                    <widget class="QLabel" name="lbl_natnet_status">
+                     <property name="text"><string>● disconnected</string></property>
+                     <property name="styleSheet"><string>color: #cc2200; font-weight: bold;</string></property>
+                    </widget>
+                   </item>
+                   <item>
+                    <widget class="QLabel" name="lbl_natnet_fps">
+                     <property name="text"><string>-- Hz</string></property>
+                    </widget>
+                   </item>
+                  </layout>
+                 </item>
+
+                </layout>
+               </widget>
+              </item>
+
+             </layout>
+            </item>
+
+            <!-- ── Live Monitor GroupBox ── -->
+            <item>
+             <widget class="QGroupBox" name="grp_monitor">
+              <property name="title"><string>Live Monitor</string></property>
+              <layout class="QGridLayout" name="grid_monitor">
+               <property name="spacing"><number>3</number></property>
+               <property name="leftMargin"><number>5</number></property>
+               <property name="topMargin"><number>5</number></property>
+               <property name="rightMargin"><number>5</number></property>
+               <property name="bottomMargin"><number>5</number></property>
+
+               <item row="0" column="0">
+                <widget class="QLabel"><property name="text"><string>TCP pos</string></property></widget>
+               </item>
+               <item row="0" column="1">
+                <widget class="QLabel" name="lbl_tcp_pos">
+                 <property name="text"><string>---</string></property>
+                 <property name="font"><font><family>Courier New</family><pointsize>9</pointsize></font></property>
+                </widget>
+               </item>
+
+               <item row="1" column="0">
+                <widget class="QLabel"><property name="text"><string>TCP rot</string></property></widget>
+               </item>
+               <item row="1" column="1">
+                <widget class="QLabel" name="lbl_tcp_rot">
+                 <property name="text"><string>---</string></property>
+                 <property name="font"><font><family>Courier New</family><pointsize>9</pointsize></font></property>
+                </widget>
+               </item>
+
+               <item row="2" column="0">
+                <widget class="QLabel"><property name="text"><string>Joints</string></property></widget>
+               </item>
+               <item row="2" column="1">
+                <widget class="QLabel" name="lbl_joints">
+                 <property name="text"><string>---</string></property>
+                 <property name="font"><font><family>Courier New</family><pointsize>9</pointsize></font></property>
+                </widget>
+               </item>
+
+               <item row="3" column="0">
+                <widget class="QLabel"><property name="text"><string>RB pos</string></property></widget>
+               </item>
+               <item row="3" column="1">
+                <widget class="QLabel" name="lbl_rb_pos">
+                 <property name="text"><string>---</string></property>
+                 <property name="font"><font><family>Courier New</family><pointsize>9</pointsize></font></property>
+                </widget>
+               </item>
+
+               <item row="4" column="0">
+                <widget class="QLabel"><property name="text"><string>RB quat</string></property></widget>
+               </item>
+               <item row="4" column="1">
+                <widget class="QLabel" name="lbl_rb_quat">
+                 <property name="text"><string>---</string></property>
+                 <property name="font"><font><family>Courier New</family><pointsize>9</pointsize></font></property>
+                </widget>
+               </item>
+
+               <item row="5" column="0">
+                <widget class="QLabel"><property name="text"><string>Tracking</string></property></widget>
+               </item>
+               <item row="5" column="1">
+                <widget class="QLabel" name="lbl_rb_tracking">
+                 <property name="text"><string>---</string></property>
+                 <property name="styleSheet"><string>font-weight: bold;</string></property>
+                </widget>
+               </item>
+
+               <item row="6" column="0" colspan="2">
+                <widget class="QFrame">
+                 <property name="frameShape"><enum>QFrame::HLine</enum></property>
+                 <property name="frameShadow"><enum>QFrame::Sunken</enum></property>
+                </widget>
+               </item>
+
+               <item row="7" column="0">
+                <widget class="QLabel"><property name="text"><string>dx dy dz</string></property></widget>
+               </item>
+               <item row="7" column="1">
+                <widget class="QLabel" name="lbl_rb_delta">
+                 <property name="text"><string>---</string></property>
+                 <property name="font"><font><family>Courier New</family><pointsize>9</pointsize></font></property>
+                </widget>
+               </item>
+
+               <item row="8" column="0">
+                <widget class="QLabel">
+                 <property name="text"><string>r² dist</string></property>
+                 <property name="styleSheet"><string>font-weight: bold;</string></property>
+                </widget>
+               </item>
+               <item row="8" column="1">
+                <widget class="QLabel" name="lbl_rb_r2_dist">
+                 <property name="text"><string>--- mm</string></property>
+                 <property name="styleSheet"><string>font-weight: bold; color: #60d0ff;</string></property>
+                 <property name="font"><font><family>Courier New</family><pointsize>9</pointsize></font></property>
+                </widget>
+               </item>
+
+              </layout>
+             </widget>
+            </item>
+
+            <!-- ── Path Plan GroupBox ── -->
+            <item>
+             <widget class="QGroupBox" name="grp_path_plan">
+              <property name="title"><string>Path Plan</string></property>
+              <layout class="QVBoxLayout" name="vl_path_plan">
+               <property name="spacing"><number>4</number></property>
+               <property name="leftMargin"><number>5</number></property>
+               <property name="topMargin"><number>5</number></property>
+               <property name="rightMargin"><number>5</number></property>
+               <property name="bottomMargin"><number>5</number></property>
+
+               <item>
+                <layout class="QHBoxLayout">
+                 <item><widget class="QLabel"><property name="text"><string>CSV</string></property></widget></item>
+                 <item>
+                  <widget class="QLineEdit" name="edit_calib_csv">
+                   <property name="readOnly"><bool>true</bool></property>
+                   <property name="placeholderText"><string>calibration_plan.csv …</string></property>
+                  </widget>
+                 </item>
+                 <item>
+                  <widget class="QPushButton" name="btn_browse_calib_csv">
+                   <property name="text"><string>…</string></property>
+                   <property name="maximumWidth"><number>32</number></property>
+                  </widget>
+                 </item>
+                </layout>
+               </item>
+
+               <item>
+                <widget class="QLabel" name="lbl_pose_count">
+                 <property name="text"><string>Poses: --</string></property>
+                </widget>
+               </item>
+
+               <item>
+                <layout class="QHBoxLayout">
+                 <item><widget class="QLabel"><property name="text"><string>Speed</string></property></widget></item>
+                 <item>
+                  <widget class="QDoubleSpinBox" name="spin_calib_speed">
+                   <property name="maximum"><double>2000.0</double></property>
+                   <property name="singleStep"><double>50.0</double></property>
+                   <property name="value"><double>400.0</double></property>
+                  </widget>
+                 </item>
+                 <item><widget class="QLabel"><property name="text"><string>Accel</string></property></widget></item>
+                 <item>
+                  <widget class="QDoubleSpinBox" name="spin_calib_accel">
+                   <property name="maximum"><double>4000.0</double></property>
+                   <property name="singleStep"><double>50.0</double></property>
+                   <property name="value"><double>200.0</double></property>
+                  </widget>
+                 </item>
+                </layout>
+               </item>
+
+               <item>
+                <layout class="QHBoxLayout">
+                 <item><widget class="QLabel"><property name="text"><string>Settle (s)</string></property></widget></item>
+                 <item>
+                  <widget class="QDoubleSpinBox" name="spin_settle_time">
+                   <property name="minimum"><double>0.1</double></property>
+                   <property name="maximum"><double>10.0</double></property>
+                   <property name="singleStep"><double>0.1</double></property>
+                   <property name="decimals"><number>1</number></property>
+                   <property name="value"><double>0.5</double></property>
+                  </widget>
+                 </item>
+                 <item><widget class="QLabel"><property name="text"><string>Samples</string></property></widget></item>
+                 <item>
+                  <widget class="QSpinBox" name="spin_sample_count">
+                   <property name="minimum"><number>1</number></property>
+                   <property name="maximum"><number>30</number></property>
+                   <property name="value"><number>5</number></property>
+                  </widget>
+                 </item>
+                </layout>
+               </item>
+
+               <item>
+                <layout class="QHBoxLayout">
+                 <item><widget class="QLabel"><property name="text"><string>Method</string></property></widget></item>
+                 <item>
+                  <widget class="QComboBox" name="cbx_handeye_method">
+                   <item><property name="text"><string>park</string></property></item>
+                   <item><property name="text"><string>tsai</string></property></item>
+                   <item><property name="text"><string>horaud</string></property></item>
+                   <item><property name="text"><string>andreff</string></property></item>
+                   <item><property name="text"><string>daniilidis</string></property></item>
+                  </widget>
+                 </item>
+                 <item><widget class="QLabel"><property name="text"><string>Outlier (mm)</string></property></widget></item>
+                 <item>
+                  <widget class="QDoubleSpinBox" name="spin_outlier_mm">
+                   <property name="minimum"><double>0.0</double></property>
+                   <property name="maximum"><double>500.0</double></property>
+                   <property name="singleStep"><double>5.0</double></property>
+                   <property name="value"><double>60.0</double></property>
+                  </widget>
+                 </item>
+                </layout>
+               </item>
+
+               <item>
+                <layout class="QHBoxLayout">
+                 <item>
+                  <widget class="QPushButton" name="btn_run_calib">
+                   <property name="text"><string>▶  Run</string></property>
+                  </widget>
+                 </item>
+                 <item>
+                  <widget class="QPushButton" name="btn_stop_calib">
+                   <property name="text"><string>■  Stop</string></property>
+                   <property name="enabled"><bool>false</bool></property>
+                  </widget>
+                 </item>
+                </layout>
+               </item>
+
+               <item>
+                <widget class="QProgressBar" name="progress_calib">
+                 <property name="value"><number>0</number></property>
+                 <property name="textVisible"><bool>true</bool></property>
+                 <property name="format"><string>%v / %m</string></property>
+                </widget>
+               </item>
+
+              </layout>
+             </widget>
+            </item>
+
+            <!-- ── Calibration Result GroupBox ── -->
+            <item>
+             <widget class="QGroupBox" name="grp_calib_result">
+              <property name="title"><string>Calibration Result</string></property>
+              <layout class="QVBoxLayout" name="vl_calib_result">
+               <property name="spacing"><number>4</number></property>
+               <property name="leftMargin"><number>5</number></property>
+               <property name="topMargin"><number>5</number></property>
+               <property name="rightMargin"><number>5</number></property>
+               <property name="bottomMargin"><number>5</number></property>
+
+               <item>
+                <widget class="QLabel" name="lbl_calib_model">
+                 <property name="text"><string>Model: --   Inlier: --</string></property>
+                </widget>
+               </item>
+
+               <item>
+                <widget class="QLabel" name="lbl_calib_t_base_motive">
+                 <property name="text"><string>T_base_motive: --</string></property>
+                 <property name="font"><font><family>Courier New</family><pointsize>9</pointsize></font></property>
+                 <property name="wordWrap"><bool>true</bool></property>
+                </widget>
+               </item>
+
+               <item>
+                <widget class="QLabel" name="lbl_calib_t_rb_tcp">
+                 <property name="text"><string>T_rb_tcp: --</string></property>
+                 <property name="font"><font><family>Courier New</family><pointsize>9</pointsize></font></property>
+                 <property name="wordWrap"><bool>true</bool></property>
+                </widget>
+               </item>
+
+               <item>
+                <widget class="QLabel" name="lbl_calib_rmse">
+                 <property name="text"><string>RMSE pos: -- mm   rot: -- °</string></property>
+                </widget>
+               </item>
+
+               <item>
+                <layout class="QHBoxLayout">
+                 <item>
+                  <widget class="QPushButton" name="btn_save_calib">
+                   <property name="text"><string>Save JSON</string></property>
+                   <property name="enabled"><bool>false</bool></property>
+                  </widget>
+                 </item>
+                 <item>
+                  <widget class="QPushButton" name="btn_load_calib">
+                   <property name="text"><string>Load JSON</string></property>
+                  </widget>
+                 </item>
+                </layout>
+               </item>
+
+              </layout>
+             </widget>
+            </item>
+
+            <item>
+             <spacer name="spacer_calib_left_v">
+              <property name="orientation"><enum>Qt::Vertical</enum></property>
+              <property name="sizeHint" stdset="0"><size><width>20</width><height>10</height></size></property>
+             </spacer>
+            </item>
+
+           </layout>
+          </widget>
+          <!-- End left panel -->
+
+          <!-- ════════════ Right: 3D trajectory plot ════════════ -->
+          <widget class="QWidget" name="widget_calib_plot">
+           <property name="sizePolicy">
+            <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+             <horstretch>1</horstretch>
+             <verstretch>1</verstretch>
+            </sizepolicy>
+           </property>
+           <property name="minimumSize">
+            <size><width>400</width><height>300</height></size>
+           </property>
+           <property name="styleSheet">
+            <string>QWidget#widget_calib_plot { background: #1a1a2e; border: 1px solid #444; }</string>
+           </property>
+           <layout class="QVBoxLayout" name="vl_calib_plot_holder">
+            <property name="spacing"><number>0</number></property>
+            <property name="leftMargin"><number>0</number></property>
+            <property name="topMargin"><number>0</number></property>
+            <property name="rightMargin"><number>0</number></property>
+            <property name="bottomMargin"><number>0</number></property>
+           </layout>
+          </widget>
+
+         </widget>
+        </item>
+       </layout>
+      </widget>
+      <!-- END TAB 1 (Calibration) -->
+
+
+      <!-- ─────────────────────────────────────────
+           TAB 2 · Verification
+           ───────────────────────────────────────── -->
+      <widget class="QWidget" name="tab_verification">
+       <attribute name="title"><string>Verification</string></attribute>
+       <layout class="QVBoxLayout" name="vl_verify_tab">
+        <property name="spacing"><number>6</number></property>
+        <property name="leftMargin"><number>4</number></property>
+        <property name="topMargin"><number>4</number></property>
+        <property name="rightMargin"><number>4</number></property>
+        <property name="bottomMargin"><number>4</number></property>
+
+        <item>
+         <layout class="QHBoxLayout" name="hl_verify_top">
+          <property name="spacing"><number>8</number></property>
+
+          <item>
+           <widget class="QGroupBox" name="grp_verify_calib">
+            <property name="title"><string>Calibration</string></property>
+            <property name="maximumWidth"><number>380</number></property>
+            <layout class="QVBoxLayout" name="vl_verify_calib">
+             <property name="spacing"><number>4</number></property>
+             <item>
+              <widget class="QLabel" name="lbl_verify_calib_file">
+               <property name="text"><string>Not loaded</string></property>
+               <property name="styleSheet"><string>color: #888888;</string></property>
+               <property name="wordWrap"><bool>true</bool></property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLabel" name="lbl_verify_t_base_motive">
+               <property name="text"><string>T_base_motive: --</string></property>
+               <property name="font"><font><family>Courier New</family><pointsize>9</pointsize></font></property>
+               <property name="wordWrap"><bool>true</bool></property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QPushButton" name="btn_verify_load_calib">
+               <property name="text"><string>Load JSON</string></property>
+              </widget>
+             </item>
+             <item>
+              <spacer>
+               <property name="orientation"><enum>Qt::Vertical</enum></property>
+               <property name="sizeHint" stdset="0"><size><width>20</width><height>10</height></size></property>
+              </spacer>
+             </item>
+            </layout>
+           </widget>
+          </item>
+
+          <item>
+           <widget class="QGroupBox" name="grp_verify_path">
+            <property name="title"><string>Verification Path</string></property>
+            <layout class="QVBoxLayout" name="vl_verify_path">
+             <property name="spacing"><number>5</number></property>
+             <item>
+              <layout class="QHBoxLayout">
+               <item><widget class="QLabel"><property name="text"><string>CSV</string></property></widget></item>
+               <item>
+                <widget class="QLineEdit" name="edit_verify_csv">
+                 <property name="readOnly"><bool>true</bool></property>
+                 <property name="placeholderText"><string>verification_plan.csv …</string></property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QPushButton" name="btn_browse_verify_csv">
+                 <property name="text"><string>…</string></property>
+                 <property name="maximumWidth"><number>32</number></property>
+                </widget>
+               </item>
+              </layout>
+             </item>
+             <item>
+              <layout class="QHBoxLayout">
+               <item>
+                <widget class="QPushButton" name="btn_run_verify">
+                 <property name="text"><string>▶  Run Verification</string></property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QPushButton" name="btn_stop_verify">
+                 <property name="text"><string>■  Stop</string></property>
+                 <property name="enabled"><bool>false</bool></property>
+                </widget>
+               </item>
+              </layout>
+             </item>
+             <item>
+              <widget class="QProgressBar" name="progress_verify">
+               <property name="value"><number>0</number></property>
+               <property name="format"><string>%v / %m</string></property>
+              </widget>
+             </item>
+             <item>
+              <spacer>
+               <property name="orientation"><enum>Qt::Vertical</enum></property>
+               <property name="sizeHint" stdset="0"><size><width>20</width><height>10</height></size></property>
+              </spacer>
+             </item>
+            </layout>
+           </widget>
+          </item>
+
+         </layout>
+        </item>
+
+        <item>
+         <widget class="QSplitter" name="splitter_verify">
+          <property name="orientation"><enum>Qt::Vertical</enum></property>
+
+          <widget class="QWidget" name="widget_verify_plot">
+           <property name="sizePolicy">
+            <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+             <horstretch>0</horstretch>
+             <verstretch>3</verstretch>
+            </sizepolicy>
+           </property>
+           <property name="minimumHeight"><number>200</number></property>
+           <property name="styleSheet">
+            <string>QWidget#widget_verify_plot { background: #1a1a2e; border: 1px solid #444; }</string>
+           </property>
+           <layout class="QVBoxLayout" name="vl_verify_plot_holder">
+            <property name="spacing"><number>0</number></property>
+            <property name="leftMargin"><number>0</number></property>
+            <property name="topMargin"><number>0</number></property>
+            <property name="rightMargin"><number>0</number></property>
+            <property name="bottomMargin"><number>0</number></property>
+           </layout>
+          </widget>
+
+          <widget class="QWidget" name="panel_verify_bottom">
+           <property name="sizePolicy">
+            <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+             <horstretch>0</horstretch>
+             <verstretch>2</verstretch>
+            </sizepolicy>
+           </property>
+           <layout class="QVBoxLayout" name="vl_verify_bottom">
+            <property name="spacing"><number>4</number></property>
+            <property name="leftMargin"><number>0</number></property>
+            <property name="topMargin"><number>4</number></property>
+            <property name="rightMargin"><number>0</number></property>
+            <property name="bottomMargin"><number>0</number></property>
+            <item>
+             <layout class="QHBoxLayout">
+              <item>
+               <widget class="QLabel" name="lbl_verify_rmse">
+                <property name="text"><string>RMSE: -- mm</string></property>
+                <property name="styleSheet"><string>font-weight: bold;</string></property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QLabel" name="lbl_verify_max">
+                <property name="text"><string>Max: -- mm</string></property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QLabel" name="lbl_verify_mean">
+                <property name="text"><string>Mean: -- mm</string></property>
+               </widget>
+              </item>
+              <item>
+               <spacer>
+                <property name="orientation"><enum>Qt::Horizontal</enum></property>
+                <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+               </spacer>
+              </item>
+              <item>
+               <widget class="QPushButton" name="btn_save_verify_csv">
+                <property name="text"><string>Save CSV</string></property>
+                <property name="enabled"><bool>false</bool></property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+            <item>
+             <widget class="QTableWidget" name="table_verify">
+              <property name="columnCount"><number>6</number></property>
+              <property name="rowCount"><number>0</number></property>
+              <property name="selectionBehavior"><enum>QAbstractItemView::SelectRows</enum></property>
+              <property name="editTriggers"><set>QAbstractItemView::NoEditTriggers</set></property>
+              <property name="alternatingRowColors"><bool>true</bool></property>
+              <property name="sortingEnabled"><bool>false</bool></property>
+              <attribute name="horizontalHeaderStretchLastSection"><bool>true</bool></attribute>
+              <column><property name="text"><string>#</string></property></column>
+              <column><property name="text"><string>Pose</string></property></column>
+              <column><property name="text"><string>Pos err (mm)</string></property></column>
+              <column><property name="text"><string>Rot err (°)</string></property></column>
+              <column><property name="text"><string>TCP pos</string></property></column>
+              <column><property name="text"><string>Pred pos</string></property></column>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+
+         </widget>
+        </item>
+
+       </layout>
+      </widget>
+      <!-- END TAB 2 (Verification) -->
+
+     </widget>
+    </item>
+
+    <!-- ═══════════════ LOG PANEL ═══════════════ -->
+    <item>
+     <widget class="QPlainTextEdit" name="log_panel">
+      <property name="maximumHeight"><number>120</number></property>
+      <property name="minimumHeight"><number>80</number></property>
+      <property name="readOnly"><bool>true</bool></property>
+      <property name="placeholderText"><string>Log output…</string></property>
+      <property name="font"><font><family>Courier New</family><pointsize>9</pointsize></font></property>
+      <property name="styleSheet">
+       <string>QPlainTextEdit { background: #1e1e1e; color: #d4d4d4; }</string>
+      </property>
+     </widget>
+    </item>
+
+   </layout>
+  </widget>
+
+ </widget>
+
+</ui>

@@ -27,6 +27,7 @@ import argparse
 import multiprocessing
 import zmq
 from multiprocessing import Process
+from common.config_loader import load_config
 from simtool.window import AppWindow as ToolWindow
 from util.logger.console import ConsoleLogger
 
@@ -42,37 +43,36 @@ if __name__ == "__main__":
 
     app = None
     try:
-        with open(args.config, "r") as cfile:
-            configure = json.load(cfile)
+        configure = load_config(args.config)
 
-            configure["root_path"] = ROOT_PATH
-            configure["app_path"] = (pathlib.Path(__file__).parent / APP_NAME)
-            configure["verbose_level"] = args.verbose_level.upper()
+        configure["root_path"] = ROOT_PATH
+        configure["app_path"] = (pathlib.Path(__file__).parent / APP_NAME)
+        configure["verbose_level"] = args.verbose_level.upper()
 
-            if configure["verbose_level"] == "DEBUG":
-                console.debug(f"Root Path : {configure['root_path']}")
-                console.debug(f"Application Path : {configure['app_path']}")
-                console.debug(f"Verbose Level : {configure['verbose_level']}")
+        if configure["verbose_level"] == "DEBUG":
+            console.debug(f"Root Path : {configure['root_path']}")
+            console.debug(f"Application Path : {configure['app_path']}")
+            console.debug(f"Verbose Level : {configure['verbose_level']}")
 
-            # zmq pipeline
-            # create zpipe context
-            n_ctx_value = configure.get("n_io_context", 10)
-            zpipe_instance = zpipe_create_pipe(io_threads=n_ctx_value)
+        # zmq pipeline
+        # create zpipe context
+        n_ctx_value = configure.get("n_io_context", 10)
+        zpipe_instance = zpipe_create_pipe(io_threads=n_ctx_value)
 
-            # run application
-            app = QApplication(sys.argv)
-            font_id = QFontDatabase.addApplicationFont((ROOT_PATH / configure['font_path']).as_posix())
-            font_family = QFontDatabase.applicationFontFamilies(font_id)[0]
-            app.setFont(QFont(font_family, 12))
-            main_window = ToolWindow(config=configure, zpipe=zpipe_instance)
-            main_window.show()
+        # run application
+        app = QApplication(sys.argv)
+        font_id = QFontDatabase.addApplicationFont((ROOT_PATH / configure['font_path']).as_posix())
+        font_family = QFontDatabase.applicationFontFamilies(font_id)[0]
+        app.setFont(QFont(font_family, 12))
+        main_window = ToolWindow(config=configure, zpipe=zpipe_instance)
+        main_window.show()
 
-            exit_cdoe = app.exec()
+        exit_cdoe = app.exec()
 
-            # terminate pipeline
-            zpipe_destroy_pipe()
-            console.info(f"Successfully terminated")
-            sys.exit(exit_cdoe)
+        # terminate pipeline
+        zpipe_destroy_pipe()
+        console.info(f"Successfully terminated")
+        sys.exit(exit_cdoe)
 
     except json.JSONDecodeError as e:
         console.critical(f"Configuration File Parse Exception : {e}")

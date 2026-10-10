@@ -1,0 +1,76 @@
+{
+  "robot_name": "rb20_1900es",
+  "urdf_path": "D:\\flame_robotics_drt\\urdf\\rb20_1900es_RT.urdf",
+  "base_pose": [
+    0.0,
+    0.0,
+    0.0,
+    0,
+    0,
+    0
+  ],
+  "joint_names": [
+    "rt_joint_linear_track",
+    "rt_joint_carriage",
+    "rt_base",
+    "rt_shoulder",
+    "rt_elbow",
+    "rt_wrist1",
+    "rt_wrist2",
+    "rt_wrist3"
+  ],
+  "target_link_name": "rt_link_end",
+  "csv_path": "experiment\\inspection_ik\\session_20260727_111256\\success\\inspection_ik_20260727_112147_rb20_1900es_raw_success.csv",
+  "plot_path": null,
+  "target_T": [
+    [
+      1.5178830414797062e-17,
+      -0.17364817766693028,
+      0.9848077530122081,
+      6.116645604287519
+    ],
+    [
+      0.0,
+      -0.9848077530122081,
+      -0.17364817766693028,
+      1.4431564615865042
+    ],
+    [
+      1.0,
+      0.0,
+      1.5178830414797062e-17,
+      1.7105062639704447
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "goal_q": [
+    5.584483815658941,
+    -0.06225974943363794,
+    -0.1736129544468074,
+    0.9344861232616218,
+    -0.025124776417634005,
+    3.14,
+    -0.6614355284197311,
+    0.0011819560212594433
+  ],
+  "ik_result": {
+    "success": true,
+    "fallback": false,
+    "position_error": 7.520561907254095e-06,
+    "orientation_error": 9.486663216620107e-05,
+    "collision": false,
+    "collision_check_error": null,
+    "collision_pairs": [],
+    "collision_pair_count": 0,
+    "iterations": 66,
+    "elapsed": 0.0024756999919191003,
+    "max_iter": 100000,
+    "solver": "dls",
+    "normalize": false
+  }
+}

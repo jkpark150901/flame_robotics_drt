@@ -1,7 +1,6 @@
 import numpy as np
 import json
 import os
-import open3d as o3d
 from typing import List, Union, Optional
 import sys
 import logging
@@ -32,60 +31,7 @@ class TaskSpaceRRTStar(PlannerBase):
             "pitch_min": -np.pi, "pitch_max": np.pi,
             "yaw_min": -np.pi, "yaw_max": np.pi
         })
-        
-        self.scene = None
-        self.tool_mesh = None
-
-    def add_static_object(self, object_model):
-        self.static_objects.append(object_model)
-        if self.scene is None:
-             self.scene = o3d.t.geometry.RaycastingScene()
-        try:
-            t_mesh = o3d.t.geometry.TriangleMesh.from_legacy(object_model)
-            self.scene.add_triangles(t_mesh)
-        except Exception as e:
-            print(f"Error adding object to scene: {e}")
-
-    # ... params ...
-
-    def _check_collision(self, p1, p2):
-        if self.scene is None:
-            return False
-            
-        pos1 = p1[:3]
-        pos2 = p2[:3]
-        direction = pos2 - pos1
-        length = np.linalg.norm(direction)
-        if length > 1e-6: # Ray Check
-            dir_norm = direction / length
-            rays = o3d.core.Tensor([[pos1[0], pos1[1], pos1[2], dir_norm[0], dir_norm[1], dir_norm[2]]], dtype=o3d.core.Dtype.Float32)
-            ans = self.scene.cast_rays(rays)
-            t_hit = ans['t_hit'][0].item()
-            if np.isfinite(t_hit) and t_hit < length:
-                return True
-        
-        # Tool Check
-        if self.tool_mesh is not None:
-             if not hasattr(self, '_tool_pcd'):
-                 self._tool_pcd = self.tool_mesh.sample_points_poisson_disk(number_of_points=100)
-                 self._tool_pcd_pts = np.asarray(self._tool_pcd.points)
-
-             check_poses = [p2]
-             if length > 0.5:
-                 num_inter = int(length / 0.5)
-                 for i in range(1, num_inter + 1):
-                     ratio = i / (num_inter + 1)
-                     check_poses.append(p1 + (p2 - p1) * ratio)
-             
-             for pose in check_poses:
-                 R = o3d.geometry.get_rotation_matrix_from_xyz(pose[3:])
-                 transformed_pts = (R @ self._tool_pcd_pts.T).T + pose[:3]
-                 query = o3d.core.Tensor(transformed_pts, dtype=o3d.core.Dtype.Float32)
-                 dist = self.scene.compute_distance(query)
-                 if dist.min().item() < 1.0:
-                     return True
-                     
-        return False
+        self.configure_collision(self.config, default_sample_resolution=self.step_size)
 
     def generate(self, current_pose: Union[List[float], np.ndarray], target_pose: Union[List[float], np.ndarray], step_callback: Optional[callable] = None) -> List[np.ndarray]:
         current_pose = np.array(current_pose)

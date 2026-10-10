@@ -1,8 +1,28 @@
 pyqt6
-numpy
+pyqtdarktheme
+# Pinocchio 4.1 Windows bindings use the NumPy 2 ABI.
+numpy>=2.1,<3
 scipy
+scikit-image
 pyzmq
 colorlog
 open3d
 vedo
-pyqtdarktheme
+pyyaml
+opencv-python
+trimesh
+networkx
+lxml
+pycollada
+matplotlib
+
+# Robotics Pinocchio. PyPI package `pin` currently provides pip wheels on Linux only.
+pin; platform_system == "Linux"
+
+# EF pose determination's real mesh-vs-mesh collision check
+# (plugins/robotics/pybullet_collision.py) and pybullet_ik.py's IK solve.
+pybullet
+
+
+urdf-parser-py
+ompl

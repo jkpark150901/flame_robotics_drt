@@ -1,0 +1,1070 @@
+from __future__ import annotations
+
+import copy
+import os
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional, Sequence
+
+import numpy as np
+import open3d as o3d
+from scipy.spatial.transform import Rotation as R
+from urdf_parser_py.urdf import URDF
+
+try:
+    import pinocchio as pin
+except ImportError:  # pragma: no cover - depends on runtime environment
+    pin = None
+
+try:
+    import hppfcl
+except ImportError:  # pragma: no cover - depends on runtime environment
+    try:
+        import coal as hppfcl
+    except ImportError:
+        hppfcl = None
+
+from plugins.robotics.backend import (
+    CollisionResult,
+    IKOptions,
+    IKResult,
+    IKTracePoint,
+    RobotDescription,
+    RoboticsBackend,
+)
+from plugins.robotics.hppfcl_compat import build_bvh_model
+@dataclass
+class PinocchioRobotHandle:
+    description: RobotDescription
+    model: Any
+    data: Any
+    geom_model: Any = None
+    geom_data: Any = None
+    robot_geom_ids: List[int] = field(default_factory=list)
+    static_object_ids: List[int] = field(default_factory=list)
+    sample_resolution: float = 0.05
+    base_geom_model: Any = None
+    _configured_mesh_key: Any = None
+    # mesh_key(id 기반) 캐시 비교가 안전하려면 이전에 configure_collision에 넘겨졌던
+    # mesh 객체들이 다음 호출 전까지 GC되지 않도록 여기서 강하게 붙잡아 둬야 한다.
+    _configured_meshes: Any = None
+
+
+def damped_least_squares_step(
+    pin_module,
+    pin_model,
+    data,
+    q,
+    frame_id,
+    err,
+    damping=1e-3,
+    dt=0.35,
+):
+    """Compute one classic DLS IK step.
+
+    Args:
+        pin_module: pinocchio module.
+        pin_model: Pinocchio model.
+        data: Pinocchio data.
+        q: Current joint vector.
+        frame_id: Target frame id.
+        err: 6D error from the current frame to the target frame.
+        damping: task-space damping coefficient.
+        dt: update gain.
+
+    Returns:
+        Next q clamped inside joint limits.
+    """
+    J = pin_module.computeFrameJacobian(pin_model, data, q, frame_id, pin_module.ReferenceFrame.LOCAL)
+    JJt = J @ J.T
+    dq = J.T @ np.linalg.solve(JJt + float(damping) * np.eye(6), err)
+
+    q_next = pin_module.integrate(pin_model, np.asarray(q, dtype=float), float(dt) * dq)
+    return np.minimum(np.maximum(q_next, pin_model.lowerPositionLimit), pin_model.upperPositionLimit)
+
+
+def solve_qp_ik_step(
+    pin_model,
+    data,
+    q,
+    frame_name,
+    target_se3,
+    dt=0.35,
+    solver="quadprog",
+):
+    """Compute one IK step with the QP (pink) backend.
+
+    External QP IK dependencies are imported only here. Viewer/UI code only
+    selects the generic `qp` solver and does not depend on backend package names.
+    """
+    try:
+        import pink
+        from pink import solve_ik
+        from pink.tasks import FrameTask
+    except ImportError as exc:
+        raise RuntimeError(
+            "QP IK backend is not available. Install backend dependencies: "
+            "pip uninstall -y pink; pip install pin-pink qpsolvers quadprog"
+        ) from exc
+
+    if not hasattr(pink, "Configuration"):
+        raise RuntimeError(
+            "The installed QP IK backend is not the robotics package expected by this project. "
+            "Run: pip uninstall -y pink; pip install pin-pink qpsolvers quadprog"
+        )
+
+    configuration = pink.Configuration(pin_model, data, np.asarray(q, dtype=float).copy())
+    task = FrameTask(
+        frame_name,
+        position_cost=1.0,
+        orientation_cost=1.0,
+        gain=1.0,
+    )
+    task.set_target(target_se3)
+    velocity = solve_ik(configuration, [task], float(dt), solver=solver)
+    configuration.integrate_inplace(velocity, float(dt))
+    return np.asarray(configuration.q, dtype=float).copy()
+
+
+class PinocchioRoboticsBackend(RoboticsBackend):
+    """RoboticsBackend implementation using Pinocchio and hpp-fcl/coal."""
+
+    name = "pinocchio"
+
+    def __init__(self):
+        if pin is None:
+            raise RuntimeError("pinocchio is not available")
+        self._robots: Dict[str, PinocchioRobotHandle] = {}
+
+    def register_robot(self, description: RobotDescription) -> PinocchioRobotHandle:
+        urdf_path = os.path.abspath(description.urdf_path)
+        model = self._build_model_from_urdf(urdf_path)
+        handle = PinocchioRobotHandle(
+            description=RobotDescription(
+                name=description.name,
+                urdf_path=urdf_path,
+                base_T=np.asarray(description.base_T, dtype=float).copy(),
+                package_dirs=list(description.package_dirs or [os.path.dirname(urdf_path)]),
+                target_frame=description.target_frame,
+            ),
+            model=model,
+            data=model.createData(),
+        )
+        self._robots[description.name] = handle
+        return handle
+
+    def robot_model(self, robot_name: str) -> Any:
+        return self._handle(robot_name).model
+
+    def robot_handle(self, robot_name: str) -> PinocchioRobotHandle:
+        return self._handle(robot_name)
+
+    def dof(self, robot_name: str) -> int:
+        return int(self._handle(robot_name).model.nq)
+
+    def joint_names(self, robot_name: str) -> List[str]:
+        model = self._handle(robot_name).model
+        return [str(model.names[i]) for i in range(1, model.njoints)]
+
+    def neutral_q(self, robot_name: str) -> np.ndarray:
+        model = self._handle(robot_name).model
+        try:
+            return np.asarray(pin.neutral(model), dtype=float)
+        except Exception:
+            return np.zeros(model.nq, dtype=float)
+
+    def joint_limits_for_metric(self, robot_name: str, normalize: bool = True):
+        if not bool(normalize):
+            return None, None, None
+        model = self._handle(robot_name).model
+        lo = np.asarray(model.lowerPositionLimit, dtype=float).copy()
+        hi = np.asarray(model.upperPositionLimit, dtype=float).copy()
+        invalid = ~np.isfinite(lo) | ~np.isfinite(hi) | (hi <= lo)
+        lo[invalid] = -np.pi
+        hi[invalid] = np.pi
+        span = hi - lo
+        span[span < 1e-9] = 1.0
+        return lo, hi, span
+
+    def normalize_q(self, robot_name: str, q: Sequence[float], normalize: bool = True) -> np.ndarray:
+        q = np.asarray(q, dtype=float)
+        lo, _, span = self.joint_limits_for_metric(robot_name, normalize=normalize)
+        if span is None:
+            return q.copy()
+        return (q - lo) / span
+
+    def denormalize_q(self, robot_name: str, q_metric: Sequence[float], normalize: bool = True) -> np.ndarray:
+        q_metric = np.asarray(q_metric, dtype=float)
+        lo, hi, span = self.joint_limits_for_metric(robot_name, normalize=normalize)
+        if span is None:
+            return q_metric.copy()
+        return np.minimum(np.maximum(lo + q_metric * span, lo), hi)
+
+    def joint_distance(
+        self,
+        robot_name: str,
+        q_a: Sequence[float],
+        q_b: Sequence[float],
+        normalize: bool = True,
+    ) -> float:
+        a = self.normalize_q(robot_name, q_a, normalize=normalize)
+        b = self.normalize_q(robot_name, q_b, normalize=normalize)
+        return float(np.linalg.norm(b - a))
+
+    def joint_distances(
+        self,
+        robot_name: str,
+        q_points: Sequence[Sequence[float]],
+        q_ref: Sequence[float],
+        normalize: bool = True,
+    ) -> np.ndarray:
+        pts = np.asarray(q_points, dtype=float)
+        ref = np.asarray(q_ref, dtype=float)
+        if pts.ndim == 1:
+            return np.asarray([self.joint_distance(robot_name, pts, ref, normalize=normalize)], dtype=float)
+        lo, _, span = self.joint_limits_for_metric(robot_name, normalize=normalize)
+        if span is None:
+            return np.linalg.norm(pts - ref, axis=1)
+        return np.linalg.norm(((pts - lo) / span) - ((ref - lo) / span), axis=1)
+
+    def steer_joint_state(
+        self,
+        robot_name: str,
+        from_state: Sequence[float],
+        to_state: Sequence[float],
+        step_size: float,
+        normalize: bool = True,
+    ) -> np.ndarray:
+        if not bool(normalize):
+            direction = np.asarray(to_state, dtype=float) - np.asarray(from_state, dtype=float)
+            length = float(np.linalg.norm(direction))
+            if length < 1e-12:
+                return np.asarray(from_state, dtype=float).copy()
+            return np.asarray(from_state, dtype=float) + direction / length * min(float(step_size), length)
+
+        from_norm = self.normalize_q(robot_name, from_state, normalize=True)
+        to_norm = self.normalize_q(robot_name, to_state, normalize=True)
+        direction = to_norm - from_norm
+        length = float(np.linalg.norm(direction))
+        if length < 1e-12:
+            return np.asarray(from_state, dtype=float).copy()
+        new_norm = from_norm + direction / length * min(float(step_size), length)
+        return self.denormalize_q(robot_name, new_norm, normalize=True)
+
+    def sample_configuration(self, robot_name: str) -> np.ndarray:
+        lo, hi, _span = self.joint_limits_for_metric(robot_name, normalize=True)
+        return np.random.uniform(lo, hi)
+
+    def end_effector_collision_geometry(
+        self,
+        robot_name: str,
+        end_link_name: str,
+        tcp_joint_name,
+        pose_to_link_offset=None,
+    ):
+        handle = self._handle(robot_name)
+        urdf = URDF.from_xml_file(handle.description.urdf_path)
+        link = urdf.link_map[end_link_name]
+        collision = getattr(link, "collision", None)
+        if collision is None or collision.geometry is None:
+            raise RuntimeError(f"collision geometry is not available: {robot_name}:{end_link_name}")
+
+        mesh_path = Path(str(collision.geometry.filename).replace("file://", ""))
+        if not mesh_path.is_absolute():
+            mesh_path = Path(handle.description.urdf_path).resolve().parent / mesh_path
+        mesh_path = mesh_path.resolve()
+        link_mesh = o3d.io.read_triangle_mesh(str(mesh_path))
+
+        scale = getattr(collision.geometry, "scale", 1.0)
+        if isinstance(scale, list):
+            if len(scale) == 3 and not np.allclose(scale, scale[0]):
+                vertices = np.asarray(link_mesh.vertices, dtype=float)
+                link_mesh.vertices = o3d.utility.Vector3dVector(vertices * np.asarray(scale, dtype=float))
+            else:
+                link_mesh.scale(float(scale[0]), np.zeros(3, dtype=np.float64))
+        elif isinstance(scale, (int, float)):
+            link_mesh.scale(float(scale), np.zeros(3, dtype=np.float64))
+
+        origin = getattr(collision, "origin", None)
+        T_collision = np.eye(4)
+        if origin is not None:
+            T_collision[:3, :3] = R.from_euler("xyz", origin.rpy).as_matrix()
+            T_collision[:3, 3] = origin.xyz
+        link_mesh.transform(T_collision)
+
+        if pose_to_link_offset is not None:
+            return link_mesh, self._offset_to_transform(pose_to_link_offset)
+
+        tcp_joint_names = (tcp_joint_name,) if isinstance(tcp_joint_name, str) else tuple(tcp_joint_name)
+        tcp_joint = None
+        for candidate_name in tcp_joint_names:
+            tcp_joint = urdf.joint_map.get(candidate_name)
+            if tcp_joint is not None:
+                break
+        if tcp_joint is None:
+            raise KeyError(f"TCP joint not found. candidates={tcp_joint_names}")
+
+        fallback_T = self._joint_origin_T(tcp_joint)
+        end_to_tcp_T = self._relative_link_transform(
+            urdf,
+            end_link_name,
+            tcp_joint.child,
+            fallback_T=fallback_T,
+        )
+        return link_mesh, np.linalg.inv(end_to_tcp_T)
+
+    def frame_id(self, robot_name: str, frame_name: Optional[str] = None) -> int:
+        handle = self._handle(robot_name)
+        target = frame_name or handle.description.target_frame
+        if target:
+            try:
+                fid = handle.model.getFrameId(str(target))
+                if fid < handle.model.nframes:
+                    return fid
+            except Exception:
+                pass
+        return handle.model.nframes - 1
+
+    def frame_world_T(self, robot_name: str, q: Sequence[float], frame_name: Optional[str] = None) -> np.ndarray:
+        handle = self._handle(robot_name)
+        q = np.asarray(q, dtype=float)
+        pin.forwardKinematics(handle.model, handle.data, q)
+        pin.updateFramePlacements(handle.model, handle.data)
+        local_T = np.asarray(handle.data.oMf[self.frame_id(robot_name, frame_name)].homogeneous, dtype=float)
+        return np.asarray(handle.description.base_T, dtype=float) @ local_T
+
+    def target_world_T(
+        self,
+        robot_name: str,
+        target_world: Any,
+        q_reference: Sequence[float],
+        frame_name: Optional[str] = None,
+    ) -> np.ndarray:
+        target_arr = np.asarray(target_world, dtype=float)
+        if target_arr.shape == (4, 4):
+            return target_arr.copy()
+        if target_arr.size >= 6:
+            pose = target_arr.reshape(-1)[:6]
+            T = np.eye(4)
+            T[:3, :3] = R.from_euler("xyz", pose[3:6]).as_matrix()
+            T[:3, 3] = pose[:3]
+            return T
+        current_world_T = self.frame_world_T(robot_name, q_reference, frame_name)
+        target_T = current_world_T.copy()
+        target_T[:3, 3] = target_arr.reshape(-1)[:3]
+        return target_T
+
+    def solve_ik(
+        self,
+        robot_name: str,
+        target_world_T: np.ndarray,
+        q_init: Sequence[float],
+        options: Optional[IKOptions] = None,
+        frame_name: Optional[str] = None,
+    ) -> IKResult:
+        options = options or IKOptions()
+        handle = self._handle(robot_name)
+        model = handle.model
+        data = model.createData()
+        fid = self.frame_id(robot_name, frame_name)
+        frame_name = frame_name or handle.description.target_frame or str(model.frames[fid].name)
+
+        target_world_T = np.asarray(target_world_T, dtype=float)
+        target_local_T = np.linalg.inv(handle.description.base_T) @ target_world_T
+        target_se3 = pin.SE3(target_local_T[:3, :3], target_local_T[:3, 3])
+
+        solver_name = str(options.solver or "pybullet").lower()
+        use_qp = solver_name in ("qp", "qp_ik")
+        use_pybullet = solver_name in ("pybullet", "pybullet_ik")
+        # normalized DLS는 pink가 대체하지 못하는 별도 구현이었는데 정리하며 제거했다.
+        # dls만 남았으므로 QP/pybullet이 아니면 무조건 dls를 쓴다.
+        normalize = bool(options.normalize) if options.normalize is not None else False
+        solver_label = "qp" if use_qp else ("pybullet" if use_pybullet else "dls")
+
+        t0 = time.perf_counter()
+        q = np.asarray(q_init, dtype=float).copy()
+        trace: List[IKTracePoint] = []
+
+        def record(iteration: int):
+            pin.forwardKinematics(model, data, q)
+            pin.updateFramePlacements(model, data)
+            err_vec = pin.log6(data.oMf[fid].inverse() * target_se3).vector
+            current_T = np.asarray(data.oMf[fid].homogeneous, dtype=float)
+            position_error = float(np.linalg.norm(current_T[:3, 3] - target_local_T[:3, 3]))
+            rot_delta = current_T[:3, :3].T @ target_local_T[:3, :3]
+            cos_angle = (float(np.trace(rot_delta)) - 1.0) * 0.5
+            orientation_error = float(np.arccos(np.clip(cos_angle, -1.0, 1.0)))
+            if options.record_trace:
+                trace.append(
+                    IKTracePoint(
+                        iteration=int(iteration),
+                        q=q.copy(),
+                        err_norm=float(np.linalg.norm(err_vec)),
+                        position_error=position_error,
+                        orientation_error=orientation_error,
+                        tcp_world=(handle.description.base_T @ current_T)[:3, 3].copy(),
+                    )
+                )
+            return err_vec, position_error, orientation_error
+
+        err, position_error, orientation_error = record(0)
+
+        if use_pybullet:
+            # PyBullet의 IK는 C++로 구현된 반복 solver라 자체적으로 max_iter만큼 내부에서
+            # 다 수렴시킨다. 우리 쪽 Python for-loop을 매 iteration 돌리는 대신 한 번만
+            # 호출하고, 수렴/오차 판정은 다른 solver와 똑같이 Pinocchio FK(record)로 한다
+            # - 두 라이브러리의 오차 계산 방식이 달라서 생기는 결과 불일치를 막기 위함이다.
+            from plugins.robotics import pybullet_ik
+            q = pybullet_ik.solve(
+                handle.description.urdf_path,
+                handle.description.base_T,
+                self.joint_names(robot_name),
+                q,
+                target_world_T,
+                frame_name,
+                max_iter=int(options.max_iter),
+                tol=float(options.tol),
+                damping=float(options.damping),
+            )
+            err, position_error, orientation_error = record(int(options.max_iter))
+            if np.linalg.norm(err) < float(options.tol):
+                return self._ik_result(
+                    True, q, solver_label, normalize, int(options.max_iter),
+                    time.perf_counter() - t0, position_error, orientation_error,
+                    target_world_T, trace, robot_name, frame_name,
+                )
+            iteration = int(options.max_iter)
+        else:
+            for iteration in range(int(options.max_iter)):
+                if np.linalg.norm(err) < float(options.tol):
+                    return self._ik_result(
+                        True,
+                        q,
+                        solver_label,
+                        normalize,
+                        iteration,
+                        time.perf_counter() - t0,
+                        position_error,
+                        orientation_error,
+                        target_world_T,
+                        trace,
+                        robot_name,
+                        frame_name,
+                    )
+
+                if use_qp:
+                    q = solve_qp_ik_step(
+                        model,
+                        data,
+                        q,
+                        frame_name,
+                        target_se3,
+                        dt=options.dt,
+                        solver=options.backend_solver,
+                    )
+                else:
+                    q = damped_least_squares_step(
+                        pin,
+                        model,
+                        data,
+                        q,
+                        fid,
+                        err,
+                        damping=options.damping,
+                        dt=options.dt,
+                    )
+                err, position_error, orientation_error = record(iteration + 1)
+
+        position_only = position_error < float(options.position_only_tol)
+        final_q = q.copy()
+        final_T = self.frame_world_T(robot_name, final_q, frame_name)
+        failure_info = self.classify_ik_failure(
+            robot_name,
+            final_q,
+            target_world_T,
+            final_T,
+            orientation_error=orientation_error,
+            max_iter=options.max_iter,
+        )
+        return self._ik_result(
+            position_only,
+            final_q,
+            solver_label,
+            normalize,
+            int(options.max_iter),
+            time.perf_counter() - t0,
+            position_error,
+            orientation_error,
+            target_world_T,
+            trace,
+            robot_name,
+            frame_name,
+            position_only=position_only,
+            failure_info={} if position_only else failure_info,
+            message="" if position_only else "IK failed to converge",
+        )
+
+    def classify_ik_failure(
+        self,
+        robot_name: str,
+        q: Sequence[float],
+        target_world_T: np.ndarray,
+        final_T: Optional[np.ndarray],
+        orientation_error: float = float("inf"),
+        max_iter: int = 0,
+    ) -> Dict[str, Any]:
+        handle = self._handle(robot_name)
+        model = handle.model
+        q = np.asarray(q, dtype=float)
+        lo = np.asarray(model.lowerPositionLimit, dtype=float)
+        hi = np.asarray(model.upperPositionLimit, dtype=float)
+        names = self.joint_names(robot_name)
+        saturated = []
+        for i, joint_name in enumerate(names[:len(q)]):
+            lower = lo[i] if i < len(lo) else -np.inf
+            upper = hi[i] if i < len(hi) else np.inf
+            if not np.isfinite(lower) or not np.isfinite(upper):
+                continue
+            span = max(abs(float(upper - lower)), 1.0)
+            eps = max(1e-5, span * 1e-3)
+            if q[i] <= lower + eps:
+                saturated.append({
+                    "joint": str(joint_name),
+                    "side": "lower",
+                    "value": float(q[i]),
+                    "limit": float(lower),
+                })
+            elif q[i] >= upper - eps:
+                saturated.append({
+                    "joint": str(joint_name),
+                    "side": "upper",
+                    "value": float(q[i]),
+                    "limit": float(upper),
+                })
+
+        target_world_T = np.asarray(target_world_T, dtype=float)
+        position_error = float("inf")
+        if final_T is not None:
+            position_error = float(np.linalg.norm(np.asarray(final_T)[:3, 3] - target_world_T[:3, 3]))
+        if saturated and position_error > 0.05:
+            failure_type = "likely_reach_or_joint_limit"
+        elif saturated:
+            failure_type = "joint_limit_saturation"
+        elif position_error > 0.25:
+            failure_type = "likely_unreachable"
+        else:
+            failure_type = "ik_non_convergence"
+        return {
+            "type": failure_type,
+            "robot": robot_name,
+            "position_error": position_error,
+            "orientation_error": float(orientation_error),
+            "max_iter": int(max_iter),
+            "saturated_joints": saturated,
+            "final_q": q.tolist(),
+            "target_position": target_world_T[:3, 3].tolist(),
+            "final_position": None if final_T is None else np.asarray(final_T)[:3, 3].tolist(),
+            "final_T": None if final_T is None else np.asarray(final_T).tolist(),
+            "target_T": target_world_T.tolist(),
+        }
+
+    def configure_collision(
+        self,
+        robot_name: str,
+        static_meshes: Optional[Iterable[Any]] = None,
+        sample_resolution: float = 0.05,
+    ) -> None:
+        if hppfcl is None:
+            raise RuntimeError("hppfcl/coal is not available")
+        handle = self._handle(robot_name)
+        # 같은 obstacle mesh 객체로 반복 호출되면(한 batch 안의 target들이 보통 그렇다)
+        # geom_model deepcopy + BVH 재계산을 또 할 필요가 없다. 객체 identity로만 판단한다
+        # (내용이 바뀌었는데 같은 객체를 그대로 mutate한 경우는 대상이 아님 - 호출부는
+        # 항상 새 mesh 객체를 만들어 넘긴다).
+        #
+        # 주의: id()만으로 판단하면 위험하다 - 호출부가 넘기는 mesh(예: 매 target마다
+        # copy.deepcopy로 새로 만든 rotated obstacle mesh)는 이 함수 호출이 끝나면 호출부
+        # 쪽 참조가 사라져 곧바로 GC될 수 있고, CPython은 그 자리(id)를 바로 다음에 만들어진
+        # 전혀 다른 mesh 객체에 재사용할 수 있다. 그러면 "이전과 같은 mesh"로 오판해서
+        # 실제로는 새로 회전된 mesh인데 이전(회전 전) collision geometry를 그대로 써버린다 -
+        # 예를 들어 positioner 회전 후 ef pose는 제대로 rotated pose로 IK를 푸는데, collision
+        # 검사만 회전 전 배관 mesh 기준으로 이뤄져 "같은 축으로 같이 돌았는데도 충돌한다"는
+        # 겉보기 모순이 생긴다. static_meshes를 handle에 강하게 붙잡아 두면(다음 호출 전까지)
+        # 이 GC/id 재사용 자체가 불가능해져 mesh_key 비교가 안전해진다.
+        mesh_key = tuple(id(mesh) for mesh in (static_meshes or []))
+        if handle.base_geom_model is not None and handle.geom_model is not None \
+                and getattr(handle, "_configured_mesh_key", None) == mesh_key:
+            handle.sample_resolution = float(sample_resolution)
+            handle._configured_meshes = list(static_meshes or [])
+            return
+        if handle.base_geom_model is None:
+            # URDF 파싱 + robot self-collision pair 계산은 로봇 URDF가 바뀌지 않는 한
+            # 매 planning 호출마다 다시 할 필요가 없다. 로봇 전용(geom_model, static
+            # object 없음) 버전을 한 번만 만들어 캐시하고, 이후에는 그걸 deepcopy해서
+            # static mesh(장애물)만 새로 얹는다.
+            package_dirs = handle.description.package_dirs or [os.path.dirname(handle.description.urdf_path)]
+            base_geom_model = pin.buildGeomFromUrdf(
+                handle.model,
+                handle.description.urdf_path,
+                pin.GeometryType.COLLISION,
+                None,
+                [os.path.abspath(p) for p in package_dirs],
+            )
+            base_geom_model.addAllCollisionPairs()
+            handle.geom_model = base_geom_model
+            self._remove_adjacent_pairs(handle)
+            handle.base_geom_model = handle.geom_model
+        handle.geom_model = copy.deepcopy(handle.base_geom_model)
+        handle.robot_geom_ids = list(range(len(handle.geom_model.geometryObjects)))
+        handle.static_object_ids = []
+        handle.sample_resolution = float(sample_resolution)
+        for mesh in static_meshes or []:
+            self._add_static_mesh(handle, mesh, recreate_data=False)
+        handle.geom_data = pin.GeometryData(handle.geom_model)
+        handle._configured_mesh_key = mesh_key
+        # mesh_key(id 기반) 비교가 다음 호출까지 안전하려면, 이 mesh들이 그 사이 GC되어
+        # id가 재사용되지 않도록 handle이 직접 참조를 붙잡고 있어야 한다.
+        handle._configured_meshes = list(static_meshes or [])
+
+    def check_collision(self, robot_name: str, q: Sequence[float], return_pairs: bool = False) -> CollisionResult:
+        handle = self._handle(robot_name)
+        self._require_collision(handle)
+        q = np.asarray(q, dtype=float)
+        has_collision = bool(
+            pin.computeCollisions(
+                handle.model,
+                handle.data,
+                handle.geom_model,
+                handle.geom_data,
+                q,
+                False,
+            )
+        )
+        pairs = self._active_collision_pairs(handle) if return_pairs else []
+        return CollisionResult(has_collision, pairs=pairs, q=q.copy(), backend=self.name)
+
+    def check_edge_collision(
+        self,
+        robot_name: str,
+        q_from: Sequence[float],
+        q_to: Sequence[float],
+        return_pairs: bool = False,
+    ) -> CollisionResult:
+        handle = self._handle(robot_name)
+        self._require_collision(handle)
+        q_from = np.asarray(q_from, dtype=float)
+        q_to = np.asarray(q_to, dtype=float)
+        dist = float(np.linalg.norm(q_to - q_from))
+        steps = max(1, int(np.ceil(dist / max(float(handle.sample_resolution), 1e-9))))
+        for i in range(steps + 1):
+            alpha = i / steps
+            q = (1.0 - alpha) * q_from + alpha * q_to
+            result = self.check_collision(robot_name, q, return_pairs=return_pairs)
+            if result.collision:
+                result.alpha = float(alpha)
+                return result
+        return CollisionResult(False, backend=self.name)
+
+    def link_obstacle_distances(self, robot_name: str, q: Sequence[float]) -> List[Dict[str, Any]]:
+        """Minimum distance from every robot link to every static obstacle
+        (pipe, positioner, ...) at configuration q - a clearance metric, not
+        just a boolean collision check. Uses the same collision scene
+        (geom_model/geom_data) check_collision() already relies on, so it
+        must be called with the robot's collision already configured
+        (add_collision_objects()/configure_collision() - same requirement as
+        check_collision()).
+
+        Returns one entry per (robot link, static obstacle) pair actually in
+        the collision model - self-collision pairs (both sides robot links)
+        and static-static pairs are excluded, only robot-vs-static distances
+        matter for clearance:
+            [{"link": str, "obstacle": str, "distance": float}, ...]
+        distance is signed (negative = penetrating, matches hppfcl's
+        DistanceResult.min_distance convention) so an in-collision pose still
+        reports a (negative) number instead of silently omitting it.
+        """
+        handle = self._handle(robot_name)
+        self._require_collision(handle)
+        q = np.asarray(q, dtype=float)
+        try:
+            # Don't rely on computeDistances(..., q)'s q-overload to update
+            # geometry placements internally - in a live WSL run, querying
+            # the same q-varying grid produced bit-identical distances at
+            # every cell, meaning geometry never actually moved with q (this
+            # codebase has repeatedly found this pinocchio/OMPL build not
+            # matching documented "q updates FK automatically" behavior -
+            # see check_collision() above and the OMPL binding notes
+            # elsewhere in this file). Force it explicitly instead.
+            pin.forwardKinematics(handle.model, handle.data, q)
+            pin.updateGeometryPlacements(handle.model, handle.data, handle.geom_model, handle.geom_data)
+            # This build only exposes computeDistances(model, data, geom_model,
+            # geom_data, q) and computeDistances(geom_model, geom_data) - no
+            # 4-arg (model, data, geom_model, geom_data) overload, confirmed by
+            # this exact TypeError at runtime. Use the 2-arg form now that
+            # geometry placements are already up to date from the explicit
+            # forwardKinematics/updateGeometryPlacements above.
+            pin.computeDistances(handle.geom_model, handle.geom_data)
+        except Exception as exc:
+            # This mirrors pin.computeCollisions()'s signature (see
+            # check_collision() above) but that's an assumption, not a
+            # verified fact for every pinocchio build this project has run
+            # against (OMPL bindings in this same environment have
+            # repeatedly turned out to be missing/renamed APIs). Degrade to
+            # "no clearance data" rather than crashing every caller
+            # (benchmark_path_planners.py's smoothness/path-length metrics
+            # still work fine without this).
+            if not getattr(self, "_warned_link_obstacle_distances", False):
+                self._warned_link_obstacle_distances = True
+                print(f"link_obstacle_distances: pin.computeDistances unavailable/failed: {exc}")
+            return []
+        static_ids = set(handle.static_object_ids)
+        results = []
+        for pair_id, pair in enumerate(handle.geom_model.collisionPairs):
+            first_static = int(pair.first) in static_ids
+            second_static = int(pair.second) in static_ids
+            if first_static == second_static:
+                continue  # only robot-vs-static pairs are a "clearance" metric
+            link_id = pair.second if first_static else pair.first
+            obstacle_id = pair.first if first_static else pair.second
+            distance_result = handle.geom_data.distanceResults[pair_id]
+            results.append({
+                "link": str(handle.geom_model.geometryObjects[link_id].name),
+                "obstacle": str(handle.geom_model.geometryObjects[obstacle_id].name),
+                "distance": float(distance_result.min_distance),
+            })
+        return results
+
+    def set_link_clearance(
+        self,
+        robot_name: str,
+        link_names: Optional[Sequence[str]],
+        margin: float,
+    ) -> int:
+        """Per-pair hppfcl security_margin on (link, static obstacle) pairs:
+        pin.computeCollisions() then reports a collision whenever the pair is
+        closer than `margin`, so every planner/optimizer/verify_path that
+        already goes through check_collision() picks the constraint up with no
+        changes of its own. Every other pair (including this robot's other
+        links) is reset to 0 - the margin is applied to *only* link_names.
+
+        geom_data outlives a call (configure_collision() reuses it when the
+        obstacle meshes are unchanged), so callers must clear the margin
+        themselves once done - see InspectionPlanningBase.link_clearance().
+
+        link_names match geometry names exactly or as "<link>_<n>" (pinocchio
+        suffixes URDF collision geometries, e.g. "dda_link_end" ->
+        "dda_link_end_0")."""
+        handle = self._handle(robot_name)
+        self._require_collision(handle)
+        margin = max(float(margin or 0.0), 0.0)
+        names = [str(n) for n in (link_names or [])]
+
+        def selected(geom_id: int) -> bool:
+            geom_name = str(handle.geom_model.geometryObjects[geom_id].name)
+            return any(geom_name == n or geom_name.startswith(n + "_") for n in names)
+
+        static_ids = set(handle.static_object_ids)
+        touched = 0
+        for pair_id, pair in enumerate(handle.geom_model.collisionPairs):
+            first_static = int(pair.first) in static_ids
+            second_static = int(pair.second) in static_ids
+            if first_static == second_static:
+                continue
+            link_id = int(pair.second) if first_static else int(pair.first)
+            pair_margin = margin if (margin > 0.0 and names and selected(link_id)) else 0.0
+            handle.geom_data.collisionRequests[pair_id].security_margin = pair_margin
+            if pair_margin > 0.0:
+                touched += 1
+        return touched
+
+    def check_mesh_point_cloud_overlap(
+        self,
+        link_model: Any,
+        tcp_pose: Sequence[float],
+        tcp_to_link_pose_T: np.ndarray,
+        scan_data: Any,
+        margin: float = 0.05,
+        sample_count: int = 5000,
+        threshold: float = 0.001,
+    ) -> bool:
+        tcp_pose = np.asarray(tcp_pose, dtype=float).reshape(-1)
+        if tcp_pose.size < 6:
+            raise ValueError(f"tcp_pose must have at least 6 values, got {tcp_pose.size}")
+        tcp_to_link_pose_T = np.asarray(tcp_to_link_pose_T, dtype=float)
+        if tcp_to_link_pose_T.shape != (4, 4):
+            raise ValueError(f"tcp_to_link_pose_T must be 4x4, got {tcp_to_link_pose_T.shape}")
+
+        tcp_pose_T = np.eye(4)
+        tcp_pose_T[:3, :3] = R.from_euler("xyz", tcp_pose[3:6]).as_matrix()
+        tcp_pose_T[:3, 3] = tcp_pose[:3]
+        link_pose_T = tcp_pose_T @ tcp_to_link_pose_T
+
+        mesh_copy = copy.deepcopy(link_model)
+        mesh_copy.transform(link_pose_T)
+
+        aabb = mesh_copy.get_axis_aligned_bounding_box()
+        margin_vec = np.array([margin, margin, margin], dtype=float)
+        crop_box = o3d.geometry.AxisAlignedBoundingBox(
+            aabb.min_bound - margin_vec,
+            aabb.max_bound + margin_vec,
+        )
+        idx = crop_box.get_point_indices_within_bounding_box(scan_data.points)
+        if not idx:
+            return False
+
+        sub_pcd = scan_data.select_by_index(idx)
+        mesh_pcd = mesh_copy.sample_points_uniformly(number_of_points=int(sample_count))
+        distances = sub_pcd.compute_point_cloud_distance(mesh_pcd)
+        return any(float(distance) <= float(threshold) for distance in distances)
+
+    def collision_model_cache(self, robot_name: str) -> Dict[str, Any]:
+        handle = self._handle(robot_name)
+        return {
+            "pin_model": handle.model,
+            "pin_geom_model": copy.deepcopy(handle.geom_model) if handle.geom_model is not None else None,
+            "robot_geom_ids": list(handle.robot_geom_ids),
+        }
+
+    def collision_geometry_summary(self, robot_name: str) -> List[Dict[str, Any]]:
+        handle = self._handle(robot_name)
+        if handle.geom_model is None:
+            return []
+        static_ids = set(handle.static_object_ids)
+        names = list(handle.model.names)
+        summary = []
+        for geom_id, geom in enumerate(handle.geom_model.geometryObjects):
+            parent_joint = int(geom.parentJoint)
+            joint_name = names[parent_joint] if 0 <= parent_joint < len(names) else str(parent_joint)
+            item = {
+                "id": int(geom_id),
+                "name": str(geom.name),
+                "parent_joint": parent_joint,
+                "parent_joint_name": str(joint_name),
+                "kind": "static" if geom_id in static_ids else "robot",
+            }
+            # static object는 world 좌표계에 이미 구운(placement=Identity) mesh라, 이
+            # local AABB가 곧 world AABB다 - "지금 실제로 등록된 배관이 회전된 위치에
+            # 있는지"를 숫자로 바로 확인할 수 있다(collision 원인 진단용).
+            if geom_id in static_ids:
+                try:
+                    box = geom.geometry.aabb_local
+                    item["aabb_min"] = [float(v) for v in box.min_]
+                    item["aabb_max"] = [float(v) for v in box.max_]
+                except Exception:
+                    pass
+            summary.append(item)
+        return summary
+
+    def collision_pair_summary(
+        self,
+        robot_name: str,
+        include_robot_self: bool = True,
+        include_static: bool = True,
+        limit: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        handle = self._handle(robot_name)
+        if handle.geom_model is None:
+            return []
+        static_ids = set(handle.static_object_ids)
+        pairs = []
+        for pair_id, pair in enumerate(handle.geom_model.collisionPairs):
+            first = handle.geom_model.geometryObjects[pair.first]
+            second = handle.geom_model.geometryObjects[pair.second]
+            first_static = int(pair.first) in static_ids
+            second_static = int(pair.second) in static_ids
+            is_static_pair = first_static or second_static
+            if is_static_pair and not include_static:
+                continue
+            if not is_static_pair and not include_robot_self:
+                continue
+            pairs.append({
+                "id": int(pair_id),
+                "first": str(first.name),
+                "second": str(second.name),
+                "kind": "robot_static" if is_static_pair else "robot_self",
+            })
+            if limit is not None and len(pairs) >= int(limit):
+                break
+        return pairs
+
+    def _handle(self, robot_name: str) -> PinocchioRobotHandle:
+        if robot_name not in self._robots:
+            raise KeyError(f"robot is not registered: {robot_name}")
+        return self._robots[robot_name]
+
+    def _build_model_from_urdf(self, urdf_path: str):
+        if hasattr(pin, "buildModelFromUrdf"):
+            return pin.buildModelFromUrdf(urdf_path)
+        if hasattr(pin, "buildModelFromURDF"):
+            return pin.buildModelFromURDF(urdf_path)
+        if hasattr(pin, "buildModelsFromUrdf"):
+            models = pin.buildModelsFromUrdf(urdf_path)
+            if isinstance(models, tuple) and models:
+                return models[0]
+        from pinocchio.robot_wrapper import RobotWrapper
+
+        return RobotWrapper.BuildFromURDF(urdf_path).model
+
+    @staticmethod
+    def _offset_to_transform(offset) -> np.ndarray:
+        if isinstance(offset, dict):
+            if "matrix" in offset:
+                T = np.asarray(offset["matrix"], dtype=float)
+            else:
+                xyz = np.asarray(offset.get("xyz", [0.0, 0.0, 0.0]), dtype=float)
+                rpy = np.asarray(offset.get("rpy", [0.0, 0.0, 0.0]), dtype=float)
+                T = np.eye(4)
+                T[:3, :3] = R.from_euler("xyz", rpy).as_matrix()
+                T[:3, 3] = xyz
+        else:
+            T = np.asarray(offset, dtype=float)
+        if T.shape != (4, 4):
+            raise ValueError(f"pose_to_link_offset must be 4x4, got shape={T.shape}")
+        return T.astype(float, copy=True)
+
+    @staticmethod
+    def _joint_origin_T(joint) -> np.ndarray:
+        T = np.eye(4)
+        origin = getattr(joint, "origin", None)
+        if origin is not None:
+            T[:3, :3] = R.from_euler("xyz", origin.rpy).as_matrix()
+            T[:3, 3] = origin.xyz
+        return T
+
+    @classmethod
+    def _relative_link_transform(cls, urdf: URDF, source_link_name: str, target_link_name: str, fallback_T):
+        child_to_joint = {joint.child: joint for joint in urdf.joints}
+        cache: Dict[str, np.ndarray] = {}
+
+        def root_to_link(link_name: str) -> np.ndarray:
+            if link_name in cache:
+                return cache[link_name]
+            joint = child_to_joint.get(link_name)
+            if joint is None:
+                cache[link_name] = np.eye(4)
+                return cache[link_name]
+            T = root_to_link(joint.parent) @ cls._joint_origin_T(joint)
+            cache[link_name] = T
+            return T
+
+        try:
+            return np.linalg.inv(root_to_link(source_link_name)) @ root_to_link(target_link_name)
+        except Exception:
+            return np.asarray(fallback_T, dtype=float)
+
+    def _ik_result(
+        self,
+        success,
+        q,
+        solver,
+        normalize,
+        iterations,
+        elapsed,
+        position_error,
+        orientation_error,
+        target_T,
+        trace,
+        robot_name,
+        frame_name,
+        position_only=False,
+        failure_info=None,
+        message="",
+    ) -> IKResult:
+        final_T = self.frame_world_T(robot_name, q, frame_name) if q is not None else None
+        return IKResult(
+            success=bool(success),
+            q=None if q is None else np.asarray(q, dtype=float).copy(),
+            solver=solver,
+            normalize=bool(normalize),
+            iterations=int(iterations),
+            elapsed=float(elapsed),
+            position_only=bool(position_only),
+            position_error=float(position_error),
+            orientation_error=float(orientation_error),
+            final_T=final_T,
+            target_T=np.asarray(target_T, dtype=float).copy(),
+            trace=trace,
+            failure_info=dict(failure_info or {}),
+            message=message,
+        )
+
+    def _require_collision(self, handle: PinocchioRobotHandle) -> None:
+        if handle.geom_model is None or handle.geom_data is None:
+            raise RuntimeError(f"collision is not configured: {handle.description.name}")
+
+    def _static_bvh_for_mesh(self, mesh):
+        """mesh 정점/삼각형으로 hppfcl BVH를 만들되, 같은 mesh 객체면 캐시해서 재사용한다.
+
+        BVH 생성은 정점/삼각형을 Python 루프로 hppfcl 벡터에 하나씩 append하는 과정이라
+        100k 규모 배관 mesh에서 수 초씩 걸린다. mesh 객체(id)가 같으면(예: IK check 뒤 이어지는
+        path planning이 같은 base-frame 배관 mesh를 재사용) 이미 만든 BVH를 그대로 쓴다.
+        BVH는 collision 질의에서 읽기 전용이라 여러 geom_model이 공유해도 안전하다.
+        """
+        cache = getattr(self, "_static_bvh_cache", None)
+        if cache is None:
+            cache = {}
+            self._static_bvh_cache = cache
+        key = id(mesh)
+        entry = cache.get(key)
+        if entry is not None and entry[0] is mesh:
+            return entry[1]
+        vertices = np.asarray(mesh.vertices, dtype=float)
+        triangles = np.asarray(mesh.triangles if hasattr(mesh, "triangles") else mesh.faces, dtype=np.int32)
+        if triangles.shape[1] > 3:
+            triangles = triangles[:, :3]
+        bvh = build_bvh_model(hppfcl, vertices, triangles)
+        # 무한정 커지지 않게 최근 소수만 유지한다. mesh 참조를 같이 보관해 id 재사용을 막는다.
+        if len(cache) > 8:
+            cache.clear()
+        cache[key] = (mesh, bvh)
+        return bvh
+
+    def _add_static_mesh(self, handle: PinocchioRobotHandle, mesh, recreate_data=True):
+        bvh = self._static_bvh_for_mesh(mesh)
+        geom_obj = pin.GeometryObject(
+            f"collision_object_{len(handle.static_object_ids)}",
+            0,
+            pin.SE3.Identity(),
+            bvh,
+        )
+        geom_id = handle.geom_model.addGeometryObject(geom_obj)
+        for robot_geom_id in handle.robot_geom_ids:
+            pair = pin.CollisionPair(robot_geom_id, geom_id)
+            if not handle.geom_model.existCollisionPair(pair):
+                handle.geom_model.addCollisionPair(pair)
+        handle.static_object_ids.append(geom_id)
+        if recreate_data:
+            handle.geom_data = pin.GeometryData(handle.geom_model)
+        return geom_id
+
+    def _remove_adjacent_pairs(self, handle: PinocchioRobotHandle) -> None:
+        kept_pairs = []
+        for pair in list(handle.geom_model.collisionPairs):
+            first = handle.geom_model.geometryObjects[pair.first]
+            second = handle.geom_model.geometryObjects[pair.second]
+            if self._is_adjacent_pair(handle.model, first.parentJoint, second.parentJoint):
+                continue
+            kept_pairs.append(pin.CollisionPair(pair.first, pair.second))
+        handle.geom_model.removeAllCollisionPairs()
+        for pair in kept_pairs:
+            handle.geom_model.addCollisionPair(pair)
+
+    def _is_adjacent_pair(self, model, joint_a, joint_b) -> bool:
+        if joint_a == joint_b:
+            return True
+        try:
+            return model.parents[joint_a] == joint_b or model.parents[joint_b] == joint_a
+        except Exception:
+            return False
+
+    def _active_collision_pairs(self, handle: PinocchioRobotHandle) -> List[tuple]:
+        pairs = []
+        for idx, result in enumerate(handle.geom_data.collisionResults):
+            if not result.isCollision():
+                continue
+            pair = handle.geom_model.collisionPairs[idx]
+            first = handle.geom_model.geometryObjects[pair.first].name
+            second = handle.geom_model.geometryObjects[pair.second].name
+            pairs.append((str(first), str(second)))
+        return pairs

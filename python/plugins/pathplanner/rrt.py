@@ -1,177 +1,88 @@
-import numpy as np
 import json
 import os
-import open3d as o3d
-from typing import List, Union
-import sys
 
-# Adjust path to import PlannerBase if not installed as package
-# # sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../pluginbase')))
+import numpy as np
+
 from plugins.pluginbase.plannerbase import PlannerBase
 
+
 class RRT(PlannerBase):
-    def __init__(self, config_path: str = None):
+    """Workspace RRT planner."""
+
+    def __init__(self, config_path=None):
         super().__init__()
         if config_path is None:
-            # Default to json with same name
-            config_path = os.path.splitext(__file__)[0] + '.json'
-        
-        with open(config_path, 'r') as f:
-            self.config = json.load(f)
-            
-        self.step_size = self.config.get("step_size", 1.0)
-        self.max_iter = self.config.get("max_iter", 1000)
-        self.goal_bias = self.config.get("goal_bias", 0.1)
-        self.bounds = self.config.get("workspace_bounds", {
-            "x_min": -10.0, "x_max": 10.0,
-            "y_min": -10.0, "y_max": 10.0,
-            "z_min": -10.0, "z_max": 10.0
-        })
-        
-        self.scene = None # Open3D RaycastingScene
+            config_path = os.path.splitext(__file__)[0] + ".json"
+        with open(config_path, "r") as file:
+            self.config = json.load(file)
+        self.step_size = float(self.config.get("step_size", 1.0))
+        self.max_iter = int(self.config.get("max_iter", 1000))
+        self.goal_bias = float(self.config.get("goal_bias", 0.05))
+        self.normalize_joint_space = True
+        self.debug_convergence = bool(self.config.get("debug_convergence", True))
+        self.debug_output_dir = self.config.get("debug_output_dir", "debug/rrt")
+        self.bounds = self.config.get("workspace_bounds", {})
+        self.configure_fixed_joints(
+            fixed_joints=self.config.get("fixed_joints"),
+            fixed_joint_indices=self.config.get("fixed_joint_indices"),
+            fixed_joint_values=self.config.get("fixed_joint_values"),
+        )
+        self.configure_collision(self.config, default_sample_resolution=self.step_size)
 
-    def add_static_object(self, object_model):
-        """
-        Add object to collision scene.
-        Assumes object_model is an open3d.geometry.TriangleMesh or similar.
-        """
-        self.static_objects.append(object_model)
-        # Re-build scene for collision checking
-        # For simple collision checking with Open3D, we can use RaycastingScene
-        # We need to convert legacy Mesh to Tensor Mesh if needed, or use legacy collision
-        
-        # Here we will init the raycasting scene if we have objects
-        if self.scene is None:
-             self.scene = o3d.t.geometry.RaycastingScene()
-        
-        # Add mesh to scene
-        # Note: Open3D RaycastingScene expects Tensor-based TriangleMesh
-        try:
-            t_mesh = o3d.t.geometry.TriangleMesh.from_legacy(object_model)
-            self.scene.add_triangles(t_mesh)
-        except Exception as e:
-            print(f"Error adding object to scene: {e}")
-
-    def generate(self, current_pose: Union[List[float], np.ndarray], target_pose: Union[List[float], np.ndarray]) -> List[np.ndarray]:
-        current_pose = np.array(current_pose, dtype=float)
-        target_pose = np.array(target_pose, dtype=float)
-        
-        # Extract position (first 3 elements) for RRT growth
+    def _generate_workspace(self, current_pose, target_pose, step_callback=None):
+        current_pose = np.asarray(current_pose, dtype=float)
+        target_pose = np.asarray(target_pose, dtype=float)
         start_pos = current_pose[:3]
         goal_pos = target_pose[:3]
-        
         nodes = [start_pos]
-        parents = {0: None} # child_index: parent_index
-        
-        path_found = False
-        goal_node_idx = -1
-        
-        for i in range(self.max_iter):
-            # Sample random point (with goal bias)
+        parents = {0: None}
+        goal_node_idx = None
+
+        for _ in range(self.max_iter):
             if np.random.random() < self.goal_bias:
-                rnd_point = goal_pos
+                sample = goal_pos
             else:
-                rnd_point = np.array([
-                    np.random.uniform(self.bounds['x_min'], self.bounds['x_max']),
-                    np.random.uniform(self.bounds['y_min'], self.bounds['y_max']),
-                    np.random.uniform(self.bounds['z_min'], self.bounds['z_max'])
+                sample = np.asarray([
+                    np.random.uniform(self.bounds["x_min"], self.bounds["x_max"]),
+                    np.random.uniform(self.bounds["y_min"], self.bounds["y_max"]),
+                    np.random.uniform(self.bounds["z_min"], self.bounds["z_max"]),
                 ])
-                
-            # Find nearest node
-            dists = np.linalg.norm(np.array(nodes) - rnd_point, axis=1)
-            nearest_idx = np.argmin(dists)
-            nearest_node = nodes[nearest_idx]
-            
-            # Steer
-            direction = rnd_point - nearest_node
-            length = np.linalg.norm(direction)
-            if length == 0:
+            distances = np.linalg.norm(np.asarray(nodes) - sample, axis=1)
+            nearest_idx = int(np.argmin(distances))
+            nearest = nodes[nearest_idx]
+            direction = sample - nearest
+            length = float(np.linalg.norm(direction))
+            if length == 0.0:
                 continue
-                
-            direction = direction / length
-            new_point = nearest_node + direction * min(self.step_size, length)
-            
-            # Collision Check
-            if not self._check_collision(nearest_node, new_point):
-                # Add node
-                nodes.append(new_point)
-                new_idx = len(nodes) - 1
-                parents[new_idx] = nearest_idx
-                
-                # Check if close to goal
-                if np.linalg.norm(new_point - goal_pos) < self.step_size:
-                    # Try to connect directly to goal
-                    if not self._check_collision(new_point, goal_pos):
-                        nodes.append(goal_pos)
-                        goal_node_idx = len(nodes) - 1
-                        parents[goal_node_idx] = new_idx
-                        path_found = True
-                        break
-                        
-        if path_found:
-            # Reconstruct path
-            path = []
-            curr_idx = goal_node_idx
-            while curr_idx is not None:
-                pose = np.copy(current_pose) # Copy structure
-                pose[:3] = nodes[curr_idx] # Update position
-                # For orientation, we can interpolate or just keep start/goal depending on req.
-                # Here simply copying start orientation for intermediate nodes, 
-                # and setting goal orientation for the last one is simplest, 
-                # but user asked for waypoints. 
-                # Let's interpolate orientation or just assign dont-care for now?
-                # User said: "return list of waypoints... data is 3D coord and orientation"
-                # For simplicity in basic RRT, we just linearly interpolate or set. 
-                # For now, let's just use the target orientation for the final node 
-                # and interpolated or start orientation for others.
-                # Actually, standard RRT is only position. 
-                # Let's just use start orientation for all except last?
-                if curr_idx == goal_node_idx:
-                    # Handle NaN in target_pose for Don't Care
-                    final_orient = target_pose[3:]
-                    current_orient = current_pose[3:]
-                    # If NaN, use current orientation or keep it 0? 
-                    # User says NaN means don't care.
-                    # We will output a concrete value.
-                    pose[3:] = np.where(np.isnan(final_orient), current_orient, final_orient)
-                else:
-                    pose[3:] = current_pose[3:]
-                
-                path.append(pose)
-                curr_idx = parents[curr_idx]
-            return path[::-1] # Reverse
-        else:
+            new_point = nearest + direction / length * min(self.step_size, length)
+            if self._check_collision(nearest, new_point):
+                continue
+            nodes.append(new_point)
+            new_idx = len(nodes) - 1
+            parents[new_idx] = nearest_idx
+            if step_callback is not None:
+                step_callback(nodes, parents)
+            if np.linalg.norm(new_point - goal_pos) < self.step_size:
+                if not self._check_collision(new_point, goal_pos):
+                    nodes.append(goal_pos)
+                    goal_node_idx = len(nodes) - 1
+                    parents[goal_node_idx] = new_idx
+                    break
+
+        if goal_node_idx is None:
             print("Path not found within max_iter")
             return []
-
-    def _check_collision(self, p1, p2):
-        """
-        Check collision between p1 and p2.
-        Returns True if collision.
-        """
-        if self.scene is None:
-            return False
-            
-        # Create a query ray
-        # Ray casting from p1 to p2
-        direction = p2 - p1
-        length = np.linalg.norm(direction)
-        if length < 1e-6:
-            return False
-            
-        direction /= length
-        
-        # Cast ray
-        # Open3D ray format: [ox, oy, oz, dx, dy, dz]
-        # output is a dictionary
-        rays = o3d.core.Tensor([[p1[0], p1[1], p1[2], direction[0], direction[1], direction[2]]], dtype=o3d.core.Dtype.Float32)
-        ans = self.scene.cast_rays(rays)
-        
-        # t_hit is the distance to the hit.
-        t_hit = ans['t_hit'][0].item()
-        
-        # If t_hit is finite and < length, we hit something before p2
-        if np.isfinite(t_hit) and t_hit < length:
-            return True
-        
-        return False
+        path = []
+        current_idx = goal_node_idx
+        while current_idx is not None:
+            pose = current_pose.copy()
+            pose[:3] = nodes[current_idx]
+            if current_idx == goal_node_idx:
+                pose[3:] = np.where(
+                    np.isnan(target_pose[3:]), current_pose[3:], target_pose[3:]
+                )
+            else:
+                pose[3:] = current_pose[3:]
+            path.append(pose)
+            current_idx = parents[current_idx]
+        return path[::-1]

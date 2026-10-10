@@ -1,35 +1,20 @@
 import numpy as np
-import json
 import os
-import sys
-import open3d as o3d
 from typing import List, Union, Tuple
 import heapq
 
-# Adjust path to import PlannerBase
-# sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../pluginbase')))
-from plugins.pluginbase.plannerbase import PlannerBase
+from plugins.pathplanner.rrt_star import RRTStar
 
-class BITStar(PlannerBase):
+class BITStar(RRTStar):
     def __init__(self, config_path: str = None):
-        super().__init__()
         if config_path is None:
             config_path = os.path.splitext(__file__)[0] + '.json'
-        
-        with open(config_path, 'r') as f:
-            self.config = json.load(f)
+        super().__init__(config_path)
+        if "debug_output_dir" not in self.config:
+            self.debug_output_dir = os.path.join(os.getcwd(), "debug", "bit_star")
             
         self.batch_size = self.config.get("batch_size", 100)
         self.eta = self.config.get("eta", 1.1) # Pruning factor? Or radius scalar? RGG radius often uses eta * (log n / n)^(1/d)
-        self.max_iter = self.config.get("max_iter", 1000)
-        self.bounds = self.config.get("workspace_bounds", {
-            "x_min": -50.0, "x_max": 50.0,
-            "y_min": -50.0, "y_max": 50.0,
-            "z_min": -50.0, "z_max": 50.0
-        })
-        
-        self.scene = None
-        
         # BIT* State
         self.samples = [] # Implicit RGG vertices
         self.V = set() # Tree vertices (indices in samples)
@@ -42,33 +27,6 @@ class BITStar(PlannerBase):
         self.c_best = float('inf')
         self.goal_idx = -1
         self.start_idx = -1
-
-    def add_static_object(self, object_model):
-        self.static_objects.append(object_model)
-        if self.scene is None:
-             self.scene = o3d.t.geometry.RaycastingScene()
-        
-        try:
-            t_mesh = o3d.t.geometry.TriangleMesh.from_legacy(object_model)
-            self.scene.add_triangles(t_mesh)
-        except Exception as e:
-            print(f"Error adding object to scene: {e}")
-
-    def _check_collision(self, p1, p2):
-        if self.scene is None: return False
-        
-        direction = p2 - p1
-        length = np.linalg.norm(direction)
-        if length < 1e-6: return False
-        
-        direction /= length
-        rays = o3d.core.Tensor([[p1[0], p1[1], p1[2], direction[0], direction[1], direction[2]]], dtype=o3d.core.Dtype.Float32)
-        ans = self.scene.cast_rays(rays)
-        t_hit = ans['t_hit'][0].item()
-        
-        if np.isfinite(t_hit) and t_hit < length:
-            return True
-        return False
 
     def _calc_heuristic(self, p1, p2):
         return np.linalg.norm(p1 - p2)
@@ -91,7 +49,12 @@ class BITStar(PlannerBase):
         # Simplified BIT*: Just don't expand nodes that exceed c_best
         pass
         
-    def generate(self, current_pose: Union[List[float], np.ndarray], target_pose: Union[List[float], np.ndarray]) -> List[np.ndarray]:
+    def _generate_workspace(
+        self,
+        current_pose: Union[List[float], np.ndarray],
+        target_pose: Union[List[float], np.ndarray],
+        step_callback=None,
+    ) -> List[np.ndarray]:
         current_pose = np.array(current_pose, dtype=float)
         target_pose = np.array(target_pose, dtype=float)
         start_pos = current_pose[:3]
