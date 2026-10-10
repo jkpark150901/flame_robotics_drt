@@ -1,6 +1,5 @@
 from dataclasses import dataclass, fields
 import open3d as o3d
-from open3d.cpu.pybind.geometry import PointCloud  # type: ignore
 import numpy as np
 from numpy.typing import NDArray
 try:
@@ -49,7 +48,7 @@ class InspectionPoseSlot:
         raise KeyError(f"selected RT pose not found: {self.rt_selection.selected_rt}")
 
 class EndEffectorPoseOptimizer:
-    _scan_data: PointCloud
+    _scan_data: o3d.geometry.PointCloud
 
     # DDA 충돌 모델 정보
     __dda_mesh: o3d.geometry.TriangleMesh

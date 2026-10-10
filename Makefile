@@ -1,14 +1,17 @@
-# Set this to a specific interpreter when using conda or a custom venv.
-# Example: PYTHON_CONFIG := C:/Users/admin/miniforge3/envs/drt/python.exe
+# Use the active venv, then the project venv, then Python from PATH.
+# Override explicitly with: make viewervedo PYTHON=/path/to/python
+PYTHON ?= $(if $(VIRTUAL_ENV),$(VIRTUAL_ENV)/bin/python,$(if $(wildcard $(CURDIR)/venv/bin/python),$(CURDIR)/venv/bin/python,python3))
 
-
-PYTHON := /home/user/miniforge3/envs/drt/bin/python
+.PHONY: viewervedo viewer robotcore controller zproxy simtool verifycobot verifypositioner run run-embedded
 
 PYTHON_CMD := "$(PYTHON)"
 
 # 3D Viewer with Vedo 3D Library
 viewervedo:
 	$(PYTHON_CMD) ./python/viewervedo.py --config $(CURDIR)/python/viewervedo.cfg
+
+# Short alias for the Vedo viewer
+viewer: viewervedo
 
 # Standalone pose/path planning service
 robotcore:
