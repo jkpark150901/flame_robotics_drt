@@ -1,0 +1,140 @@
+{
+  "n_total": 18,
+  "n_success": 15,
+  "n_failed": 3,
+  "by_category": {
+    "timeout_approximate": 3
+  },
+  "unreached_groups": [],
+  "failures": [
+    {
+      "index": 8,
+      "group_name": "Point 3 - Inspection pose 2",
+      "robot_name": "dda_rb10_1300e",
+      "pose_name": "DDA",
+      "status": "failed",
+      "status_kind": "failed",
+      "category": "timeout_approximate",
+      "message": "planning failed for target: timeout_approximate",
+      "n_waypoints": 1,
+      "has_path": true,
+      "elapsed": 86.93269160506316,
+      "positioner_r_deg": 270.0,
+      "planner_stats": {
+        "state_validity_calls": 16004,
+        "collision_rejects": 2172,
+        "workspace_rejects": 0,
+        "solve_time": 85.25227714399807,
+        "algorithm": "RRTstar",
+        "max_iter": 16000,
+        "iterations": 16004,
+        "timeout_sec": 299.96454479708336,
+        "iteration_ptc_error": null
+      },
+      "ik_failure": null,
+      "n_colliding_edges": 0,
+      "colliding_edges": [],
+      "goal_q": null,
+      "ik_goal_q": [
+        0.7446500078885359,
+        0.6937127954289233,
+        1.6855195587788185,
+        2.117675898291271,
+        -2.8311890537560918,
+        2.216664402127452,
+        -1.0499472381953496,
+        0.1341432061812786
+      ],
+      "diag": null
+    },
+    {
+      "index": 12,
+      "group_name": "Point 2 - Inspection pose 2",
+      "robot_name": "dda_rb10_1300e",
+      "pose_name": "DDA",
+      "status": "failed",
+      "status_kind": "failed",
+      "category": "timeout_approximate",
+      "message": "planning failed for target: timeout_approximate",
+      "n_waypoints": 1,
+      "has_path": true,
+      "elapsed": 66.32790546608157,
+      "positioner_r_deg": 270.0,
+      "planner_stats": {
+        "state_validity_calls": 16004,
+        "collision_rejects": 2250,
+        "workspace_rejects": 0,
+        "solve_time": 64.18083646707237,
+        "algorithm": "RRTstar",
+        "max_iter": 16000,
+        "iterations": 16004,
+        "timeout_sec": 299.9701138730161,
+        "iteration_ptc_error": null
+      },
+      "ik_failure": null,
+      "n_colliding_edges": 0,
+      "colliding_edges": [],
+      "goal_q": null,
+      "ik_goal_q": [
+        0.3827315019923066,
+        0.6953910281988854,
+        1.7176882182437212,
+        2.089467606414159,
+        -2.8677629357166956,
+        2.262938522010369,
+        -1.0523696318105644,
+        0.1713228558465058
+      ],
+      "diag": null
+    },
+    {
+      "index": 13,
+      "group_name": "Point 2 - Inspection pose 2",
+      "robot_name": "rb20_1900es",
+      "pose_name": "RT",
+      "status": "failed",
+      "status_kind": "failed",
+      "category": "timeout_approximate",
+      "message": "planning failed for target: timeout_approximate",
+      "n_waypoints": 1,
+      "has_path": true,
+      "elapsed": 168.0144340118859,
+      "positioner_r_deg": 270.0,
+      "planner_stats": {
+        "state_validity_calls": 16001,
+        "collision_rejects": 2529,
+        "workspace_rejects": 0,
+        "solve_time": 166.85669857705943,
+        "algorithm": "RRTstar",
+        "max_iter": 16000,
+        "iterations": 16001,
+        "timeout_sec": 299.9973504389636,
+        "iteration_ptc_error": null
+      },
+      "ik_failure": null,
+      "n_colliding_edges": 0,
+      "colliding_edges": [],
+      "goal_q": [
+        1.8346349996958609,
+        0.0,
+        -1.946582467166033,
+        0.8031493480482625,
+        0.41926885694395816,
+        2.810681197655546,
+        -1.775016246679001,
+        1.1044833289862688
+      ],
+      "ik_goal_q": [
+        1.8346349996958609,
+        0.0,
+        -1.946582467166033,
+        0.8031493480482625,
+        0.41926885694395816,
+        2.810681197655546,
+        -1.775016246679001,
+        1.1044833289862688
+      ],
+      "diag": null
+    }
+  ]
+}

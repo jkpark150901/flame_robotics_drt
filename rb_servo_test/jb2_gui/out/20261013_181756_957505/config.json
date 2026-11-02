@@ -1,0 +1,35 @@
+{
+  "ip": "10.0.2.7",
+  "base": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "end": [
+    30.0,
+    15.0,
+    -10.0,
+    20.0,
+    5.0,
+    -15.0
+  ],
+  "segments": 100,
+  "mode": "simulation",
+  "method": "jb2",
+  "basis": "max_joint",
+  "blend": 50.0,
+  "gain": 1.0,
+  "alpha": 1.0,
+  "speed": 50.0,
+  "accel": 100.0,
+  "hz": 100.0,
+  "window": 0.1,
+  "timeout": 120.0,
+  "servo_period_ms": 10.0,
+  "via": [],
+  "speed_bar": 1.0,
+  "via_sample_indices": []
+}

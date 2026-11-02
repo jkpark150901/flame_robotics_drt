@@ -26,16 +26,13 @@ _BODIES: Dict[Tuple[str, ...], Dict[str, Any]] = {}
 
 
 def _ensure_client() -> int:
-    global _CLIENT_ID
     if pb is None:
         raise RuntimeError(
             "PyBullet IK backend is not available. Install it with: pip install pybullet"
         )
-    if _CLIENT_ID is None:
-        # DIRECT: GUI 없는 headless 물리 클라이언트. 렌더링/충돌 계산에는 안 쓰고
-        # IK(자코비안 기반 뉴턴 스텝)만 여기서 돌린다.
-        _CLIENT_ID = pb.connect(pb.DIRECT)
-    return _CLIENT_ID
+    # shared with the collision scene (pybullet_collision._ensure_client): one client per process, see its docstring
+    from plugins.robotics.pybullet_collision import _ensure_client as _shared_client
+    return _shared_client()
 
 
 def _quat_from_R(R: np.ndarray) -> List[float]:
@@ -77,15 +74,18 @@ def _get_body(urdf_path: str, base_T: np.ndarray, joint_names: Sequence[str]) ->
 
     client = _ensure_client()
     base_T = np.asarray(base_T, dtype=float)
-    body_id = pb.loadURDF(
-        str(urdf_path),
-        basePosition=base_T[:3, 3].tolist(),
-        baseOrientation=_quat_from_R(base_T[:3, :3]),
-        useFixedBase=True,
-        physicsClientId=client,
-    )
+    from plugins.robotics.pybullet_scene import _quiet_stdio  # PyBullet prints "No inertial data" per link on the C stdout
+    with _quiet_stdio():
+        body_id = pb.loadURDF(
+            str(urdf_path),
+            basePosition=base_T[:3, 3].tolist(),
+            baseOrientation=_quat_from_R(base_T[:3, :3]),
+            useFixedBase=True,
+            physicsClientId=client,
+        )
 
     movable_indices: List[int] = []
+    limits: List[Tuple[float, float]] = []   # (lower, upper) per movable joint, same order as movable_indices
     joint_index_by_name: Dict[str, int] = {}
     link_index_by_name: Dict[str, int] = {}
     for i in range(pb.getNumJoints(body_id, physicsClientId=client)):
@@ -97,6 +97,10 @@ def _get_body(urdf_path: str, base_T: np.ndarray, joint_names: Sequence[str]) ->
         if joint_type != pb.JOINT_FIXED:
             joint_index_by_name[joint_name] = i
             movable_indices.append(i)
+            lower, upper = float(info[8]), float(info[9])
+            if not lower < upper:  # continuous / no limit in the URDF
+                lower, upper = -2.0 * np.pi, 2.0 * np.pi
+            limits.append((lower, upper))
 
     # 우리 joint_names(raw q 순서)를 pybullet joint index로 매핑한다. 이름이 URDF와
     # 다르면(연결이 안 되면) 매핑에서 빠지고 그 관절은 IK 대상에서 제외된다.
@@ -106,6 +110,8 @@ def _get_body(urdf_path: str, base_T: np.ndarray, joint_names: Sequence[str]) ->
         "client": client,
         "body_id": body_id,
         "movable_indices": movable_indices,
+        "lower": np.array([l for l, _ in limits], dtype=float),
+        "upper": np.array([u for _, u in limits], dtype=float),
         "joint_index_by_name": joint_index_by_name,
         "link_index_by_name": link_index_by_name,
         "order": order,
@@ -144,19 +150,29 @@ def solve(
     target_pos = target_world_T[:3, 3].tolist()
     target_orn = _quat_from_R(target_world_T[:3, :3])
 
-    joint_damping = [float(damping)] * len(order)
+    movable = body["movable_indices"]
+    lower, upper = body["lower"], body["upper"]
+    rest = [float(pb.getJointState(body_id, j, physicsClientId=client)[0]) for j in movable]
+    # Joint limits must be passed explicitly: without them calculateInverseKinematics ignores the URDF limits and
+    # e.g. drove the RT carriage (prismatic, [0, 0.7] m) to -1.2 m, pushing the arm into its own carriage plate.
     result = pb.calculateInverseKinematics(
         body_id,
         end_effector_link,
         target_pos,
         target_orn,
-        jointDamping=joint_damping,
+        lowerLimits=lower.tolist(),
+        upperLimits=upper.tolist(),
+        jointRanges=(upper - lower).tolist(),
+        restPoses=rest,
+        jointDamping=[float(damping)] * len(movable),
         maxNumIterations=int(max_iter),
         residualThreshold=float(tol),
         physicsClientId=client,
     )
-    # calculateInverseKinematics는 body의 "movable joint 전체" 순서로 반환한다.
-    result_by_index = dict(zip(body["movable_indices"], result))
+    # calculateInverseKinematics는 body의 "movable joint 전체" 순서로 반환한다. null-space 방식이라 limit을
+    # 살짝 넘길 수 있어 clip한다 - clip으로 pose가 틀어지면 호출 측 FK 오차 판정에서 걸러진다.
+    result = np.clip(np.asarray(result, dtype=float), lower, upper)
+    result_by_index = dict(zip(movable, result))
     q_out = q_init.copy()
     for i, joint_idx in enumerate(order):
         if joint_idx in result_by_index:

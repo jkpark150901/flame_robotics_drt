@@ -1,0 +1,1682 @@
+[
+  {
+    "time": 1791963864.6920621,
+    "stage": "initial",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963864.7033885,
+    "stage": "initial",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963865.0044374,
+    "stage": "move_to_start",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963865.0254993,
+    "stage": "move_to_start",
+    "response": "{ \"type\": Info, \"category\": \"motion_changed\", \"msg\": \"1200\" }"
+  },
+  {
+    "time": 1791963868.5448208,
+    "stage": "move_to_start",
+    "response": "{ \"type\": Info, \"category\": \"motion_changed\", \"msg\": \"0\" }"
+  },
+  {
+    "time": 1791963868.8612502,
+    "stage": "servo[0]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963868.8809216,
+    "stage": "servo[1]",
+    "response": "{ \"type\": Info, \"category\": \"motion_changed\", \"msg\": \"7100\" }"
+  },
+  {
+    "time": 1791963868.8814473,
+    "stage": "servo[1]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963868.9012828,
+    "stage": "servo[2]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963868.921176,
+    "stage": "servo[3]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963868.9414089,
+    "stage": "servo[4]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963868.9611695,
+    "stage": "servo[5]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963868.981398,
+    "stage": "servo[6]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.0012412,
+    "stage": "servo[7]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.0212874,
+    "stage": "servo[8]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.0413988,
+    "stage": "servo[9]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.0612383,
+    "stage": "servo[10]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.0812757,
+    "stage": "servo[11]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.1013796,
+    "stage": "servo[12]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.121239,
+    "stage": "servo[13]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.1412365,
+    "stage": "servo[14]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.1611865,
+    "stage": "servo[15]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.1813736,
+    "stage": "servo[16]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.2012053,
+    "stage": "servo[17]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.2214139,
+    "stage": "servo[18]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.2412386,
+    "stage": "servo[19]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.2612214,
+    "stage": "servo[20]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.281281,
+    "stage": "servo[21]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.3012922,
+    "stage": "servo[22]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.3213265,
+    "stage": "servo[23]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.34143,
+    "stage": "servo[24]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.3613622,
+    "stage": "servo[25]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.3814008,
+    "stage": "servo[26]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.401406,
+    "stage": "servo[27]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.4213467,
+    "stage": "servo[28]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.4414244,
+    "stage": "servo[29]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.461356,
+    "stage": "servo[30]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.4813955,
+    "stage": "servo[31]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.5014062,
+    "stage": "servo[32]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.5212364,
+    "stage": "servo[33]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.5414019,
+    "stage": "servo[34]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.5613453,
+    "stage": "servo[35]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.5814035,
+    "stage": "servo[36]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.6013567,
+    "stage": "servo[37]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.6212957,
+    "stage": "servo[38]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.6412451,
+    "stage": "servo[39]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.6614106,
+    "stage": "servo[40]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.6812706,
+    "stage": "servo[41]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.7012725,
+    "stage": "servo[42]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.7212367,
+    "stage": "servo[43]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.7412295,
+    "stage": "servo[44]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.7611804,
+    "stage": "servo[45]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.7812707,
+    "stage": "servo[46]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.801116,
+    "stage": "servo[47]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.8212426,
+    "stage": "servo[48]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.8414023,
+    "stage": "servo[49]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.8612318,
+    "stage": "servo[50]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.8812368,
+    "stage": "servo[51]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.9014018,
+    "stage": "servo[52]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.9212391,
+    "stage": "servo[53]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.941402,
+    "stage": "servo[54]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.961243,
+    "stage": "servo[55]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963869.981405,
+    "stage": "servo[56]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.0014005,
+    "stage": "servo[57]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.0212438,
+    "stage": "servo[58]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.0413976,
+    "stage": "servo[59]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.0613956,
+    "stage": "servo[60]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.0812058,
+    "stage": "servo[61]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.101204,
+    "stage": "servo[62]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.1213646,
+    "stage": "servo[63]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.141413,
+    "stage": "servo[64]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.1614003,
+    "stage": "servo[65]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.1811876,
+    "stage": "servo[66]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.2014093,
+    "stage": "servo[67]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.2214088,
+    "stage": "servo[68]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.2414072,
+    "stage": "servo[69]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.261401,
+    "stage": "servo[70]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.2814019,
+    "stage": "servo[71]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.3014019,
+    "stage": "servo[72]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.3214135,
+    "stage": "servo[73]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.3414102,
+    "stage": "servo[74]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.361396,
+    "stage": "servo[75]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.3812418,
+    "stage": "servo[76]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.4013562,
+    "stage": "servo[77]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.4212055,
+    "stage": "servo[78]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.4412918,
+    "stage": "servo[79]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.4612808,
+    "stage": "servo[80]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.4812276,
+    "stage": "servo[81]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.501235,
+    "stage": "servo[82]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.5212355,
+    "stage": "servo[83]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.5413084,
+    "stage": "servo[84]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.5611997,
+    "stage": "servo[85]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.581449,
+    "stage": "servo[86]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.601241,
+    "stage": "servo[87]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.6212409,
+    "stage": "servo[88]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.641241,
+    "stage": "servo[89]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.66134,
+    "stage": "servo[90]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.6814034,
+    "stage": "servo[91]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.7014036,
+    "stage": "servo[92]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.721419,
+    "stage": "servo[93]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.7412505,
+    "stage": "servo[94]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.761187,
+    "stage": "servo[95]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.7812889,
+    "stage": "servo[96]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.8012402,
+    "stage": "servo[97]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.8214018,
+    "stage": "servo[98]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.8412864,
+    "stage": "servo[99]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.8612783,
+    "stage": "servo[100]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.88144,
+    "stage": "servo[101]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.901243,
+    "stage": "servo[102]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.9214084,
+    "stage": "servo[103]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.9413562,
+    "stage": "servo[104]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.9611902,
+    "stage": "servo[105]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963870.9812543,
+    "stage": "servo[106]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.001082,
+    "stage": "servo[107]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.021237,
+    "stage": "servo[108]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.041218,
+    "stage": "servo[109]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.061182,
+    "stage": "servo[110]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.0810952,
+    "stage": "servo[111]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.1012714,
+    "stage": "servo[112]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.1212404,
+    "stage": "servo[113]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.1412463,
+    "stage": "servo[114]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.1611998,
+    "stage": "servo[115]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.1812499,
+    "stage": "servo[116]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.2012382,
+    "stage": "servo[117]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.221278,
+    "stage": "servo[118]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.241317,
+    "stage": "servo[119]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.2614017,
+    "stage": "servo[120]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.2814078,
+    "stage": "servo[121]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.3013978,
+    "stage": "servo[122]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.3212411,
+    "stage": "servo[123]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.3413594,
+    "stage": "servo[124]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.3614116,
+    "stage": "servo[125]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.3814027,
+    "stage": "servo[126]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.4013803,
+    "stage": "servo[127]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.421459,
+    "stage": "servo[128]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.4414175,
+    "stage": "servo[129]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.4612372,
+    "stage": "servo[130]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.481402,
+    "stage": "servo[131]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.501399,
+    "stage": "servo[132]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.5212457,
+    "stage": "servo[133]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.5414095,
+    "stage": "servo[134]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.5614014,
+    "stage": "servo[135]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.581239,
+    "stage": "servo[136]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.6014006,
+    "stage": "servo[137]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.621247,
+    "stage": "servo[138]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.641247,
+    "stage": "servo[139]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.6612477,
+    "stage": "servo[140]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.6814125,
+    "stage": "servo[141]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.701241,
+    "stage": "servo[142]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.7212262,
+    "stage": "servo[143]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.74128,
+    "stage": "servo[144]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.7612283,
+    "stage": "servo[145]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.7811878,
+    "stage": "servo[146]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.8012679,
+    "stage": "servo[147]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.8214269,
+    "stage": "servo[148]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.8414106,
+    "stage": "servo[149]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.8614016,
+    "stage": "servo[150]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.8814142,
+    "stage": "servo[151]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.9013586,
+    "stage": "servo[152]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.92142,
+    "stage": "servo[153]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.9414032,
+    "stage": "servo[154]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.9612522,
+    "stage": "servo[155]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963871.9812455,
+    "stage": "servo[156]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.0012465,
+    "stage": "servo[157]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.0211961,
+    "stage": "servo[158]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.0412529,
+    "stage": "servo[159]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.0612469,
+    "stage": "servo[160]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.0813887,
+    "stage": "servo[161]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.101298,
+    "stage": "servo[162]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.1212127,
+    "stage": "servo[163]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.1412785,
+    "stage": "servo[164]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.1612518,
+    "stage": "servo[165]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.1814082,
+    "stage": "servo[166]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.201224,
+    "stage": "servo[167]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.2214074,
+    "stage": "servo[168]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.241245,
+    "stage": "servo[169]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.261242,
+    "stage": "servo[170]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.281415,
+    "stage": "servo[171]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.3012397,
+    "stage": "servo[172]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.3212364,
+    "stage": "servo[173]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.3412344,
+    "stage": "servo[174]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.361401,
+    "stage": "servo[175]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.3812444,
+    "stage": "servo[176]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.4012206,
+    "stage": "servo[177]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.421438,
+    "stage": "servo[178]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.4412422,
+    "stage": "servo[179]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.4612443,
+    "stage": "servo[180]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.4812775,
+    "stage": "servo[181]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.5012414,
+    "stage": "servo[182]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.5212808,
+    "stage": "servo[183]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.541281,
+    "stage": "servo[184]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.561248,
+    "stage": "servo[185]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.581286,
+    "stage": "servo[186]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.6012774,
+    "stage": "servo[187]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.621279,
+    "stage": "servo[188]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.6413481,
+    "stage": "servo[189]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.6614108,
+    "stage": "servo[190]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.681414,
+    "stage": "servo[191]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.7014089,
+    "stage": "servo[192]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.7213626,
+    "stage": "servo[193]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.7412028,
+    "stage": "servo[194]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.7612865,
+    "stage": "servo[195]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.7811975,
+    "stage": "servo[196]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.801352,
+    "stage": "servo[197]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.8213503,
+    "stage": "servo[198]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.8413446,
+    "stage": "servo[199]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.861366,
+    "stage": "servo[200]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.881212,
+    "stage": "servo[201]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.9013965,
+    "stage": "servo[202]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.921225,
+    "stage": "servo[203]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.9412389,
+    "stage": "servo[204]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.9613578,
+    "stage": "servo[205]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963872.982864,
+    "stage": "servo[206]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.0010333,
+    "stage": "servo[207]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.0210524,
+    "stage": "servo[208]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.041182,
+    "stage": "servo[209]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.0623875,
+    "stage": "servo[210]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.081061,
+    "stage": "servo[211]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.1048126,
+    "stage": "servo[212]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.1237917,
+    "stage": "servo[213]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.1411695,
+    "stage": "servo[214]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.1610153,
+    "stage": "servo[215]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.1811676,
+    "stage": "servo[216]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.2013938,
+    "stage": "servo[217]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.2214124,
+    "stage": "servo[218]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.2413406,
+    "stage": "servo[219]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.2614176,
+    "stage": "servo[220]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.2812886,
+    "stage": "servo[221]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.3013961,
+    "stage": "servo[222]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.3213954,
+    "stage": "servo[223]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.3412867,
+    "stage": "servo[224]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.3612306,
+    "stage": "servo[225]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.381182,
+    "stage": "servo[226]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.4012506,
+    "stage": "servo[227]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.4213517,
+    "stage": "servo[228]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.4414084,
+    "stage": "servo[229]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.4613986,
+    "stage": "servo[230]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.4813962,
+    "stage": "servo[231]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.5013983,
+    "stage": "servo[232]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.521239,
+    "stage": "servo[233]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.5413911,
+    "stage": "servo[234]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.5613987,
+    "stage": "servo[235]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.5812364,
+    "stage": "servo[236]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.6014,
+    "stage": "servo[237]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.6212862,
+    "stage": "servo[238]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.6412432,
+    "stage": "servo[239]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.661354,
+    "stage": "servo[240]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.6812308,
+    "stage": "servo[241]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.7014043,
+    "stage": "servo[242]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.7212334,
+    "stage": "servo[243]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.741088,
+    "stage": "servo[244]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.761289,
+    "stage": "servo[245]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.7812712,
+    "stage": "servo[246]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.8013957,
+    "stage": "servo[247]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.8213966,
+    "stage": "servo[248]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.841388,
+    "stage": "servo[249]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.8612258,
+    "stage": "servo[250]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.8813937,
+    "stage": "servo[251]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.9013963,
+    "stage": "servo[252]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.9213972,
+    "stage": "servo[253]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.941229,
+    "stage": "servo[254]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.9613974,
+    "stage": "servo[255]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963873.9813917,
+    "stage": "servo[256]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.001398,
+    "stage": "servo[257]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.0214062,
+    "stage": "servo[258]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.0412369,
+    "stage": "servo[259]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.0614123,
+    "stage": "servo[260]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.0813577,
+    "stage": "servo[261]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.1014261,
+    "stage": "servo[262]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.1212442,
+    "stage": "servo[263]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.1412847,
+    "stage": "servo[264]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.1612766,
+    "stage": "servo[265]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.181282,
+    "stage": "servo[266]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.2012768,
+    "stage": "servo[267]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.2212474,
+    "stage": "servo[268]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.2414596,
+    "stage": "servo[269]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.261288,
+    "stage": "servo[270]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.2812915,
+    "stage": "servo[271]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.30146,
+    "stage": "servo[272]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.3214097,
+    "stage": "servo[273]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.3414087,
+    "stage": "servo[274]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.361396,
+    "stage": "servo[275]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.3815565,
+    "stage": "servo[276]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.4012792,
+    "stage": "servo[277]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.4212813,
+    "stage": "servo[278]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.441271,
+    "stage": "servo[279]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.4612823,
+    "stage": "servo[280]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.4812844,
+    "stage": "servo[281]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.501385,
+    "stage": "servo[282]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.5213988,
+    "stage": "servo[283]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.5412252,
+    "stage": "servo[284]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.5614097,
+    "stage": "servo[285]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.5813875,
+    "stage": "servo[286]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.6014233,
+    "stage": "servo[287]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.6212423,
+    "stage": "servo[288]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.6412282,
+    "stage": "servo[289]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.6612725,
+    "stage": "servo[290]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.681384,
+    "stage": "servo[291]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.7013998,
+    "stage": "servo[292]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.7212126,
+    "stage": "servo[293]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.7413774,
+    "stage": "servo[294]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.761374,
+    "stage": "servo[295]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.7813973,
+    "stage": "servo[296]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.8013997,
+    "stage": "servo[297]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.8213952,
+    "stage": "servo[298]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.8412302,
+    "stage": "servo[299]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.8613985,
+    "stage": "servo[300]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.881388,
+    "stage": "servo[301]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.9013968,
+    "stage": "servo[302]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.9214022,
+    "stage": "servo[303]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.9414003,
+    "stage": "servo[304]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.9614062,
+    "stage": "servo[305]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963874.9813383,
+    "stage": "servo[306]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963875.0013914,
+    "stage": "servo[307]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963875.0213988,
+    "stage": "servo[308]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963875.04137,
+    "stage": "servo[309]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963875.0611954,
+    "stage": "servo[310]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963875.0812337,
+    "stage": "servo[311]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963875.101282,
+    "stage": "servo[312]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963875.1211894,
+    "stage": "servo[313]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963875.1412685,
+    "stage": "servo[314]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963875.1612265,
+    "stage": "servo[315]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963875.181186,
+    "stage": "servo[316]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963875.201183,
+    "stage": "servo[317]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963875.2211866,
+    "stage": "servo[318]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963875.2412405,
+    "stage": "servo[319]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963875.26135,
+    "stage": "servo[320]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963875.2811863,
+    "stage": "servo[321]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963875.3011844,
+    "stage": "servo[322]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963875.3213515,
+    "stage": "servo[323]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963875.34136,
+    "stage": "servo[324]",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963875.3613842,
+    "stage": "servo_final_hold",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963875.5065806,
+    "stage": "wait_final",
+    "response": "{ \"type\": Info, \"category\": \"motion_changed\", \"msg\": \"0\" }"
+  },
+  {
+    "time": 1791963916.8336804,
+    "stage": "wait_final",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963916.9997058,
+    "stage": "restore_speed_bar",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1791963917.0096676,
+    "stage": "restore_mode",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  }
+]

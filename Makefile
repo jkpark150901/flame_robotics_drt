@@ -1,6 +1,11 @@
-# Use the active venv, then the project venv, then Python from PATH.
-# Override explicitly with: make viewervedo PYTHON=/path/to/python
-PYTHON ?= $(if $(VIRTUAL_ENV),$(VIRTUAL_ENV)/bin/python,$(if $(wildcard $(CURDIR)/venv/bin/python),$(CURDIR)/venv/bin/python,python3))
+# Use the conda env (default: flame). Override with CONDA_ENV=<name> or
+# explicitly with: make viewervedo PYTHON=/path/to/python
+CONDA_ENV ?= flame
+CONDA_ROOT ?= $(HOME)/miniforge
+PYTHON ?= $(CONDA_ROOT)/envs/$(CONDA_ENV)/bin/python
+
+# Previous behavior: use the active venv, then the project venv, then Python from PATH.
+# PYTHON ?= $(if $(VIRTUAL_ENV),$(VIRTUAL_ENV)/bin/python,$(if $(wildcard $(CURDIR)/venv/bin/python),$(CURDIR)/venv/bin/python,python3))
 
 .PHONY: viewervedo viewer robotcore controller zproxy simtool verifycobot verifypositioner run run-embedded
 

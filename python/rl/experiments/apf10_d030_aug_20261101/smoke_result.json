@@ -1,0 +1,42 @@
+{
+  "train": 24,
+  "eval": 7,
+  "augmentation": [
+    {
+      "snapshot": "planning_snapshot_p1_2.apfgoal.pkl",
+      "phase": 1,
+      "n_boxes": 1,
+      "seed": 510000
+    },
+    {
+      "snapshot": "planning_snapshot_p1_2.apfgoal.pkl",
+      "phase": 2,
+      "n_boxes": 1,
+      "seed": 510100
+    },
+    {
+      "snapshot": "planning_snapshot_p2_3.apfgoal.pkl",
+      "phase": 1,
+      "n_boxes": 3,
+      "seed": 510200
+    },
+    {
+      "snapshot": "planning_snapshot_p2_3.apfgoal.pkl",
+      "phase": 2,
+      "n_boxes": 1,
+      "seed": 510300
+    },
+    {
+      "snapshot": "planning_snapshot_p3_6.apfgoal.pkl",
+      "phase": 1,
+      "n_boxes": 3,
+      "seed": 510400
+    },
+    {
+      "snapshot": "planning_snapshot_p3_6.apfgoal.pkl",
+      "phase": 2,
+      "n_boxes": 1,
+      "seed": 510500
+    }
+  ]
+}

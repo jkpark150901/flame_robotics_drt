@@ -1,0 +1,16 @@
+{
+  "max_steps": 200,
+  "influence": 0.3,
+  "range_min": 0.02,
+  "range_max": 0.4,
+  "global_prob": 0.15,
+  "goal_prob": 0.1,
+  "extend_step": 0.05,
+  "connect_limit": 20,
+  "obstacle_weight": 5.0,
+  "length_weight": 1.0,
+  "smooth_weight": 0.01,
+  "success_reward": 100.0,
+  "collision_penalty": 2.0,
+  "time_penalty": 0.05
+}

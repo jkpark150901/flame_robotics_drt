@@ -1,0 +1,9 @@
+[
+  {
+    "file": "follow.csv",
+    "label": "servo gain=0.1",
+    "completed": false,
+    "error": "목표 도달 대기 시간 초과",
+    "error_stage": "wait_final"
+  }
+]

@@ -29,7 +29,18 @@ def test_handler_accepts_result_and_requests_owned_playback_sequence():
         "speed": 0.5,
         "plan_sequence": result["plan_sequence"],
         "playback_initial_r_deg": 15.0,
+        "loaded_playback_result": False,
     }
+
+
+def test_loaded_result_marks_playback_request():
+    workflow = InspectionWorkflowState()
+    handler = InspectionPathHandler({}, workflow)
+    zapi = _ZAPI()
+    handler.accept_result({"plan_sequence": [{"name": "saved", "plans": {}}],
+                           "loaded_playback_result": True})
+    handler.request_playback(zapi)
+    assert zapi.playback_kwargs["loaded_playback_result"] is True
 
 
 def test_viewer_does_not_execute_planning_batches():

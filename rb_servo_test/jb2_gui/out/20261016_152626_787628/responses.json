@@ -1,0 +1,167 @@
+[
+  {
+    "time": 1792131987.0820847,
+    "stage": "initial",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1792131987.0831778,
+    "stage": "initial",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1792131987.3840714,
+    "stage": "move_to_start",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1792131987.6988099,
+    "stage": "move_to_start",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1792131987.708983,
+    "stage": "move_to_start",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1792131987.718892,
+    "stage": "move_to_start",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1792131987.7289891,
+    "stage": "move_to_start",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1792131987.7390938,
+    "stage": "move_to_start",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1792131987.7492416,
+    "stage": "move_to_start",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1792131987.7592387,
+    "stage": "move_to_start",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1792131987.7694044,
+    "stage": "move_to_start",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1792131987.7794373,
+    "stage": "move_to_start",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1792131987.7896013,
+    "stage": "move_to_start",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1792131987.7997246,
+    "stage": "move_to_start",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1792131987.8097582,
+    "stage": "move_to_start",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1792131987.8197627,
+    "stage": "move_to_start",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1792131987.8299112,
+    "stage": "move_to_start",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1792131988.0034275,
+    "stage": "wait_final",
+    "response": "{ \"type\": Info, \"category\": \"motion_changed\", \"msg\": \"900\" }"
+  },
+  {
+    "time": 1792131989.1836557,
+    "stage": "wait_final",
+    "response": "{ \"type\": Info, \"category\": \"motion_changed\", \"msg\": \"901\" }"
+  },
+  {
+    "time": 1792131990.182716,
+    "stage": "wait_final",
+    "response": "{ \"type\": Info, \"category\": \"motion_changed\", \"msg\": \"902\" }"
+  },
+  {
+    "time": 1792131991.2121398,
+    "stage": "wait_final",
+    "response": "{ \"type\": Info, \"category\": \"motion_changed\", \"msg\": \"903\" }"
+  },
+  {
+    "time": 1792131992.2414203,
+    "stage": "wait_final",
+    "response": "{ \"type\": Info, \"category\": \"motion_changed\", \"msg\": \"904\" }"
+  },
+  {
+    "time": 1792131993.2404034,
+    "stage": "wait_final",
+    "response": "{ \"type\": Info, \"category\": \"motion_changed\", \"msg\": \"905\" }"
+  },
+  {
+    "time": 1792131994.2696826,
+    "stage": "wait_final",
+    "response": "{ \"type\": Info, \"category\": \"motion_changed\", \"msg\": \"906\" }"
+  },
+  {
+    "time": 1792131995.813846,
+    "stage": "wait_final",
+    "response": "{ \"type\": Info, \"category\": \"motion_changed\", \"msg\": \"907\" }"
+  },
+  {
+    "time": 1792131997.1456208,
+    "stage": "wait_final",
+    "response": "{ \"type\": Info, \"category\": \"motion_changed\", \"msg\": \"908\" }"
+  },
+  {
+    "time": 1792131998.4776223,
+    "stage": "wait_final",
+    "response": "{ \"type\": Info, \"category\": \"motion_changed\", \"msg\": \"909\" }"
+  },
+  {
+    "time": 1792131999.8096259,
+    "stage": "wait_final",
+    "response": "{ \"type\": Info, \"category\": \"motion_changed\", \"msg\": \"910\" }"
+  },
+  {
+    "time": 1792132001.1414597,
+    "stage": "wait_final",
+    "response": "{ \"type\": Info, \"category\": \"motion_changed\", \"msg\": \"911\" }"
+  },
+  {
+    "time": 1792132003.2908378,
+    "stage": "wait_final",
+    "response": "{ \"type\": Info, \"category\": \"motion_changed\", \"msg\": \"912\" }"
+  },
+  {
+    "time": 1792132003.2908697,
+    "stage": "wait_final",
+    "response": "{ \"type\": Info, \"category\": \"motion_changed\", \"msg\": \"0\" }"
+  },
+  {
+    "time": 1792132003.6636698,
+    "stage": "restore_speed_bar",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  },
+  {
+    "time": 1792132003.6738675,
+    "stage": "restore_mode",
+    "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+  }
+]

@@ -1,0 +1,19 @@
+{
+  "created": "2026-10-30T16:33:14",
+  "n_total": 36,
+  "n_success": 35,
+  "n_failed": 1,
+  "unreached_groups": [],
+  "planner": "RRTConnect+SAC (apf5_p3_shield)",
+  "planner_options": {
+    "step_size": 0.1,
+    "planning_timeout": 300.0
+  },
+  "source": "rl/export_playback.py",
+  "snapshot": "/home/dev/flame_robotics_drt/sample/planning_snapshot_p3_6.pkl",
+  "initial_positioner_r_deg": 90.0,
+  "positioner_second_group_r_deg": 180.0,
+  "scene_snapshot": "scene_snapshot.pkl",
+  "sac_eval": "debug/rl/dda_residual_apf5/eval_p3_shield.json",
+  "sac_targets_replaced": 18
+}

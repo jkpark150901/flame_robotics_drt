@@ -1,0 +1,158 @@
+{
+  "n_total": 12,
+  "n_success": 9,
+  "n_failed": 3,
+  "by_category": {
+    "timeout_approximate": 3
+  },
+  "unreached_groups": [],
+  "failures": [
+    {
+      "index": 6,
+      "group_name": "Point 1 - Inspection pose 2",
+      "robot_name": "dda_rb10_1300e",
+      "pose_name": "DDA",
+      "status": "failed",
+      "status_kind": "failed",
+      "category": "timeout_approximate",
+      "message": "planning failed for target: timeout_approximate",
+      "n_waypoints": 1,
+      "has_path": true,
+      "elapsed": 100.08910816395655,
+      "positioner_r_deg": 270.0,
+      "planner_stats": {
+        "state_validity_calls": 16002,
+        "collision_rejects": 2068,
+        "workspace_rejects": 0,
+        "solve_time": 98.59636948700063,
+        "algorithm": "InformedRRTstar",
+        "max_iter": 16000,
+        "iterations": 16002,
+        "timeout_sec": 299.9559910511598,
+        "iteration_ptc_error": null
+      },
+      "ik_failure": null,
+      "n_colliding_edges": 0,
+      "colliding_edges": [],
+      "goal_q": [
+        0.05232428168336382,
+        0.019997738101518933,
+        0.8295197178600934,
+        1.0510573251219943,
+        1.4736158740797856,
+        -0.5817240176066011,
+        -1.1927295469443797,
+        -0.8134099723042244
+      ],
+      "ik_goal_q": [
+        0.05232428168336382,
+        0.019997738101518933,
+        0.8295197178600934,
+        1.0510573251219943,
+        1.4736158740797856,
+        -0.5817240176066011,
+        -1.1927295469443797,
+        -0.8134099723042244
+      ],
+      "diag": null
+    },
+    {
+      "index": 8,
+      "group_name": "Point 2 - Inspection pose 3",
+      "robot_name": "dda_rb10_1300e",
+      "pose_name": "DDA",
+      "status": "failed",
+      "status_kind": "failed",
+      "category": "timeout_approximate",
+      "message": "planning failed for target: timeout_approximate",
+      "n_waypoints": 1,
+      "has_path": true,
+      "elapsed": 90.75893935607746,
+      "positioner_r_deg": 270.0,
+      "planner_stats": {
+        "state_validity_calls": 16005,
+        "collision_rejects": 2213,
+        "workspace_rejects": 0,
+        "solve_time": 89.30198248894885,
+        "algorithm": "InformedRRTstar",
+        "max_iter": 16000,
+        "iterations": 16005,
+        "timeout_sec": 299.92543244501576,
+        "iteration_ptc_error": null
+      },
+      "ik_failure": null,
+      "n_colliding_edges": 0,
+      "colliding_edges": [],
+      "goal_q": [
+        0.4938331719230167,
+        0.30778031646009657,
+        -0.510319016354333,
+        0.7904653603776451,
+        1.8085061617582678,
+        1.646524440907293,
+        -1.8176074950056533,
+        -1.1194938393944178
+      ],
+      "ik_goal_q": [
+        0.4938331719230167,
+        0.30778031646009657,
+        -0.510319016354333,
+        0.7904653603776451,
+        1.8085061617582678,
+        1.646524440907293,
+        -1.8176074950056533,
+        -1.1194938393944178
+      ],
+      "diag": null
+    },
+    {
+      "index": 10,
+      "group_name": "Point 2 - Inspection pose 2",
+      "robot_name": "dda_rb10_1300e",
+      "pose_name": "DDA",
+      "status": "failed",
+      "status_kind": "failed",
+      "category": "timeout_approximate",
+      "message": "planning failed for target: timeout_approximate",
+      "n_waypoints": 1,
+      "has_path": true,
+      "elapsed": 66.35292528104037,
+      "positioner_r_deg": 270.0,
+      "planner_stats": {
+        "state_validity_calls": 16005,
+        "collision_rejects": 2351,
+        "workspace_rejects": 0,
+        "solve_time": 64.47891614679247,
+        "algorithm": "InformedRRTstar",
+        "max_iter": 16000,
+        "iterations": 16005,
+        "timeout_sec": 299.811994882999,
+        "iteration_ptc_error": null
+      },
+      "ik_failure": null,
+      "n_colliding_edges": 0,
+      "colliding_edges": [],
+      "goal_q": [
+        0.9350694906927868,
+        0.0,
+        -0.7073503295021416,
+        1.7998983782441025,
+        0.3628766106345459,
+        -0.17844252618427606,
+        -1.9017078545783743,
+        -2.2081211133740895
+      ],
+      "ik_goal_q": [
+        0.9350694906927868,
+        0.0,
+        -0.7073503295021416,
+        1.7998983782441025,
+        0.3628766106345459,
+        -0.17844252618427606,
+        -1.9017078545783743,
+        -2.2081211133740895
+      ],
+      "diag": null
+    }
+  ]
+}

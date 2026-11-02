@@ -1,0 +1,37 @@
+index,group_name,robot_name,pose_name,status,message,n_waypoints,iterations,max_iter,solve_time,iteration_ptc_error,positioner_r_deg,status_kind,failure_category,elapsed
+0,Point 1 - Inspection pose 1,dda_rb10_1300e,DDA,success,,40,741,16000,8.172939382027835,,90.0,success,,33.50054038898088
+1,Point 1 - Inspection pose 1,rb20_1900es,RT,success,,40,737,16000,31.625467523001134,,90.0,success,,46.37727366108447
+2,Point 2 - Inspection pose 1,dda_rb10_1300e,DDA,success,,40,613,16000,3.53482455201447,,90.0,success,,19.46298338798806
+3,Point 2 - Inspection pose 1,rb20_1900es,RT,success,,40,338,16000,30.216058345977217,,90.0,success,,36.500564022921026
+4,Point 4 - Inspection pose 1,dda_rb10_1300e,DDA,success,,40,678,16000,8.666153779951856,,90.0,success,,21.511200344888493
+5,Point 4 - Inspection pose 1,rb20_1900es,RT,success,,40,472,16000,48.31786780292168,,90.0,success,,57.241311704041436
+6,Point 3 - Inspection pose 1,dda_rb10_1300e,DDA,success,,40,227,16000,0.44836460892111063,,90.0,success,,13.929908725898713
+7,Point 3 - Inspection pose 1,rb20_1900es,RT,success,,40,312,16000,33.372257590992376,,90.0,success,,42.98896813089959
+8,Point 5 - Inspection pose 1,dda_rb10_1300e,DDA,success,,40,295,16000,4.2621389091946185,,90.0,success,,16.98096699710004
+9,Point 5 - Inspection pose 1,rb20_1900es,RT,failed,planning failed for target: timeout_approximate,1,3599,16000,300.2370936181396,,90.0,failed,timeout_approximate,300.27533750305884
+10,Point 6 - Inspection pose 1,dda_rb10_1300e,DDA,failed,planning failed for target: path planning timeout,1,,,,,90.0,failed,timeout,300.046866472112
+11,Point 6 - Inspection pose 1,rb20_1900es,RT,success,,40,184,16000,4.584833883214742,,90.0,success,,27.87097399518825
+12,Point 6 - Inspection pose 3,dda_rb10_1300e,DDA,success,,40,634,16000,22.017522753914818,,270.0,success,,57.176971963839605
+13,Point 6 - Inspection pose 3,rb20_1900es,RT,failed,planning failed for target: path planning timeout,1,,,,,270.0,failed,timeout,305.63275787001476
+14,Point 6 - Inspection pose 2,dda_rb10_1300e,DDA,failed,planning failed for target: timeout_approximate,1,16004,16000,277.22659164713696,,270.0,failed,timeout_approximate,282.2587613200303
+15,Point 6 - Inspection pose 2,rb20_1900es,RT,success,,40,528,16000,12.404717142926529,,270.0,success,,47.60564936581068
+16,Point 5 - Inspection pose 3,dda_rb10_1300e,DDA,success,,40,2086,16000,17.606187142198905,,270.0,success,,67.90770185203291
+17,Point 5 - Inspection pose 3,rb20_1900es,RT,success,,40,408,16000,10.122034842148423,,270.0,success,,26.2196794860065
+18,Point 5 - Inspection pose 2,dda_rb10_1300e,DDA,failed,planning failed for target: timeout_approximate,1,16007,16000,295.6833337780554,,270.0,failed,timeout_approximate,301.1719029380474
+19,Point 5 - Inspection pose 2,rb20_1900es,RT,success,,40,3148,16000,223.35757152014412,,270.0,success,,239.69133998802863
+20,Point 3 - Inspection pose 3,dda_rb10_1300e,DDA,success,,40,322,16000,1.3955514039844275,,270.0,success,,45.66389965591952
+21,Point 3 - Inspection pose 3,rb20_1900es,RT,success,,40,2805,16000,209.08564108796418,,270.0,success,,227.28025690792128
+22,Point 3 - Inspection pose 2,dda_rb10_1300e,DDA,failed,planning failed for target: path planning timeout,1,,,,,270.0,failed,timeout,304.619795988081
+23,Point 3 - Inspection pose 2,rb20_1900es,RT,failed,planning failed for target: timeout_approximate,1,2592,16000,300.445805166848,,270.0,failed,timeout_approximate,305.7778035539668
+24,Point 4 - Inspection pose 3,dda_rb10_1300e,DDA,success,,40,86,16000,0.524889393011108,,270.0,success,,43.74059095000848
+25,Point 4 - Inspection pose 3,rb20_1900es,RT,success,,40,24,16000,0.030438239919021726,,270.0,success,,17.87354577612132
+26,Point 4 - Inspection pose 2,dda_rb10_1300e,DDA,failed,planning failed for target: path planning timeout,1,,,,,270.0,failed,timeout,304.59951855405234
+27,Point 4 - Inspection pose 2,rb20_1900es,RT,success,,40,1273,16000,123.12587221409194,,270.0,success,,137.5034947330132
+28,Point 2 - Inspection pose 3,dda_rb10_1300e,DDA,success,,40,1733,16000,26.46850976184942,,270.0,success,,68.51793343294412
+29,Point 2 - Inspection pose 3,rb20_1900es,RT,success,,40,443,16000,61.8643316780217,,270.0,success,,80.06972175184637
+30,Point 2 - Inspection pose 2,dda_rb10_1300e,DDA,success,,40,6920,16000,167.89102263282984,,270.0,success,,208.44125611917116
+31,Point 2 - Inspection pose 2,rb20_1900es,RT,failed,planning failed for target: path planning timeout,1,,,,,270.0,failed,timeout,304.8045287588611
+32,Point 1 - Inspection pose 3,dda_rb10_1300e,DDA,failed,planning failed for target: path planning timeout,1,,,,,270.0,failed,timeout,304.4435490218457
+33,Point 1 - Inspection pose 3,rb20_1900es,RT,success,,40,127,16000,0.14281627885065973,,270.0,success,,14.311504550045356
+34,Point 1 - Inspection pose 2,dda_rb10_1300e,DDA,success,,40,195,16000,1.4314536459278315,,270.0,success,,37.18067247211002
+35,Point 1 - Inspection pose 2,rb20_1900es,RT,success,,40,958,16000,43.61375054111704,,270.0,success,,59.27989542298019

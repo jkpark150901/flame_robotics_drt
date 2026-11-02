@@ -1,0 +1,470 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="dda_rb10_1300e">
+  <link name="dda_link_base" />
+  <link name="dda_link_linear_track">
+    <visual>
+      <origin xyz="1.36424e-15 4.09273e-15 0.161" rpy="4.75452e-30 0 -1.22465e-16" />
+      <geometry>
+        <box size="7.208 0.56 0.282" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="1.36424e-15 4.09273e-15 0.161" rpy="4.75452e-30 0 -1.22465e-16" />
+      <geometry>
+        <box size="7.208 0.56 0.282" />
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-3.489 1.36424e-15 -1.74094e-15" rpy="4.75452e-30 0 -1.22465e-16" />
+      <geometry>
+        <box size="0.2 1.1 0.04" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-3.489 1.36424e-15 -1.74094e-15" rpy="4.75452e-30 0 -1.22465e-16" />
+      <geometry>
+        <box size="0.2 1.1 0.04" />
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-1.7445 9.09495e-16 -7.50906e-16" rpy="4.75452e-30 0 -1.22465e-16" />
+      <geometry>
+        <box size="0.2 1.1 0.04" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-1.7445 9.09495e-16 -7.50906e-16" rpy="4.75452e-30 0 -1.22465e-16" />
+      <geometry>
+        <box size="0.2 1.1 0.04" />
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="3.35376e-15 0 -7.48527e-16" rpy="4.75452e-30 0 -1.22465e-16" />
+      <geometry>
+        <box size="0.2 1.1 0.04" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="3.35376e-15 0 -7.48527e-16" rpy="4.75452e-30 0 -1.22465e-16" />
+      <geometry>
+        <box size="0.2 1.1 0.04" />
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="1.7445 -9.09495e-16 -5.93382e-16" rpy="4.75452e-30 0 -1.22465e-16" />
+      <geometry>
+        <box size="0.2 1.1 0.04" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="1.7445 -9.09495e-16 -5.93382e-16" rpy="4.75452e-30 0 -1.22465e-16" />
+      <geometry>
+        <box size="0.2 1.1 0.04" />
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="3.489 -9.09495e-16 9.40989e-15" rpy="4.75452e-30 0 -1.22465e-16" />
+      <geometry>
+        <box size="0.2 1.1 0.04" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="3.489 -9.09495e-16 9.40989e-15" rpy="4.75452e-30 0 -1.22465e-16" />
+      <geometry>
+        <box size="0.2 1.1 0.04" />
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-3.489 -2.4329e-14 0.085" rpy="1.5708 0 -4.56336e-15" />
+      <geometry>
+        <box size="0.015 0.13 0.74" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-3.489 -2.4329e-14 0.085" rpy="1.5708 0 -4.56336e-15" />
+      <geometry>
+        <box size="0.015 0.13 0.74" />
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-1.7445 -1.72804e-14 0.085" rpy="1.5708 0 -4.56336e-15" />
+      <geometry>
+        <box size="0.015 0.13 0.74" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-1.7445 -1.72804e-14 0.085" rpy="1.5708 0 -4.56336e-15" />
+      <geometry>
+        <box size="0.015 0.13 0.74" />
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="5.79803e-15 -2.52385e-14 0.085" rpy="1.5708 0 -4.56336e-15" />
+      <geometry>
+        <box size="0.015 0.13 0.74" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="5.79803e-15 -2.52385e-14 0.085" rpy="1.5708 0 -4.56336e-15" />
+      <geometry>
+        <box size="0.015 0.13 0.74" />
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="1.7445 -3.31966e-14 0.085" rpy="1.5708 0 -4.56336e-15" />
+      <geometry>
+        <box size="0.015 0.13 0.74" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="1.7445 -3.31966e-14 0.085" rpy="1.5708 0 -4.56336e-15" />
+      <geometry>
+        <box size="0.015 0.13 0.74" />
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="3.489 -4.1382e-14 0.085" rpy="1.5708 0 -4.56336e-15" />
+      <geometry>
+        <box size="0.015 0.13 0.74" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="3.489 -4.1382e-14 0.085" rpy="1.5708 0 -4.56336e-15" />
+      <geometry>
+        <box size="0.015 0.13 0.74" />
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-1.7317 0.025 0.245" rpy="-1.5708 0 1.45473e-15" />
+      <geometry>
+        <box size="3.4624 0.33 0.165" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-1.7317 0.025 0.245" rpy="-1.5708 0 1.45473e-15" />
+      <geometry>
+        <box size="3.4624 0.33 0.165" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="dda_link_carriage">
+    <visual>
+      <origin xyz="-7.95808e-16 0.0125 -2.27374e-16" rpy="1.5708 7.88908e-15 -3.14159" />
+      <geometry>
+        <box size="0.8 0.52 0.025" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-7.95808e-16 0.0125 -2.27374e-16" rpy="1.5708 7.88908e-15 -3.14159" />
+      <geometry>
+        <box size="0.8 0.52 0.025" />
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0.35975 0.063 -0.025" rpy="1.5708 7.88908e-15 -3.14159" />
+      <geometry>
+        <box size="0.0805 0.165 0.076" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.35975 0.063 -0.025" rpy="1.5708 7.88908e-15 -3.14159" />
+      <geometry>
+        <box size="0.0805 0.165 0.076" />
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="0.289 0.201 9.09495e-15" rpy="1.5708 7.88908e-15 -3.14159" />
+      <geometry>
+        <box size="0.226 0.3245 0.352" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.289 0.201 9.09495e-15" rpy="1.5708 7.88908e-15 -3.14159" />
+      <geometry>
+        <box size="0.226 0.3245 0.352" />
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-1.25056e-15 0.09 -3.18323e-15" rpy="1.5708 7.88908e-15 -3.14159" />
+      <geometry>
+        <box size="0.33 0.16 0.102" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-1.25056e-15 0.09 -3.18323e-15" rpy="1.5708 7.88908e-15 -3.14159" />
+      <geometry>
+        <box size="0.33 0.16 0.102" />
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-1.21645e-14 0.4515 0.035" rpy="1.5708 7.88908e-15 -3.14159" />
+      <geometry>
+        <box size="0.352 0.53 0.621" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-1.21645e-14 0.4515 0.035" rpy="1.5708 7.88908e-15 -3.14159" />
+      <geometry>
+        <box size="0.352 0.53 0.621" />
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="0.0107325 2.63285 0.0521338" rpy="0.0054756 -0.680086 -1.5708" />
+      <geometry>
+        <box size="0.1 0.0953271 0.145436" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.0107325 2.63285 0.0521338" rpy="0.0054756 -0.680086 -1.5708" />
+      <geometry>
+        <box size="0.1 0.0953271 0.145436" />
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="0.0157407 2.58451 0.00994251" rpy="-3.12431 -0.680086 -1.5708" />
+      <geometry>
+        <box size="0.0679 0.627868 0.0901768" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.0157407 2.58451 0.00994251" rpy="-3.12431 -0.680086 -1.5708" />
+      <geometry>
+        <box size="0.0679 0.627868 0.0901768" />
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="0.000232483 0.198227 -0.307389" rpy="0.0054756 0.757225 -1.5708" />
+      <geometry>
+        <box size="0.1 0.0953271 0.145436" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.000232483 0.198227 -0.307389" rpy="0.0054756 0.757225 -1.5708" />
+      <geometry>
+        <box size="0.1 0.0953271 0.145436" />
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="0.00524071 0.23361 -0.360911" rpy="-3.12431 0.757225 -1.5708" />
+      <geometry>
+        <box size="0.0679 0.627868 0.0901768" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.00524071 0.23361 -0.360911" rpy="-3.12431 0.757225 -1.5708" />
+      <geometry>
+        <box size="0.0679 0.627868 0.0901768" />
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0.673122 -0.257 -1.5" rpy="1.5708 7.88908e-15 -3.14159" />
+      <geometry>
+        <mesh filename="meshes/slab_0_1_1_349_ccfc56fc.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.673122 -0.257 -1.5" rpy="1.5708 7.88908e-15 -3.14159" />
+      <geometry>
+        <mesh filename="meshes/slab_0_1_1_349_ccfc56fc.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="dda_link_slide">
+    <visual>
+      <origin xyz="-0.66625 0.05775 -0.00325" rpy="1.5708 -5.36832e-16 -3.14159" />
+      <geometry>
+        <box size="1.3315 0.3515 0.1225" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.66625 0.05775 -0.00325" rpy="1.5708 -5.36832e-16 -3.14159" />
+      <geometry>
+        <box size="1.3315 0.3515 0.1225" />
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-1.9768 1.167 -0.677622" rpy="1.5708 1.5708 0" />
+      <geometry>
+        <mesh filename="meshes/slab_0_1_1_720_212c22b0.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-1.9768 1.167 -0.677622" rpy="1.5708 1.5708 0" />
+      <geometry>
+        <mesh filename="meshes/slab_0_1_1_720_212c22b0.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="dda_link0">
+    <visual>
+      <geometry>
+        <mesh filename="meshes/rb10_1300e/visual/link0.dae" />
+      </geometry>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/rb10_1300e/collision/link0.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="dda_link1">
+    <visual>
+      <geometry>
+        <mesh filename="meshes/rb10_1300e/visual/link1.dae" />
+      </geometry>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/rb10_1300e/collision/link1.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="dda_link2">
+    <visual>
+      <geometry>
+        <mesh filename="meshes/rb10_1300e/visual/link2.dae" />
+      </geometry>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/rb10_1300e/collision/link2.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="dda_link3">
+    <visual>
+      <geometry>
+        <mesh filename="meshes/rb10_1300e/visual/link3.dae" />
+      </geometry>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/rb10_1300e/collision/link3.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="dda_link4">
+    <visual>
+      <geometry>
+        <mesh filename="meshes/rb10_1300e/visual/link4.dae" />
+      </geometry>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/rb10_1300e/collision/link4.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="dda_link5">
+    <visual>
+      <geometry>
+        <mesh filename="meshes/rb10_1300e/visual/link5.dae" />
+      </geometry>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/rb10_1300e/collision/link5.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="dda_link6">
+    <visual>
+      <geometry>
+        <mesh filename="meshes/rb10_1300e/visual/link6.dae" />
+      </geometry>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/rb10_1300e/collision/link6.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="dda_link_end">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/tool_dda.stl" />
+      </geometry>
+      <material name="tool_black">
+        <color rgba="0.1 0.1 0.1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/tool_dda.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="dda_joint_rail_mount" type="fixed">
+    <origin xyz="0.32245 1.5 0.03" rpy="0 0 3.14159" />
+    <parent link="dda_link_base" />
+    <child link="dda_link_linear_track" />
+  </joint>
+  <joint name="dda_joint_linear_track" type="prismatic">
+    <origin xyz="2.764572 0 0.227" rpy="1.5708 0 0" />
+    <parent link="dda_link_linear_track" />
+    <child link="dda_link_carriage" />
+    <axis xyz="-1 0 0" />
+    <limit lower="0" upper="5.37" effort="1000.0" velocity="1.0" />
+  </joint>
+  <joint name="dda_joint_carriage" type="prismatic">
+    <origin xyz="0.0045 0.91 0.476799" rpy="0 -1.57079265 -3.14159" />
+    <parent link="dda_link_carriage" />
+    <child link="dda_link_slide" />
+    <axis xyz="-1 0 0" />
+    <limit lower="0" upper="0.7" effort="1000.0" velocity="1.0" />
+  </joint>
+  <joint name="dda_joint_mount" type="fixed">
+    <origin xyz="-1.08599939 -0.00354128091 -0.00450024731" rpy="-1.57079367 3.67321484e-06 3.14158898" />
+    <parent link="dda_link_slide" />
+    <child link="dda_link0" />
+  </joint>
+  <joint name="dda_joint_base" type="revolute">
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <parent link="dda_link0" />
+    <child link="dda_link1" />
+    <axis xyz="0 0 1" />
+    <limit effort="10" lower="-3.14" upper="3.14" velocity="3.14" />
+  </joint>
+  <joint name="dda_joint_shoulder" type="revolute">
+    <origin rpy="0 0 0" xyz="0 0 0.197" />
+    <parent link="dda_link1" />
+    <child link="dda_link2" />
+    <axis xyz="0 1 0" />
+    <limit effort="10" lower="-3.14" upper="3.14" velocity="3.14" />
+  </joint>
+  <joint name="dda_joint_elbow" type="revolute">
+    <origin rpy="0 0 0" xyz="0 -0.1875 0.6127" />
+    <parent link="dda_link2" />
+    <child link="dda_link3" />
+    <axis xyz="0 1 0" />
+    <limit effort="10" lower="-3.14" upper="3.14" velocity="3.14" />
+  </joint>
+  <joint name="dda_joint_wrist1" type="revolute">
+    <origin rpy="0 0 0" xyz="0 0.1484 0.57015" />
+    <parent link="dda_link3" />
+    <child link="dda_link4" />
+    <axis xyz="0 1 0" />
+    <limit effort="10" lower="-3.14" upper="3.14" velocity="3.14" />
+  </joint>
+  <joint name="dda_joint_wrist2" type="revolute">
+    <origin rpy="0 0 0" xyz="0 -0.11715 0" />
+    <parent link="dda_link4" />
+    <child link="dda_link5" />
+    <axis xyz="0 0 1" />
+    <limit effort="10" lower="-3.14" upper="3.14" velocity="3.14" />
+  </joint>
+  <joint name="dda_joint_wrist3" type="revolute">
+    <origin rpy="0 0 0" xyz="0 0 0.11715" />
+    <parent link="dda_link5" />
+    <child link="dda_link6" />
+    <axis xyz="0 1 0" />
+    <limit effort="10" lower="-3.14" upper="3.14" velocity="3.14" />
+  </joint>
+  <joint name="dda_joint_end" type="fixed">
+    <origin xyz="0.00450781579 -0.169365555 0.00228070346" rpy="0 1.57078735 -1.57079633" />
+    <parent link="dda_link6" />
+    <child link="dda_link_end" />
+  </joint>
+</robot>

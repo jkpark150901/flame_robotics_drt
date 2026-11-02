@@ -1,0 +1,9 @@
+[
+  {
+    "file": "follow.csv",
+    "label": "servo gain=0.1",
+    "completed": false,
+    "error": "사용자 중지",
+    "error_stage": "wait_final"
+  }
+]

@@ -1,0 +1,40 @@
+{
+  "index": 10,
+  "group_name": "Point 6 - Inspection pose 1",
+  "robot_name": "dda_rb10_1300e",
+  "pose_name": "DDA",
+  "status": "failed",
+  "status_kind": "failed",
+  "category": "timeout",
+  "message": "planning failed for target: path planning timeout",
+  "n_waypoints": 1,
+  "has_path": true,
+  "elapsed": 300.5725356959738,
+  "positioner_r_deg": 90.0,
+  "planner_stats": {},
+  "ik_failure": null,
+  "n_colliding_edges": 0,
+  "colliding_edges": [],
+  "goal_q": [
+    4.3587460755894005,
+    0.18402433691697456,
+    2.1192216315811696,
+    -0.4175000151304373,
+    -1.9831675750677449,
+    -0.7410494558909456,
+    0.5483648910987461,
+    -1.5706910436780153
+  ],
+  "ik_goal_q": [
+    4.3587460755894005,
+    0.18402433691697456,
+    2.1192216315811696,
+    -0.4175000151304373,
+    -1.9831675750677449,
+    -0.7410494558909456,
+    0.5483648910987461,
+    -1.5706910436780153
+  ],
+  "diag": null,
+  "verification": {}
+}

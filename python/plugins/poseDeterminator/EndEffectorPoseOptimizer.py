@@ -1,4 +1,4 @@
-from dataclasses import dataclass, fields
+from dataclasses import asdict as dataclasses_asdict, dataclass, fields
 import open3d as o3d
 import numpy as np
 from numpy.typing import NDArray
@@ -6,6 +6,12 @@ try:
     from .CylinderFitting import fit_cylinder
 except ImportError:
     from CylinderFitting import fit_cylinder
+try:
+    from .PipeProfileFitting import (
+        PipeProfileError, PipeProfileParams, fit_metrics, ransac_cylinder, refine_cylinder, validate_fit)
+except ImportError:
+    from PipeProfileFitting import (
+        PipeProfileError, PipeProfileParams, fit_metrics, ransac_cylinder, refine_cylinder, validate_fit)
 from urdf_parser_py.urdf import URDF
 from pathlib import Path
 from scipy.spatial.transform import Rotation as R
@@ -111,7 +117,27 @@ class EndEffectorPoseOptimizer:
         self.__dda_pipe_facing_axis = np.asarray([1.0, 0.0, 0.0], dtype=float)
         self.__dda_pipe_parallel_axis = np.asarray([0.0, 1.0, 0.0], dtype=float)
         self.__rt_pipe_facing_axis = np.asarray([0.0, -1.0, 0.0], dtype=float)
+        self.__rt_roll_about_facing_deg = 0.0
         self.__collision_checker = None
+        self.__last_collision_info = None
+        self.__current_candidate_index = None
+        self.__current_candidate_angle_deg = None
+
+    def __log_candidate_collision(self, part, pose, collided):
+        """후보(DDA/RT1/RT2)별 충돌 판정을 debuging_info["candidate_log"]에 남긴다.
+
+        충돌이면 외부 checker가 알려준 hit 정보(장애물 종류, 최근접 거리/점)를 함께 기록해,
+        탈락한 후보가 무엇과 왜 충돌로 판정됐는지 viewer에서 확인할 수 있게 한다.
+        """
+        hit = self.__last_collision_info if collided else None
+        self.debuging_info.setdefault("candidate_log", []).append({
+            "candidate_index": self.__current_candidate_index,
+            "angle_deg": self.__current_candidate_angle_deg,
+            "part": str(part),
+            "pose": [float(v) for v in np.asarray(pose, dtype=float).reshape(-1)],
+            "collided": bool(collided),
+            "hit": dict(hit) if hit else None,
+        })
 
     @staticmethod
     def __normalized_config_axis(
@@ -141,6 +167,13 @@ class EndEffectorPoseOptimizer:
     def set_rt_pipe_facing_axis(self, axis: tuple[float, float, float] | list[float] | np.ndarray):
         self.__rt_pipe_facing_axis = self.__normalized_config_axis(axis, "rt pipe facing axis")
 
+    def set_rt_roll_about_facing_deg(self, roll_deg: float):
+        """RT 자세를 배관 지향축(RT local facing 축) 기준으로 추가 회전시킨다(deg, 오른손 법칙).
+
+        배관 지향축은 roll을 정하지 못하므로(축 둘레 회전은 자유) RT를 어느 방향으로 돌려서 놓을지는 이 값으로 정한다.
+        """
+        self.__rt_roll_about_facing_deg = float(roll_deg)
+
     def set_collision_checker(self, checker):
         """Register an external mesh-vs-point-cloud collision checker."""
         self.__collision_checker = checker
@@ -152,6 +185,7 @@ class EndEffectorPoseOptimizer:
     ):
         self.__dda_mesh = copy.deepcopy(link_mesh)
         self.__dda_invers_transform_mat = self.__offset_to_transform(tcp_to_link_transform)
+        return self.__dda_mesh
 
     def set_RT_geometry(
         self,
@@ -160,6 +194,7 @@ class EndEffectorPoseOptimizer:
     ):
         self.__rt_mesh = copy.deepcopy(link_mesh)
         self.__rt_invers_transform_mat = self.__offset_to_transform(tcp_to_link_transform)
+        return self.__rt_mesh
 
     def load_scan_data(
         self,
@@ -262,7 +297,8 @@ class EndEffectorPoseOptimizer:
         pose_to_link_offset: np.ndarray | dict[str, Any] | None = None,
     ):
         # URDF 파일 로드
-        urdf: URDF = URDF.from_xml_file(file_path)
+        with open(file_path, "rb") as f:   # bytes: ROS 2's lxml-based urdf_parser_py rejects str + encoding declaration
+            urdf: URDF = URDF.from_xml_string(f.read())
 
         # 엔드이펙터 collision mesh 경로 추출
         end_geometry_file_path = urdf.link_map[end_link_name].collision.geometry.filename
@@ -535,6 +571,11 @@ class EndEffectorPoseOptimizer:
         det = np.linalg.det(rt_rot_matrix)
         if det < 0:
             rt_rot_matrix[:, 0] *= -1.0
+        if abs(self.__rt_roll_about_facing_deg) > 1e-9:
+            # local facing 축(RT 프레임 기준) 둘레로 roll만큼 더 돌린다: R_world <- R_world @ Rot(local_axis, roll)
+            local_axis = self.__rt_pipe_facing_axis / np.linalg.norm(self.__rt_pipe_facing_axis)
+            rt_rot_matrix = rt_rot_matrix @ R.from_rotvec(
+                local_axis * np.deg2rad(self.__rt_roll_about_facing_deg)).as_matrix()
 
         if self.__is_debug_mode:
             rt_x_axis = rt_rot_matrix[:, 0]
@@ -883,8 +924,14 @@ class EndEffectorPoseOptimizer:
                 self.__dda_mesh if distance_reference_mesh is None else distance_reference_mesh,
             )
             _slots: list[dict | None] = []
-            for dda_pose in _base:
-                if self.__check_collision(self.__dda_mesh, dda_pose, self.__dda_invers_transform_mat):
+            self.debuging_info["candidate_log"] = []  # 재샘플링 시 마지막 후보 집합만 남긴다.
+            for _idx, dda_pose in enumerate(_base):
+                self.__current_candidate_index = _idx
+                self.__current_candidate_angle_deg = float(_idx * _step_deg)
+                _dda_collided = self.__check_collision(
+                    self.__dda_mesh, dda_pose, self.__dda_invers_transform_mat)
+                self.__log_candidate_collision("DDA", dda_pose, _dda_collided)
+                if _dda_collided:
                     _slots.append(None)
                     continue
                 slot = self.__process_dda_rt_combination(dda_pose, angle_of_rt, distance_from_dda_to_rt)
@@ -946,11 +993,17 @@ class EndEffectorPoseOptimizer:
             self.debuging_info["skipped_best_triple"] = best_triple
         elif not allow_2pair_fallback:
             return "[]", []
+        else:
+            self.debuging_info["selected_pose_pair_strategy"] = "automatic_90_fallback"
+
+        # Both automatic and forced two-pose selection use the 90-degree rule.
+        # Keep the force flag above solely for explicitly bypassing a valid triple.
+        use_90_fallback = True
 
         best_pair: tuple[int, int] | None = None
         best_pair_key: tuple | None = None
-        fallback_pair_gap_deg = 90.0 if force_90_fallback else 120.0
-        fallback_pair_labels = ("0", "90") if force_90_fallback else ("0", "120")
+        fallback_pair_gap_deg = 90.0 if use_90_fallback else 120.0
+        fallback_pair_labels = ("0", "90") if use_90_fallback else ("0", "120")
         # 90도 fallback은 두 RT(-y)축이 ±45도에 가장 가까운 쌍을 고른다.
         fallback_reference_deg = 45.0
         if self.__is_debug_mode:
@@ -960,7 +1013,7 @@ class EndEffectorPoseOptimizer:
         # grid에 45도가 있어야 하고(45=360/8 → 8의 배수), ±45/±60/90/120을 모두 정확히
         # 담으려면 LCM(8,3,4,6)=24의 배수가 필요하다. 현재 후보 수 이상인 24의 배수로
         # 재샘플링한다. (예: 9->24, 15->24, 25->48). step 30도(=12개)로는 45도를 못 찍는다.
-        if force_90_fallback and num_candidates % 24 != 0:
+        if use_90_fallback and num_candidates % 24 != 0:
             resampled_num = int(math.ceil(num_candidates / 24.0)) * 24
             if resampled_num != num_candidates:
                 num_candidates = resampled_num
@@ -976,7 +1029,7 @@ class EndEffectorPoseOptimizer:
         # 90도 fallback일 때만 사용: 각 후보 slot의 RT(-y)축 각도를 미리 계산한다.
         # 90도 2쌍 조건: RT source가 반대 방향을 바라봐야 하므로 지향축을 뒤집어 측정한다.
         facing_angles: dict[int, list[float]] = {}
-        if force_90_fallback:
+        if use_90_fallback:
             for idx in valid_indices:
                 angs = self.__rt_slot_facing_angles_deg(
                     slot_results[idx], flip_facing=True  # type: ignore[arg-type]
@@ -1024,7 +1077,7 @@ class EndEffectorPoseOptimizer:
                     continue
                 # 90도 fallback: RT(-y)축이 ±45에 가장 가까운 쌍을 1순위로 선택한다.
                 # 그 다음 gap 편차, 마지막으로 더 앞선 index 조합을 택한다.
-                if force_90_fallback:
+                if use_90_fallback:
                     pm_dev = pair_pm_deviation(i, j)
                     if pm_dev is None:
                         continue
@@ -1038,7 +1091,7 @@ class EndEffectorPoseOptimizer:
         if best_pair is None:
             return "[]", []
 
-        if self.__is_debug_mode and force_90_fallback:
+        if self.__is_debug_mode and use_90_fallback:
             self.debuging_info["fallback_pair_pm45_deviation_deg"] = best_pair_key[0]
             self.debuging_info["fallback_pair_facing_angles_deg"] = [
                 facing_angles.get(idx) for idx in best_pair
@@ -1119,6 +1172,7 @@ class EndEffectorPoseOptimizer:
             rt1_pose,
             self.__rt_invers_transform_mat,
         )
+        self.__log_candidate_collision("RT1", rt1_pose, is_rt1_collision)
         if not is_rt1_collision:
             result["RT1"] = rt1_pose.tolist()
 
@@ -1128,6 +1182,7 @@ class EndEffectorPoseOptimizer:
             rt2_pose,
             self.__rt_invers_transform_mat,
         )
+        self.__log_candidate_collision("RT2", rt2_pose, is_rt2_collision)
         if not is_rt2_collision:
             result["RT2"] = rt2_pose.tolist()
 
@@ -1151,12 +1206,152 @@ class EndEffectorPoseOptimizer:
     def calculate_pipe_profile(
         self,
         target_point: tuple[float, float, float] | np.ndarray,  # x,y,z
+        params: "PipeProfileParams | None" = None,
+        *,
+        sampling_size_for_calculating_normal: float | None = None,
+        radius_offset_for_sampling_points_in_sphere: float | None = None,
+        sampling_cylinder_radius: float | None = None,
+        sampling_cylinder_height_range: tuple[float, float] | None = None,
+    ):
+        """선택한 배관 표면점 주변의 로컬 원통 프로파일(축/중심/반지름)을 계산하고 검증한다.
+
+        params.method == "ransac"(기본): 주변 점군에 RANSAC 원통 피팅 (법선 정확도에 의존하지 않음).
+        params.method == "cluster": 기존 ROI 클러스터 + 최소제곱 방식.
+        어느 쪽이든 결과가 검증을 통과하지 못하면 PipeProfileError(사유 포함)를 던지고, 디버그 정보
+        (debuging_info)에 피팅 중간 결과를 남긴다. 예전 키워드 인자는 params를 덮어쓰는 용도로만 남겨뒀다.
+        """
+        import dataclasses
+
+        profile = dataclasses.replace(params) if params is not None else PipeProfileParams()
+        if sampling_size_for_calculating_normal is not None:
+            profile.normal_sampling_size = float(sampling_size_for_calculating_normal)
+        if radius_offset_for_sampling_points_in_sphere is not None:
+            profile.sphere_radius_offset = float(radius_offset_for_sampling_points_in_sphere)
+        if sampling_cylinder_radius is not None:
+            profile.cluster_roi_radius = float(sampling_cylinder_radius)
+        if sampling_cylinder_height_range is not None:
+            profile.cluster_height_range = tuple(float(v) for v in sampling_cylinder_height_range)
+        profile.check()
+        if profile.method == "cluster":
+            return self.__calculate_pipe_profile_cluster(
+                target_point,
+                sampling_size_for_calculating_normal=profile.normal_sampling_size,
+                radius_offset_for_sampling_points_in_sphere=profile.sphere_radius_offset,
+                sampling_cylinder_radius=profile.cluster_roi_radius,
+                sampling_cylinder_height_range=profile.cluster_height_range,
+                profile_params=profile,
+            )
+        return self.__calculate_pipe_profile_ransac(target_point, profile)
+
+    def __scan_kdtree(self):
+        """scan 점군의 KDTree (같은 scan이면 재사용 - 검사점마다 다시 만들면 수백만 점에서 느리다)."""
+        scan = self._scan_data
+        cache = getattr(self, "_scan_kdtree_cache", None)
+        if cache is None or cache[0] is not scan or cache[1] != len(scan.points):
+            cache = (scan, len(scan.points), o3d.geometry.KDTreeFlann(scan))
+            self._scan_kdtree_cache = cache
+        return cache[2]
+
+    def __diagnose_clusters(self, anchor, profile: "PipeProfileParams"):
+        """ROI + 클러스터 중간 결과를 debuging_info에 남긴다 (RANSAC 방식에서도 실패 원인 시각화용)."""
+        try:
+            scan_points = np.asarray(self._scan_data.points, dtype=float)
+            gap = np.full(3, profile.normal_sampling_size, dtype=np.float64)
+            box = o3d.geometry.AxisAlignedBoundingBox(anchor - gap, anchor + gap)  # type: ignore
+            idx = box.get_point_indices_within_bounding_box(self._scan_data.points)
+            if not idx:
+                return
+            normal = np.median(np.asarray(self._scan_data.normals)[idx], axis=0)
+            if np.linalg.norm(normal) < 1e-9:
+                return
+            inward = -normal
+            roi_points = self.__extract_points_in_cylinder(
+                scan_points, anchor, inward, profile.cluster_roi_radius, profile.cluster_height_range)
+            self.debuging_info["pipe_profile_target_point"] = anchor
+            self.debuging_info["pipe_profile_normal_axis"] = inward
+            self.debuging_info["pipe_profile_sampling_cylinder"] = {
+                "start": anchor, "axis": inward, "radius": profile.cluster_roi_radius,
+                "height_range": profile.cluster_height_range,
+            }
+            clusters = self.__cluster_points_along_line(roi_points, anchor, inward, profile.cluster_roi_radius)
+            self.debuging_info["pipe_profile_clusters"] = clusters
+            if len(clusters) >= 2 and len(clusters[1]):
+                opposite = clusters[1][-1]
+                center = (anchor + opposite) / 2
+                self.debuging_info["estimated_center"] = center
+                self.debuging_info["estimated_radius"] = float(np.linalg.norm(opposite - center))
+        except Exception as exc:  # diagnostics must never break the fit
+            self.debuging_info["pipe_profile_cluster_diag_error"] = str(exc)
+
+    def __calculate_pipe_profile_ransac(self, target_point, profile: "PipeProfileParams"):
+        """주변 점군(neighborhood)에 RANSAC 원통 피팅을 하고 결과를 검증한다."""
+        self.debuging_info = {}
+        self.debuging_info["pipe_profile_method"] = "ransac"
+        self.debuging_info["pipe_profile_params"] = dataclasses_asdict(profile)
+        scan_points = np.asarray(self._scan_data.points, dtype=float)
+        if len(scan_points) == 0:
+            raise RuntimeError("scan_data has no points.")
+        if not self._scan_data.has_normals():
+            raise RuntimeError("scan_data has no normals (required for RANSAC pipe profile fitting).")
+        target = np.asarray(target_point, dtype=float).reshape(3)
+        anchor_index = int(np.argmin(np.linalg.norm(scan_points - target, axis=1)))
+        anchor = scan_points[anchor_index]
+        self.debuging_info["pipe_profile_input_center_point"] = target
+        self.debuging_info["pipe_profile_nearest_surface_point"] = anchor
+        self.debuging_info["pipe_profile_target_point"] = anchor
+        self.__diagnose_clusters(anchor, profile)
+
+        _, ids, _ = self.__scan_kdtree().search_radius_vector_3d(anchor, float(profile.neighborhood_radius))
+        ids = np.asarray(ids, dtype=int)
+        rng = np.random.default_rng(profile.seed)
+        if len(ids) > profile.max_neighborhood_points:
+            ids = rng.choice(ids, int(profile.max_neighborhood_points), replace=False)
+        points = scan_points[ids]
+        normals = np.asarray(self._scan_data.normals, dtype=float)[ids]
+        self.debuging_info["pipe_profile_neighborhood"] = points
+        if len(points) < profile.min_inliers:
+            reasons = [f"only {len(points)} scan points within {profile.neighborhood_radius * 1000:.0f}mm of the selected point"]
+            self.debuging_info["pipe_profile_validation"] = {"ok": False, "reasons": reasons, "metrics": {}}
+            raise PipeProfileError("Pipe profile fit rejected: " + "; ".join(reasons), reasons)
+
+        model = ransac_cylinder(points, normals, anchor, profile, rng)
+        if model is None:
+            reasons = [
+                "RANSAC found no cylinder hypothesis through the selected point "
+                f"(radius range {profile.radius_min * 1000:.0f}-{profile.radius_max * 1000:.0f}mm, "
+                f"{profile.ransac_iterations} iterations) - not a straight pipe section here, or the radius range is wrong"]
+            self.debuging_info["pipe_profile_validation"] = {"ok": False, "reasons": reasons, "metrics": {}}
+            raise PipeProfileError("Pipe profile fit rejected: " + "; ".join(reasons), reasons)
+        if profile.refine:
+            model = refine_cylinder(points, normals, model, profile)
+        metrics = fit_metrics(points, model, anchor)
+        reasons = validate_fit(model["radius"], metrics, len(points), profile)
+        self.debuging_info["pipe_profile_fit"] = {
+            "center": np.asarray(model["center"], dtype=float).tolist(),
+            "direction": np.asarray(model["axis"], dtype=float).tolist(),
+            "radius": float(model["radius"]),
+        }
+        self.debuging_info["pipe_profile_inliers"] = points[model["mask"]]
+        metrics["n_neighborhood"] = int(len(points))
+        metrics["inlier_ratio"] = float(metrics["n_inliers"] / max(1, len(points)))
+        self.debuging_info["pipe_profile_validation"] = {
+            "ok": not reasons, "reasons": reasons, "metrics": metrics}
+        if reasons and profile.validate:
+            raise PipeProfileError("Pipe profile fit rejected: " + "; ".join(reasons), reasons)
+        self.__pipe_direction = np.asarray(model["axis"], dtype=float)
+        self.__pipe_center = np.asarray(model["center"], dtype=float)
+        self.__pipe_radius = float(model["radius"])
+
+    def __calculate_pipe_profile_cluster(
+        self,
+        target_point: tuple[float, float, float] | np.ndarray,  # x,y,z
         sampling_size_for_calculating_normal: float = 0.01,
         radius_offset_for_sampling_points_in_sphere: float = 0.003,
         sampling_cylinder_radius: float = 0.005,
         sampling_cylinder_height_range: tuple[float, float] = (-0.1, 0.3),
+        profile_params: "PipeProfileParams | None" = None,
     ):
-        """선택한 배관 표면점 주변에서 로컬 원통 프로파일을 계산한다.
+        """(legacy, method="cluster") 선택한 배관 표면점 주변에서 로컬 원통 프로파일을 계산한다.
 
         1. 선택점 주변의 local normal을 추정한다.
         2. normal 반대 방향의 작은 실린더 ROI에서 피팅 후보점을 얻는다.
@@ -1268,6 +1463,29 @@ class EndEffectorPoseOptimizer:
             self.debuging_info["points_in_sphere"] = points_in_sphere
 
         direction, center, radius, _ = fit_cylinder(points_in_sphere)
+
+        self.debuging_info["pipe_profile_method"] = "cluster"
+        self.debuging_info["pipe_profile_fit"] = {
+            "center": np.asarray(center, dtype=float).tolist(),
+            "direction": np.asarray(direction, dtype=float).tolist(),
+            "radius": float(radius),
+        }
+        # 검증: 클러스터 방식은 반대편 벽을 못 찾으면 mm 단위의 가짜 원통을 만들어도 성공으로 처리됐다.
+        if profile_params is not None and profile_params.validate:
+            reasons = []
+            if not (profile_params.radius_min <= float(radius) <= profile_params.radius_max):
+                reasons.append(
+                    f"radius {float(radius) * 1000:.1f}mm outside "
+                    f"[{profile_params.radius_min * 1000:.0f}, {profile_params.radius_max * 1000:.0f}]mm")
+            if estimated_radius > 0 and abs(float(radius) - estimated_radius) / estimated_radius > profile_params.max_radius_mismatch:
+                reasons.append(
+                    f"fit radius {float(radius) * 1000:.1f}mm disagrees with cluster estimate "
+                    f"{estimated_radius * 1000:.1f}mm (second cluster is probably not the opposite wall)")
+            self.debuging_info["pipe_profile_validation"] = {
+                "ok": not reasons, "reasons": reasons,
+                "metrics": {"n_fit_points": int(len(points_in_sphere)), "estimated_radius": estimated_radius}}
+            if reasons:
+                raise PipeProfileError("Pipe profile fit rejected: " + "; ".join(reasons), reasons)
 
         # 최종 원통 피팅 결과를 현재 배관 프로파일로 저장한다.
         self.__pipe_direction = direction
@@ -1572,9 +1790,13 @@ class EndEffectorPoseOptimizer:
             실제로는 한 번도 안 쓰이던 상태였다.
         """
         if self.__collision_checker is not None:
-            return bool(self.__collision_checker(
+            collided = bool(self.__collision_checker(
                 link_model, tcp_pose, tcp_to_link_pose_T,
                 margin=margin, sample_count=sample_count))
+            # checker가 last_hit(장애물 종류/거리/점)을 제공하면 후보 로그용으로 보관한다.
+            self.__last_collision_info = getattr(self.__collision_checker, "last_hit", None) if collided else None
+            return collided
+        self.__last_collision_info = None
 
         # TCP pose와 TCP-to-link 변환으로 link mesh world pose를 계산한다.
         tcp_pose_T = np.eye(4)

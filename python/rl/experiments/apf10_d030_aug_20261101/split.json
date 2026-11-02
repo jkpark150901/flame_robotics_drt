@@ -1,0 +1,133 @@
+{
+  "train": [
+    [
+      "planning_snapshot_p1_2.apfgoal.pkl",
+      "Point 2 - Inspection pose 1"
+    ],
+    [
+      "planning_snapshot_p1_2.apfgoal.pkl",
+      "Point 1 - Inspection pose 2"
+    ],
+    [
+      "planning_snapshot_p1_2.apfgoal.pkl",
+      "Point 1 - Inspection pose 3"
+    ],
+    [
+      "planning_snapshot_p1_2.apfgoal.pkl",
+      "Point 2 - Inspection pose 3"
+    ],
+    [
+      "planning_snapshot_p2_3.apfgoal.pkl",
+      "Point 2 - Inspection pose 1"
+    ],
+    [
+      "planning_snapshot_p2_3.apfgoal.pkl",
+      "Point 1 - Inspection pose 1"
+    ],
+    [
+      "planning_snapshot_p2_3.apfgoal.pkl",
+      "Point 3 - Inspection pose 3"
+    ],
+    [
+      "planning_snapshot_p2_3.apfgoal.pkl",
+      "Point 2 - Inspection pose 3"
+    ],
+    [
+      "planning_snapshot_p2_3.apfgoal.pkl",
+      "Point 1 - Inspection pose 3"
+    ],
+    [
+      "planning_snapshot_p3_6.apfgoal.pkl",
+      "Point 3 - Inspection pose 1"
+    ],
+    [
+      "planning_snapshot_p3_6.apfgoal.pkl",
+      "Point 5 - Inspection pose 1"
+    ],
+    [
+      "planning_snapshot_p3_6.apfgoal.pkl",
+      "Point 4 - Inspection pose 1"
+    ],
+    [
+      "planning_snapshot_p3_6.apfgoal.pkl",
+      "Point 2 - Inspection pose 1"
+    ],
+    [
+      "planning_snapshot_p3_6.apfgoal.pkl",
+      "Point 1 - Inspection pose 1"
+    ],
+    [
+      "planning_snapshot_p3_6.apfgoal.pkl",
+      "Point 4 - Inspection pose 2"
+    ],
+    [
+      "planning_snapshot_p3_6.apfgoal.pkl",
+      "Point 2 - Inspection pose 2"
+    ],
+    [
+      "planning_snapshot_p3_6.apfgoal.pkl",
+      "Point 3 - Inspection pose 3"
+    ],
+    [
+      "planning_snapshot_p3_6.apfgoal.pkl",
+      "Point 1 - Inspection pose 3"
+    ],
+    [
+      "planning_snapshot_p3_6.apfgoal.pkl",
+      "Point 2 - Inspection pose 3"
+    ],
+    [
+      "planning_snapshot_p3_6.apfgoal.pkl",
+      "Point 5 - Inspection pose 3"
+    ],
+    [
+      "planning_snapshot_p3_6.apfgoal.pkl",
+      "Point 5 - Inspection pose 2"
+    ],
+    [
+      "planning_snapshot_p3_6.apfgoal.pkl",
+      "Point 1 - Inspection pose 2"
+    ],
+    [
+      "planning_snapshot_p3_6.apfgoal.pkl",
+      "Point 6 - Inspection pose 3"
+    ],
+    [
+      "planning_snapshot_p3_6.apfgoal.pkl",
+      "Point 4 - Inspection pose 3"
+    ]
+  ],
+  "eval": [
+    [
+      "planning_snapshot_p1_2.apfgoal.pkl",
+      "Point 1 - Inspection pose 1"
+    ],
+    [
+      "planning_snapshot_p1_2.apfgoal.pkl",
+      "Point 2 - Inspection pose 2"
+    ],
+    [
+      "planning_snapshot_p2_3.apfgoal.pkl",
+      "Point 3 - Inspection pose 1"
+    ],
+    [
+      "planning_snapshot_p2_3.apfgoal.pkl",
+      "Point 1 - Inspection pose 2"
+    ],
+    [
+      "planning_snapshot_p3_6.apfgoal.pkl",
+      "Point 6 - Inspection pose 1"
+    ],
+    [
+      "planning_snapshot_p3_6.apfgoal.pkl",
+      "Point 3 - Inspection pose 2"
+    ],
+    [
+      "planning_snapshot_p3_6.apfgoal.pkl",
+      "Point 6 - Inspection pose 2"
+    ]
+  ],
+  "seed": 0,
+  "ratio_eval": 0.2,
+  "robot": "dda_rb10_1300e"
+}

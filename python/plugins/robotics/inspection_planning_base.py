@@ -77,6 +77,8 @@ class InspectionIKRequest:
         ik_config: damping, dt, tol, max_iter 등 IK 설정 dict.
         ik_solver: 요청에서 override된 solver 이름.
         ik_normalize: 요청에서 override된 joint 정규화 여부.
+        preset_goal_q: 미리 풀어 스냅샷에 저장해 둔 목표 q(precompute_ik_goals.py). 주어지면 IK를 다시 풀지 않고
+            이 q를 목표로 쓴다(목표 pose 오차와 충돌만 확인).
     """
 
     robot_name: str
@@ -89,6 +91,7 @@ class InspectionIKRequest:
     ik_config: Dict[str, Any] = field(default_factory=dict)
     ik_solver: Optional[str] = None
     ik_normalize: Optional[bool] = None
+    preset_goal_q: Optional[Sequence[float]] = None
 
 
 #: Resolution (rad, q-space) used for the FINAL accept/reject verify_path()
@@ -176,6 +179,7 @@ class InspectionPlanningBase:
             position_only_tol=float(ik_config.get("position_only_tol", 0.01)),
             backend_solver=str(ik_config.get("qp_solver", "quadprog")),
             record_trace=True,
+            extra=dict(ik_config),   # collision_free solver parameters (multi_start, clearance_safe, ...)
         )
 
     @staticmethod
@@ -262,6 +266,31 @@ class InspectionPlanningBase:
             "normalize":            bool(ik_result.normalize),
         }
 
+    # 저장된 목표 q가 목표 pose에서 이보다 벗어나면 (스냅샷과 다른 배관/자세) 쓰지 않고 실패로 본다
+    PRESET_POS_TOL = 5e-3   # the collision-free IK accepts ~2 mm (p1 Point 1 pose 1 RT: 2.02 mm was rejected at 2 mm)
+    PRESET_ROT_TOL = 0.02
+
+    def preset_ik_result(self, request: InspectionIKRequest, target_world_T) -> IKResult:
+        """IK 대신 스냅샷에 저장된 목표 q (request.preset_goal_q)를 IKResult로 감싼다.
+
+        목표 pose와의 위치/자세 오차가 PRESET_POS_TOL / PRESET_ROT_TOL 이내일 때만 success. 충돌 여부는 호출부의
+        ik_result_summary가 IK 결과와 똑같이 검사한다."""
+        t0 = time.perf_counter()
+        q = np.asarray(request.preset_goal_q, dtype=float)
+        reached_T = np.asarray(self.backend.frame_world_T(request.robot_name, q, request.frame_name), dtype=float)
+        target_T = np.asarray(target_world_T, dtype=float)
+        pos_err = float(np.linalg.norm(reached_T[:3, 3] - target_T[:3, 3]))
+        cos = (np.trace(reached_T[:3, :3].T @ target_T[:3, :3]) - 1.0) / 2.0
+        rot_err = float(np.arccos(np.clip(cos, -1.0, 1.0)))
+        ok = pos_err <= self.PRESET_POS_TOL and rot_err <= self.PRESET_ROT_TOL
+        return IKResult(
+            success=ok, q=q, solver="preset", normalize=False, iterations=0, elapsed=time.perf_counter() - t0,
+            position_error=pos_err, orientation_error=rot_err, final_T=reached_T, target_T=target_T,
+            failure_info={} if ok else {"reason": "preset_goal_pose_mismatch", "position_error": pos_err,
+                                        "orientation_error": rot_err},
+            message="preset goal q from snapshot" if ok else "preset goal q does not reach the target pose",
+        )
+
     def check_inspection_ik_for_robot(self, request: InspectionIKRequest) -> Dict[str, Any]:
         """한 로봇의 검사 목표 pose에 대해 IK만 확인한다.
 
@@ -294,13 +323,20 @@ class InspectionPlanningBase:
 
         stage_t0 = time.perf_counter()
         options = self.ik_options(request.ik_config, request.ik_solver, request.ik_normalize)
-        result = self.backend.solve_ik(
-            request.robot_name,
-            target_world_T,
-            start_q,
-            options=options,
-            frame_name=request.frame_name,
-        )
+        if request.preset_goal_q is not None:
+            result = self.preset_ik_result(request, target_world_T)
+        else:
+            result = self.backend.solve_ik(
+                request.robot_name,
+                target_world_T,
+                start_q,
+                options=options,
+                frame_name=request.frame_name,
+            )
+        multi_start_info = dict(result.extra) if getattr(result, "extra", None) else None
+        if multi_start_info:
+            print(f"IK {result.solver} [{request.robot_name}]: " + ", ".join(
+                f"{k}={v:.3f}" if isinstance(v, float) else f"{k}={v}" for k, v in multi_start_info.items()))
         timings["ik"] = time.perf_counter() - stage_t0
 
         ik_success = bool(result.success)
@@ -357,9 +393,11 @@ class InspectionPlanningBase:
             "ik_solver": result.solver,
             "ik_normalize": result.normalize,
             "collision_free": not ik_collision,
+            "ik_extra": multi_start_info,   # solver diagnostics (collision_free: seeds, apf_goal_refine incl. q_before)
             "ik_reached_T": np.asarray(reached_T, dtype=float),
             "ik_target_T": np.asarray(target_world_T, dtype=float),
             "ik_trace": self.trace_to_rows(result),
+            "ik_multi_start": multi_start_info,
             "timing": timings,
         }
 
@@ -445,11 +483,60 @@ class InspectionPlanningBase:
         if original is None:
             yield
             return
+        backend = getattr(planner, "robotics_backend", None)
+        name = getattr(planner, "robotics_robot_name", None)
+        handle = backend.robot_handle(name) if backend is not None and name and hasattr(backend, "robot_handle") else None
+        original_backend = handle.sample_resolution if handle is not None else None
         planner.pin_collision_sample_resolution = float(resolution)
+        if handle is not None:
+            handle.sample_resolution = float(resolution)
         try:
             yield
         finally:
             planner.pin_collision_sample_resolution = original
+            if handle is not None:
+                handle.sample_resolution = original_backend
+
+    def audit_planned_path(self, planner, path, resolution=0.005, max_repairs=3):
+        from plugins.robotics.path_repair import audit_and_repair
+        name = planner.robotics_robot_name
+        def replan(start, goal, step):
+            previous = getattr(planner, "planning_deadline", None)
+            try:
+                planner.planning_deadline = time.monotonic() + 180.0
+                with self.tight_verification_resolution(planner, step):
+                    return planner.generate(start, goal)
+            finally:
+                planner.planning_deadline = previous
+        return audit_and_repair(
+            path, lambda q: self.backend.check_collision(name, q).collision,
+            replan, resolution=resolution, max_repairs=max_repairs)
+
+    def plan_joint_retreat(self, planner, q_start, q_goal, timeout=180.0):
+        """Plan an exact joint goal; never return an unchecked preview/fallback."""
+        start, goal = np.asarray(q_start, dtype=float), np.asarray(q_goal, dtype=float)
+        started = time.perf_counter()
+        previous_deadline = getattr(planner, "planning_deadline", None)
+        try:
+            planner.planning_deadline = time.monotonic() + timeout if timeout > 0 else None
+            # Tight sampling must apply during search as well as final verification.
+            with self.tight_verification_resolution(planner):
+                path = planner.generate(start, goal)
+                if path is None or len(path) < 2:
+                    raise RuntimeError(f"retreat planning failed: {getattr(planner, 'last_planning_status', 'empty_path')}")
+                points = np.asarray(path, dtype=float)
+                if (points.ndim != 2 or points.shape[1:] != start.shape
+                        or not np.isfinite(points).all()
+                        or not np.allclose(points[0], start, atol=1e-6, rtol=0)
+                        or not np.allclose(points[-1], goal, atol=1e-6, rtol=0)):
+                    raise RuntimeError("retreat planning failed: incomplete path")
+                verification = planner.verify_path(path)
+                if verification.get("colliding_edges", 0) or verification.get("colliding_waypoints", 0):
+                    raise RuntimeError("retreat planning failed: returned_path_collision")
+            return {"q_path": points.tolist(), "status": "success", "kind": "retreat",
+                    "verification": verification, "elapsed": time.perf_counter() - started}
+        finally:
+            planner.planning_deadline = previous_deadline
 
     def link_min_distance(self, robot_name: str, q, link_names: Sequence[str]) -> Optional[float]:
         """link_names에 해당하는 링크의 장애물까지 최소 거리. 거리 데이터가 없으면 None."""
@@ -473,6 +560,9 @@ class InspectionPlanningBase:
         step 간격마다 직전 해를 seed로 IK를 다시 풀어 카르테시안 직선을 만든다(관절 보간이 아님).
         """
         options = self.ik_options(request.ik_config, request.ik_solver, request.ik_normalize)
+        if str(options.solver).lower() in ("collision_free", "collision_free_ik", "cf"):
+            from dataclasses import replace as _replace
+            options = _replace(options, solver="pybullet", extra={})
         T_seed = self.backend.frame_world_T(request.robot_name, q_seed, request.frame_name)
         p_start = T_seed[:3, 3].copy()
         p_end = np.asarray(p_end, dtype=float).reshape(3)

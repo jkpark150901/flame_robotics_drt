@@ -1,0 +1,54 @@
+{
+  "index": 12,
+  "group_name": "Point 2 - Inspection pose 2",
+  "robot_name": "dda_rb10_1300e",
+  "pose_name": "DDA",
+  "status": "failed",
+  "status_kind": "failed",
+  "category": "ik_failure",
+  "message": "ik_fallback",
+  "n_waypoints": 40,
+  "has_path": true,
+  "elapsed": 50.497723918175325,
+  "positioner_r_deg": 270.0,
+  "planner_stats": {
+    "state_validity_calls": 613,
+    "collision_rejects": 147,
+    "workspace_rejects": 0,
+    "solve_time": 8.632419103989378,
+    "algorithm": "RRTConnect",
+    "max_iter": 16000,
+    "iterations": 613,
+    "timeout_sec": 299.9705452588387,
+    "iteration_ptc_error": null,
+    "path_cost": 0.9612586437783043
+  },
+  "ik_failure": {
+    "reason": "preset_goal_pose_mismatch",
+    "position_error": 0.009742027709988981,
+    "orientation_error": 0.0022502112315078635
+  },
+  "n_colliding_edges": 0,
+  "colliding_edges": [],
+  "goal_q": [
+    0.3827315019923066,
+    0.6953910281988854,
+    1.7176882182437212,
+    2.089467606414159,
+    -2.8677629357166956,
+    2.262938522010369,
+    -1.0523696318105644,
+    0.1713228558465058
+  ],
+  "ik_goal_q": null,
+  "diag": null,
+  "verification": {
+    "colliding_edges": 0,
+    "colliding_waypoints": 0,
+    "collision_pairs": [],
+    "edge_collisions": [],
+    "waypoint_collisions": [],
+    "end_link_colliding": false,
+    "backend": "pinocchio"
+  }
+}

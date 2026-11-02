@@ -1,0 +1,66 @@
+[
+  {
+    "title": "추종 성능 확인 요약 · 2페이지",
+    "file": "sources/rb_servo_gui/docs/report/tracking_summary_2p.pdf",
+    "pages": 2,
+    "merged_start": 2,
+    "merged_end": 3,
+    "sha256": "e8efbde0d1436d669f44982c969405cfc12f9c7b5924ab0e9caa79c14c519a16"
+  },
+  {
+    "title": "궤적 추종 성능 평가 전체 보고서",
+    "file": "sources/rb_servo_gui/docs/report/report.pdf",
+    "pages": 31,
+    "merged_start": 4,
+    "merged_end": 34,
+    "sha256": "c1c19b41360d2844bd2a6697a9778236bc9b4584d736c77af9bb805d25c07b20"
+  },
+  {
+    "title": "웨이포인트 분할·속도·경유점 도달 오차",
+    "file": "sources/rb_servo_test/jb2_gui/report/report.pdf",
+    "pages": 12,
+    "merged_start": 35,
+    "merged_end": 46,
+    "sha256": "9f3a4baaae816a1a43f703b8757c9c246f31249fcf2b3f98d1b79b5257a02314"
+  },
+  {
+    "title": "동일 조건 반복 기록·오차 방향 분석",
+    "file": "sources/rb_servo_gui/docs/report/repeatability/README.pdf",
+    "pages": 3,
+    "merged_start": 47,
+    "merged_end": 49,
+    "sha256": "2834df98f76fdf50a4fbe25faa03ec66c2d6336aa7185b4f3effc6d902ba683a"
+  },
+  {
+    "title": "평가 지표 해설",
+    "file": "sources/rb_servo_gui/docs/metrics.pdf",
+    "pages": 22,
+    "merged_start": 50,
+    "merged_end": 71,
+    "sha256": "88edc31ece8cbc7ea9f1919a3c4bb448ad09245adad39fc2e0573e0ee6e85e7c"
+  },
+  {
+    "title": "외부 스크립트 인터페이스 정의서",
+    "file": "sources/rb_servo_gui/docs/interface_spec.pdf",
+    "pages": 8,
+    "merged_start": 72,
+    "merged_end": 79,
+    "sha256": "4855a1b563ebe68755ed16b372289901b7f375e3fb81e312ac4b734cfd391b39"
+  },
+  {
+    "title": "결과 데이터 명세서",
+    "file": "sources/rb_servo_gui/docs/report/RESULTS_SPEC.pdf",
+    "pages": 6,
+    "merged_start": 80,
+    "merged_end": 85,
+    "sha256": "fa2daa84e5c1046ceab653ce855798d96e232f7dc36d00a65af45ead14c2fbe9"
+  },
+  {
+    "title": "실험 데이터 명세서",
+    "file": "sources/rb_servo_gui/docs/report/DATA_SPEC.pdf",
+    "pages": 12,
+    "merged_start": 86,
+    "merged_end": 97,
+    "sha256": "c0103890b829939911a40464ccfbffd5d136d898ed30f82e03497e827e0e914e"
+  }
+]

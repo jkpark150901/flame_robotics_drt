@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rb-servo-gui"
+version = "0.1.0"
+description = "Rainbow Robotics 외부 스크립트(move_jb2_add / move_servo_j) 궤적 추종 시험 GUI"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.21",
+    "scipy>=1.7",
+    "matplotlib>=3.5",
+]
+
+[project.scripts]
+rb-servo-gui = "rb_servo_gui.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

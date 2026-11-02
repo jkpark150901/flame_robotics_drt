@@ -31,6 +31,8 @@ class IKOptions:
     position_only_tol: float = 0.01
     backend_solver: str = "quadprog"
     record_trace: bool = True
+    # solver-specific parameters (collision_free: multi_start, clearance_safe, ...), see collision_free_ik.py
+    extra: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -59,6 +61,7 @@ class IKResult:
     trace: List[IKTracePoint] = field(default_factory=list)
     failure_info: Dict[str, Any] = field(default_factory=dict)
     message: str = ""
+    extra: Dict[str, Any] = field(default_factory=dict)   # solver diagnostics (collision_free: seeds / refinement counts)
 
 
 @dataclass

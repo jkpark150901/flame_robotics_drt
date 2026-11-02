@@ -19,5 +19,5 @@ module if one of these doesn't fit.
 """
 
 OPTIMIZER_MODULES = frozenset({
-    "bspline", "gpmp2", "path_pruning", "stomp", "topp_ra", "trajopt",
+    "bspline", "chomp", "chomp_moveit", "gpmp2", "path_pruning", "pp_shortcut", "stomp", "topp_ra", "trajopt",
 })

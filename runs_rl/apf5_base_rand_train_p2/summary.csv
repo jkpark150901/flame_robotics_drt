@@ -1,0 +1,19 @@
+index,group_name,robot_name,pose_name,status,message,n_waypoints,iterations,max_iter,solve_time,iteration_ptc_error,positioner_r_deg,status_kind,failure_category,elapsed
+0,Point 1 - Inspection pose 1,dda_rb10_1300e,DDA,success,,34,107,16000,2.3348304969258606,,90.0,success,,12.494189474964514
+1,Point 1 - Inspection pose 1,rb20_1900es,RT,success,,9,70,16000,0.05377246695570648,,90.0,success,,1.8340649830643088
+2,Point 2 - Inspection pose 1,dda_rb10_1300e,DDA,success,,23,45,16000,2.4678630200214684,,90.0,success,,12.779726674081758
+3,Point 2 - Inspection pose 1,rb20_1900es,RT,success,,4,21,16000,0.01857509696856141,,90.0,success,,0.10834384383633733
+4,Point 3 - Inspection pose 1,dda_rb10_1300e,DDA,success,,27,42,16000,0.04080078308470547,,90.0,success,,0.22087807790376246
+5,Point 3 - Inspection pose 1,rb20_1900es,RT,success,,4,23,16000,0.019892460200935602,,90.0,success,,0.11890904791653156
+6,Point 3 - Inspection pose 3,dda_rb10_1300e,DDA,success,,53,78,16000,0.1097294520586729,,270.0,success,,1.9944172659888864
+7,Point 3 - Inspection pose 3,rb20_1900es,RT,success,,9,66,16000,0.05062754102982581,,270.0,success,,1.4872250070329756
+8,Point 3 - Inspection pose 2,dda_rb10_1300e,DDA,failed,ik_fallback,12,1159,16000,15.398809392005205,,270.0,failed,ik_failure,18.924092824105173
+9,Point 3 - Inspection pose 2,rb20_1900es,RT,success,,7,50,16000,0.0597786121070385,,270.0,success,,1.4093108579982072
+10,Point 2 - Inspection pose 3,dda_rb10_1300e,DDA,success,,26,48,16000,0.13635245710611343,,270.0,success,,2.1099131379742175
+11,Point 2 - Inspection pose 3,rb20_1900es,RT,success,,6,40,16000,0.10349403088912368,,270.0,success,,1.7634822560939938
+12,Point 2 - Inspection pose 2,dda_rb10_1300e,DDA,failed,ik_fallback,14,550,16000,6.544313462916762,,270.0,failed,ik_failure,11.447333612013608
+13,Point 2 - Inspection pose 2,rb20_1900es,RT,success,,9,81,16000,0.7653293590992689,,270.0,success,,2.3477729309815913
+14,Point 1 - Inspection pose 3,dda_rb10_1300e,DDA,success,,16,30,16000,0.34824016503989697,,270.0,success,,3.0852136560715735
+15,Point 1 - Inspection pose 3,rb20_1900es,RT,success,,6,43,16000,0.11997724999673665,,270.0,success,,1.852806790964678
+16,Point 1 - Inspection pose 2,dda_rb10_1300e,DDA,success,,64,112,16000,1.3006737928371876,,270.0,success,,5.247602412011474
+17,Point 1 - Inspection pose 2,rb20_1900es,RT,success,,6,51,16000,0.1776620268356055,,270.0,success,,1.526363573037088

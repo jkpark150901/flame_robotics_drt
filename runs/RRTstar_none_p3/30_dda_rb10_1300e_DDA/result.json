@@ -1,0 +1,50 @@
+{
+  "index": 30,
+  "group_name": "Point 2 - Inspection pose 2",
+  "robot_name": "dda_rb10_1300e",
+  "pose_name": "DDA",
+  "status": "failed",
+  "status_kind": "failed",
+  "category": "timeout_approximate",
+  "message": "planning failed for target: timeout_approximate",
+  "n_waypoints": 1,
+  "has_path": true,
+  "elapsed": 284.27751341392286,
+  "positioner_r_deg": 270.0,
+  "planner_stats": {
+    "state_validity_calls": 16000,
+    "collision_rejects": 3037,
+    "workspace_rejects": 0,
+    "solve_time": 264.96884139301255,
+    "algorithm": "RRTstar",
+    "max_iter": 16000,
+    "iterations": 16000,
+    "timeout_sec": 299.845638460014,
+    "iteration_ptc_error": null
+  },
+  "ik_failure": null,
+  "n_colliding_edges": 0,
+  "colliding_edges": [],
+  "goal_q": [
+    0.0,
+    0.3917839693943271,
+    1.0413247161753736,
+    0.7687569696472611,
+    2.2513484639995953,
+    -1.1649444841394767,
+    -1.1236727867147058,
+    -0.5943277493608571
+  ],
+  "ik_goal_q": [
+    0.0,
+    0.3917839693943271,
+    1.0413247161753736,
+    0.7687569696472611,
+    2.2513484639995953,
+    -1.1649444841394767,
+    -1.1236727867147058,
+    -0.5943277493608571
+  ],
+  "diag": null,
+  "verification": {}
+}

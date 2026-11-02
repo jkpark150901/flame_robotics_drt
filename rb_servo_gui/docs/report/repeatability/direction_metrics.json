@@ -1,0 +1,128 @@
+[
+  {
+    "paths": [
+      "/home/dev/rb_servo_gui_runs/20261008_111008_REAL_servo_step10",
+      "/home/dev/rb_servo_gui_runs/20261008_111351_REAL_servo_step10"
+    ],
+    "common_bins": 90,
+    "direction_bins": 76,
+    "median_cosine": 0.9849356710783183,
+    "positive_direction_ratio": 0.9473684210526315,
+    "joints": [
+      {
+        "joint": 1,
+        "bins": 44,
+        "same_sign": 1.0
+      },
+      {
+        "joint": 2,
+        "bins": 54,
+        "same_sign": 0.9814814814814815
+      },
+      {
+        "joint": 3,
+        "bins": 48,
+        "same_sign": 1.0
+      },
+      {
+        "joint": 4,
+        "bins": 43,
+        "same_sign": 0.9534883720930233
+      },
+      {
+        "joint": 5,
+        "bins": 45,
+        "same_sign": 1.0
+      },
+      {
+        "joint": 6,
+        "bins": 40,
+        "same_sign": 1.0
+      }
+    ]
+  },
+  {
+    "paths": [
+      "rb_servo_test/jb2_gui/out/20261016_141046_862354",
+      "rb_servo_test/jb2_gui/out/20261016_141107_694066"
+    ],
+    "common_bins": 8,
+    "direction_bins": 0,
+    "median_cosine": null,
+    "positive_direction_ratio": null,
+    "joints": [
+      {
+        "joint": 1,
+        "bins": 0,
+        "same_sign": null
+      },
+      {
+        "joint": 2,
+        "bins": 0,
+        "same_sign": null
+      },
+      {
+        "joint": 3,
+        "bins": 0,
+        "same_sign": null
+      },
+      {
+        "joint": 4,
+        "bins": 0,
+        "same_sign": null
+      },
+      {
+        "joint": 5,
+        "bins": 0,
+        "same_sign": null
+      },
+      {
+        "joint": 6,
+        "bins": 0,
+        "same_sign": null
+      }
+    ]
+  },
+  {
+    "paths": [
+      "rb_servo_test/jb2_gui/out/20261016_141054_813994",
+      "rb_servo_test/jb2_gui/out/20261016_141137_793703"
+    ],
+    "common_bins": 20,
+    "direction_bins": 0,
+    "median_cosine": null,
+    "positive_direction_ratio": null,
+    "joints": [
+      {
+        "joint": 1,
+        "bins": 0,
+        "same_sign": null
+      },
+      {
+        "joint": 2,
+        "bins": 0,
+        "same_sign": null
+      },
+      {
+        "joint": 3,
+        "bins": 0,
+        "same_sign": null
+      },
+      {
+        "joint": 4,
+        "bins": 0,
+        "same_sign": null
+      },
+      {
+        "joint": 5,
+        "bins": 0,
+        "same_sign": null
+      },
+      {
+        "joint": 6,
+        "bins": 0,
+        "same_sign": null
+      }
+    ]
+  }
+]

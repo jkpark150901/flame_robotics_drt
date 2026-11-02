@@ -89,12 +89,10 @@ def inspection_group_pose_items(group_info: Mapping[str, Any]) -> List[tuple]:
     to happen before the rotation is applied.
     """
     items: List[tuple] = []
-    dda_pose = group_info.get("dda_pose_resolved", group_info.get("dda_pose"))
-    if dda_pose is not None:
-        items.append((ef_pose_robot_name("DDA"), "DDA", np.asarray(dda_pose, dtype=float)))
-    rt_pose = group_info.get("rt_pose_resolved", group_info.get("rt_pose"))
-    if rt_pose is not None:
-        items.append((ef_pose_robot_name("RT"), "RT", np.asarray(rt_pose, dtype=float)))
+    for kind, key in (("RT", "rt_pose"), ("DDA", "dda_pose")):
+        pose = group_info.get(key + "_resolved", group_info.get(key))
+        if pose is not None:
+            items.append((ef_pose_robot_name(kind), kind, np.asarray(pose, dtype=float)))
     return items
 
 

@@ -1,0 +1,44 @@
+{
+ "source": "follow_jb2_20261007_195039.csv",
+ "mode": "jb2",
+ "params": {
+  "method": "move_jb2_add",
+  "speed": 200,
+  "accel": 300,
+  "blend": 50
+ },
+ "step": 10,
+ "metrics": {
+  "path_dev_mean": 0.10557536416992101,
+  "path_dev_rms": 0.15856996835457143,
+  "path_dev_p95": 0.3511861573475874,
+  "path_dev_max": 0.6625138573264994,
+  "pair_rmse_after": 0.06473591849966263,
+  "time_rmse_before": 3.4068030886822473,
+  "cover_mean": 0.12739889848059271,
+  "cover_p95": 0.4268163579055417,
+  "cover_max": 0.7472441261087249,
+  "progress_max": 0.9983483629239536,
+  "max_step": 0.55732553530231,
+  "start_err": 0.14221815123134718,
+  "end_err": 0.43281604466677237,
+  "lag_max": 0.008135972413254144,
+  "lag_min": -0.033275660021756776,
+  "lag_mean": -0.01602480973615047,
+  "lag_abs_max": 0.033275660021756776,
+  "lag_max_s": 0.2819928038433886,
+  "late_ratio": 0.0,
+  "early_ratio": 0.036734693877551024,
+  "T_ref": 14.6733,
+  "T_meas": 34.66,
+  "reached": true
+ },
+ "verdict": {
+  "경로 p95 <= 1deg": true,
+  "경로 max <= 2deg": true,
+  "커버리지 max <= 2deg": true,
+  "진행도 >= 99%": true,
+  "샘플간 이동 <= 5deg": true,
+  "시작/종료 오차 <= 0.5deg": true
+ }
+}

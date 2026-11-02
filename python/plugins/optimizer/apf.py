@@ -82,6 +82,22 @@ def path_attractive_cost(path_arr: np.ndarray, k_att: float = DEFAULT_K_ATT,
     return 0.5 * k_att * np.sum(diffs ** 2, axis=1)
 
 
+# True: APF distances come from the precomputed scene SDF (backend.link_obstacle_distances_sdf) when the backend has
+# one - the potential only needs distances up to d0, and the lookup is far cheaper than a mesh query per waypoint.
+# False: exact collision-engine distances (slower).
+USE_SDF = True
+
+
+def obstacle_distances(backend, robot_name: str, q):
+    """Per-(link, obstacle) distances for the APF cost: precomputed SDF when available, else the exact engine."""
+    if USE_SDF and hasattr(backend, "link_obstacle_distances_sdf"):
+        try:
+            return list(backend.link_obstacle_distances_sdf(robot_name, q))
+        except Exception:
+            pass  # e.g. collision scene not configured yet -> exact path reports the real error/empty result
+    return list(backend.link_obstacle_distances(robot_name, q))
+
+
 def robot_backend_and_name(planner):
     """(backend, robot_name) from a PlannerBase, or (None, None) if not wired."""
     getter = getattr(planner, "_robotics_collision_backend", None)
@@ -125,7 +141,7 @@ def link_distances(planner, q, exclude_links: Optional[Sequence[str]] = None,
     if backend is None or not robot_name:
         return []
     try:
-        entries = list(backend.link_obstacle_distances(robot_name, q))
+        entries = obstacle_distances(backend, robot_name, q)
     except Exception:
         return []
     return filter_excluded(entries, exclude_links, include_links)
@@ -149,7 +165,7 @@ def repulsive_cost_at(backend, robot_name: str, q, d0: float = DEFAULT_D0, eta: 
     """Same as repulsive_cost(), for callers that already have a backend/
     robot_name (e.g. apf_heatmap.py) instead of a PlannerBase."""
     try:
-        entries = list(backend.link_obstacle_distances(robot_name, q))
+        entries = obstacle_distances(backend, robot_name, q)
     except Exception:
         entries = []
     return repulsive_cost(filter_excluded(entries, exclude_links, include_links), d0, eta)
@@ -160,7 +176,7 @@ def min_distance_at(backend, robot_name: str, q, exclude_links: Optional[Sequenc
     """Same as min_distance(), for callers with a backend/robot_name instead
     of a PlannerBase (e.g. apf_heatmap.py's raw-distance sanity check)."""
     try:
-        entries = list(backend.link_obstacle_distances(robot_name, q))
+        entries = obstacle_distances(backend, robot_name, q)
     except Exception:
         entries = []
     return min_distance(filter_excluded(entries, exclude_links, include_links))

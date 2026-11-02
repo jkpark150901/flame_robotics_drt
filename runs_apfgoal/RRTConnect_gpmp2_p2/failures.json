@@ -1,0 +1,224 @@
+{
+  "n_total": 18,
+  "n_success": 16,
+  "n_failed": 2,
+  "by_category": {
+    "ik_failure": 2
+  },
+  "unreached_groups": [],
+  "failures": [
+    {
+      "index": 8,
+      "group_name": "Point 3 - Inspection pose 2",
+      "robot_name": "dda_rb10_1300e",
+      "pose_name": "DDA",
+      "status": "failed",
+      "status_kind": "failed",
+      "category": "ik_failure",
+      "message": "ik_fallback",
+      "n_waypoints": 26,
+      "has_path": true,
+      "elapsed": 1048.6573668790516,
+      "positioner_r_deg": 270.0,
+      "planner_stats": {
+        "state_validity_calls": 4003,
+        "collision_rejects": 1353,
+        "workspace_rejects": 0,
+        "solve_time": 51.24882854707539,
+        "algorithm": "RRTConnect",
+        "max_iter": 16000,
+        "iterations": 4003,
+        "timeout_sec": 299.965988666052,
+        "iteration_ptc_error": null,
+        "path_cost": 2.4247408927929697
+      },
+      "ik_failure": {
+        "reason": "preset_goal_pose_mismatch",
+        "position_error": 0.008954723102909625,
+        "orientation_error": 0.0020522273155103654
+      },
+      "n_colliding_edges": 2,
+      "colliding_edges": [
+        {
+          "edge": 22,
+          "from_waypoint": 22,
+          "to_waypoint": 23,
+          "pairs": [
+            [
+              "dda_link2_0",
+              "dda_link_slide_0"
+            ]
+          ]
+        },
+        {
+          "edge": 23,
+          "from_waypoint": 23,
+          "to_waypoint": 24,
+          "pairs": [
+            [
+              "dda_link2_0",
+              "dda_link_slide_0"
+            ]
+          ]
+        }
+      ],
+      "goal_q": [
+        0.7446500078885359,
+        0.6937127954289233,
+        1.6855195587788185,
+        2.117675898291271,
+        -2.8311890537560918,
+        2.216664402127452,
+        -1.0499472381953496,
+        0.1341432061812786
+      ],
+      "ik_goal_q": null,
+      "diag": null
+    },
+    {
+      "index": 12,
+      "group_name": "Point 2 - Inspection pose 2",
+      "robot_name": "dda_rb10_1300e",
+      "pose_name": "DDA",
+      "status": "failed",
+      "status_kind": "failed",
+      "category": "ik_failure",
+      "message": "ik_fallback",
+      "n_waypoints": 20,
+      "has_path": true,
+      "elapsed": 626.156587184174,
+      "positioner_r_deg": 270.0,
+      "planner_stats": {
+        "state_validity_calls": 3543,
+        "collision_rejects": 1061,
+        "workspace_rejects": 0,
+        "solve_time": 54.14249420398846,
+        "algorithm": "RRTConnect",
+        "max_iter": 16000,
+        "iterations": 3543,
+        "timeout_sec": 299.9698755189311,
+        "iteration_ptc_error": null,
+        "path_cost": 1.8242049055017693
+      },
+      "ik_failure": {
+        "reason": "preset_goal_pose_mismatch",
+        "position_error": 0.009742027709988981,
+        "orientation_error": 0.0022502112315078635
+      },
+      "n_colliding_edges": 5,
+      "colliding_edges": [
+        {
+          "edge": 12,
+          "from_waypoint": 12,
+          "to_waypoint": 13,
+          "pairs": [
+            [
+              "dda_link2_0",
+              "dda_link4_0"
+            ],
+            [
+              "dda_link1_0",
+              "dda_link3_0"
+            ],
+            [
+              "dda_link2_0",
+              "dda_link_end_0"
+            ]
+          ]
+        },
+        {
+          "edge": 13,
+          "from_waypoint": 13,
+          "to_waypoint": 14,
+          "pairs": [
+            [
+              "dda_link1_0",
+              "dda_link3_0"
+            ],
+            [
+              "dda_link2_0",
+              "dda_link4_0"
+            ],
+            [
+              "dda_link2_0",
+              "dda_link_end_0"
+            ]
+          ]
+        },
+        {
+          "edge": 15,
+          "from_waypoint": 15,
+          "to_waypoint": 16,
+          "pairs": [
+            [
+              "dda_link2_0",
+              "dda_link4_0"
+            ],
+            [
+              "dda_link1_0",
+              "dda_link3_0"
+            ]
+          ]
+        },
+        {
+          "edge": 16,
+          "from_waypoint": 16,
+          "to_waypoint": 17,
+          "pairs": [
+            [
+              "dda_link1_0",
+              "dda_link3_0"
+            ],
+            [
+              "dda_link2_0",
+              "dda_link4_0"
+            ],
+            [
+              "dda_link2_0",
+              "dda_link_end_0"
+            ],
+            [
+              "dda_link2_0",
+              "dda_link5_0"
+            ]
+          ]
+        },
+        {
+          "edge": 17,
+          "from_waypoint": 17,
+          "to_waypoint": 18,
+          "pairs": [
+            [
+              "dda_link1_0",
+              "dda_link3_0"
+            ],
+            [
+              "dda_link2_0",
+              "dda_link4_0"
+            ],
+            [
+              "dda_link2_0",
+              "dda_link5_0"
+            ],
+            [
+              "dda_link2_0",
+              "dda_link_end_0"
+            ]
+          ]
+        }
+      ],
+      "goal_q": [
+        0.3827315019923066,
+        0.6953910281988854,
+        1.7176882182437212,
+        2.089467606414159,
+        -2.8677629357166956,
+        2.262938522010369,
+        -1.0523696318105644,
+        0.1713228558465058
+      ],
+      "ik_goal_q": null,
+      "diag": null
+    }
+  ]
+}

@@ -1,223 +1,876 @@
-<?xml version="1.0"?>
+<?xml version='1.0' encoding='utf-8'?>
 <robot name="positioner">
-  <!-- 
-       Positioner Base Link
-       Fixed structure, no joints.
-       Mass and inertia are omitted as it is a fixed structure.
-  -->
   <link name="base_link">
     <visual>
-      <!-- Adjust scale if your mesh unit is not in meters (default is 1 1 1) -->
-      <!-- Adjust origin if the mesh coordinate center needs fine-tuning -->
-      <origin rpy="0 0 0" xyz="0 0 0" />
+      <origin xyz="4.38645 0 0.1318001" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/positioner/visual/base.dae" />
+        <box size="0.15 2.754 0.2436" />
       </geometry>
-      <!-- Optional: Add material color if needed. DAE usually carries its own textures. -->
+    </visual>
+    <visual>
+      <origin xyz="4.13467 -0.538777 0.1786" rpy="0 -1.57079265 -0.785398" />
+      <geometry>
+        <box size="0.15 0.15 0.65" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="4.13467 0.53878 0.1786" rpy="0 -1.57079265 -2.35619" />
+      <geometry>
+        <box size="0.15 0.15 0.65" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="-3.71355 0 0.1318001" rpy="0 0 0" />
+      <geometry>
+        <box size="0.15 2.754 0.2436" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="-3.46177 0.53878 0.1786" rpy="0 -1.57079265 2.35619" />
+      <geometry>
+        <box size="0.15 0.15 0.65" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="-3.46177 -0.538777 0.1786" rpy="0 -1.57079265 0.785398" />
+      <geometry>
+        <box size="0.15 0.15 0.65" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="0.3977 0 0.2101" rpy="0 0 0" />
+      <geometry>
+        <box size="8.0725 0.724 0.213" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="-3.41855 0 0.2786" rpy="0 0 0" />
+      <geometry>
+        <box size="0.74 0.724 0.05" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="-3.53355 0 1.3356" rpy="0 0 0" />
+      <geometry>
+        <box size="0.18 0.7 2.064" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="-3.75855 0 1.1036" rpy="1.5708 0 -1.5708" />
+      <geometry>
+        <box size="0.7 1 0.3" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="-3.24855 0 0.4136" rpy="0 0 0" />
+      <geometry>
+        <box size="0.4 0.357 0.22" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="-3.46105 -0.4005 1.46716" rpy="0 0 0" />
+      <geometry>
+        <box size="0.265 0.101 2.01413" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="-3.41205 -0.245 1.24235" rpy="0 0 0" />
+      <geometry>
+        <box size="0.063 0.09 1.4375" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="-3.41205 0.245 1.24235" rpy="0 0 0" />
+      <geometry>
+        <box size="0.063 0.09 1.4375" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="-3.51855 -0.275 0.4036" rpy="0 0 0" />
+      <geometry>
+        <box size="0.45 0.012 0.2" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="-3.51855 0.275 0.4036" rpy="0 0 0" />
+      <geometry>
+        <box size="0.45 0.012 0.2" />
+      </geometry>
     </visual>
     <collision>
-      <origin rpy="0 0 0" xyz="0 0 0" />
+      <origin xyz="4.38645 0 0.1318001" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/positioner/collision/base.stl" scale="0.001 0.001 0.001"/>
+        <box size="0.15 2.754 0.2436" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="4.13467 -0.538777 0.1786" rpy="0 -1.57079265 -0.785398" />
+      <geometry>
+        <box size="0.15 0.15 0.65" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="4.13467 0.53878 0.1786" rpy="0 -1.57079265 -2.35619" />
+      <geometry>
+        <box size="0.15 0.15 0.65" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-3.71355 0 0.1318001" rpy="0 0 0" />
+      <geometry>
+        <box size="0.15 2.754 0.2436" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-3.46177 0.53878 0.1786" rpy="0 -1.57079265 2.35619" />
+      <geometry>
+        <box size="0.15 0.15 0.65" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-3.46177 -0.538777 0.1786" rpy="0 -1.57079265 0.785398" />
+      <geometry>
+        <box size="0.15 0.15 0.65" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.3977 0 0.2101" rpy="0 0 0" />
+      <geometry>
+        <box size="8.0725 0.724 0.213" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-3.41855 0 0.2786" rpy="0 0 0" />
+      <geometry>
+        <box size="0.74 0.724 0.05" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-3.53355 0 1.3356" rpy="0 0 0" />
+      <geometry>
+        <box size="0.18 0.7 2.064" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-3.75855 0 1.1036" rpy="1.5708 0 -1.5708" />
+      <geometry>
+        <box size="0.7 1 0.3" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-3.24855 0 0.4136" rpy="0 0 0" />
+      <geometry>
+        <box size="0.4 0.357 0.22" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-3.46105 -0.4005 1.46716" rpy="0 0 0" />
+      <geometry>
+        <box size="0.265 0.101 2.01413" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-3.41205 -0.245 1.24235" rpy="0 0 0" />
+      <geometry>
+        <box size="0.063 0.09 1.4375" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-3.41205 0.245 1.24235" rpy="0 0 0" />
+      <geometry>
+        <box size="0.063 0.09 1.4375" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-3.51855 -0.275 0.4036" rpy="0 0 0" />
+      <geometry>
+        <box size="0.45 0.012 0.2" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-3.51855 0.275 0.4036" rpy="0 0 0" />
+      <geometry>
+        <box size="0.45 0.012 0.2" />
       </geometry>
     </collision>
   </link>
-
-  <!-- 
-       NOTE: For some physics simulation environments (like Gazebo or PyBullet),
-       a base_link with no joints or inertia might still fall to the ground 
-       or cause warnings.
-       
-       If you need to strictly fix this model to the world in a physics engine,
-       uncomment the following code block:
-  -->
-  <!--
-  <link name="world"/>
-  <joint name="world_fixed_joint" type="fixed">
-    <parent link="world" />
-    <child link="base_link" />
-    <origin rpy="0 0 0" xyz="0 0 0" />
-  </joint>
-  -->
-
-  <!-- ============================================================
-       f_column_z: base에서 z축으로 이동하는 prismatic joint
-       m_column_z와 항상 동기화되어 동일한 z축 위치를 유지합니다.
-       (동기화 로직은 kinematics 소프트웨어 레이어에서 구현 필요)
-       ============================================================ -->
   <link name="f_column_z">
     <visual>
-      <origin rpy="0 0 0" xyz="0.26 1.375 1.3" />
+      <origin xyz="0.646 0.354 1.846" rpy="1.5708 0 -1.5708" />
       <geometry>
-        <mesh filename="meshes/positioner/visual/f_column_z.dae"/>
+        <box size="0.712 0.413 0.292" />
       </geometry>
-      <material name="red_color">
-        <color rgba="1.0 0.0 0.0 1.0"/>
-      </material>
     </visual>
-    <collision>
-      <origin rpy="0 0 0" xyz="0 0 0" />
-      <geometry>
-        <mesh filename="meshes/positioner/collision/f_column_z.stl" scale="0.001 0.001 0.001"/>
-      </geometry>
-    </collision>
-  </link>
-
-  <joint name="base_to_f_column_z" type="prismatic">
-    <parent link="base_link" />
-    <child link="f_column_z" />
-    <!-- SYNC: 이 조인트는 m_column_to_m_column_z와 동기화됩니다 (동일 z축 위치) -->
-    <origin rpy="0 0 0" xyz="0 0 0" />
-    <axis xyz="0 0 1" />
-    <limit effort="1000.0" lower="0.0" upper="0.85" velocity="1.0" />
-  </joint>
-
-  <!-- ============================================================
-       m_column: 수동으로 조작되는 prismatic joint (x축 이동)
-       Kinematics 해석 시 이 조인트의 구동값은 사용자가 입력한 값을
-       계속 유지해야 합니다 (수동 조작 조인트).
-       Movement range: 0 ~ 8500 mm (0.0 ~ 8.5 m)
-       ============================================================ -->
-  <link name="m_column">
     <visual>
-      <origin rpy="0 0 0" xyz="0 0 0" />
+      <origin xyz="0.503 0.55 1.6295" rpy="0 0 1.5708" />
       <geometry>
-        <mesh filename="meshes/positioner/visual/m_column.dae"/>
+        <box size="0.6 0.576 0.02" />
       </geometry>
-      <material name="green_color">
-        <color rgba="0.0 1.0 0.0 1.0"/>
-      </material>
     </visual>
-    <collision>
-      <origin rpy="0 0 0" xyz="0 0 0" />
-      <geometry>
-        <mesh filename="meshes/positioner/collision/m_column.stl" scale="0.001 0.001 0.001"/>
-      </geometry>
-    </collision>
-  </link>
-
-  <!-- MANUAL JOINT: 수동 조작 조인트 - kinematics 해석 시 사용자 입력값 유지 -->
-  <joint name="base_to_m_column" type="prismatic">
-    <parent link="base_link" />
-    <child link="m_column" />
-    <!-- 특정 옵셋만큼 떨어진 위치 (필요시 수정) -->
-    <origin rpy="0 0 0" xyz="8.0 1.377 0.328" />
-    <axis xyz="1 0 0" />
-    <limit effort="1000.0" lower="-4.7" upper="0.0" velocity="1.0" />
-  </joint>
-
-  <!-- ============================================================
-       m_column_z: m_column에서 z축으로 이동하는 prismatic joint
-       f_column_z와 항상 동기화되어 동일한 z축 위치를 유지합니다.
-       (동기화 로직은 kinematics 소프트웨어 레이어에서 구현 필요)
-       ============================================================ -->
-  <link name="m_column_z">
     <visual>
-      <origin rpy="0 0 0" xyz="0 0 0.885" />
+      <origin xyz="0.471 0.55 1.4225" rpy="1.5708 0 -1.5708" />
       <geometry>
-        <mesh filename="meshes/positioner/visual/m_column_z.dae"/>
+        <box size="0.6 0.4 0.02" />
       </geometry>
-      <material name="red_color">
-        <color rgba="1.0 0.0 0.0 1.0"/>
-      </material>
     </visual>
-    <collision>
-      <origin rpy="0 0 0" xyz="0 0 0" />
-      <geometry>
-        <mesh filename="meshes/positioner/collision/m_column_z.stl" scale="0.001 0.001 0.001"/>
-      </geometry>
-    </collision>
-  </link>
-
-  <!-- SYNC: 이 조인트는 base_to_f_column_z와 동기화됩니다 (동일 z축 위치) -->
-  <joint name="m_column_to_m_column_z" type="prismatic">
-    <parent link="m_column" />
-    <child link="m_column_z" />
-    <origin rpy="0 0 0" xyz="0 0 0" />
-    <axis xyz="0 0 1" />
-    <limit effort="1000.0" lower="0.0" upper="0.85" velocity="1.0" />
-    <mimic joint="base_to_f_column_z" multiplier="1.0" offset="0.0" />
-  </joint>
-  <!-- ============================================================
-       m_column_passive_r: m_column_z 하위의 revolute joint
-       수동으로 조작하는 조인트로 사용자가 입력하는 값에만 대응합니다.
-       ============================================================ -->
-  <link name="m_column_passive_r">
     <visual>
-      <origin rpy="0 0 0" xyz="0 0 0" />
+      <origin xyz="3.81355 0.55 -0.2786" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/positioner/visual/m_column_passive_r.dae"/>
+        <mesh filename="meshes/slab_0_1_1_1000_d5032b02.stl" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
-      <origin rpy="0 0 0" xyz="0.247 0 -0.885" />
+      <origin xyz="0.646 0.354 1.846" rpy="1.5708 0 -1.5708" />
       <geometry>
-        <mesh filename="meshes/positioner/collision/m_column_passive_r.stl" scale="0.001 0.001 0.001"/>
+        <box size="0.712 0.413 0.292" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.503 0.55 1.6295" rpy="0 0 1.5708" />
+      <geometry>
+        <box size="0.6 0.576 0.02" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.471 0.55 1.4225" rpy="1.5708 0 -1.5708" />
+      <geometry>
+        <box size="0.6 0.4 0.02" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="3.81355 0.55 -0.2786" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/slab_0_1_1_1000_d5032b02.stl" scale="0.001 0.001 0.001" />
       </geometry>
     </collision>
   </link>
-
-  <!-- MANUAL JOINT: 수동 조작 조인트 - kinematics 해석 시 사용자 입력값 대응 -->
-  <joint name="m_column_z_to_m_column_passive_r" type="revolute">
-    <parent link="m_column_z" />
-    <child link="m_column_passive_r" />
-    <origin rpy="0 0 0" xyz="-0.247 0 0.885" />
-    <axis xyz="1 0 0" /> <!-- 회전축은 필요시 수정 -->
-    <limit effort="1000.0" lower="-3.14159" upper="3.14159" velocity="1.0" />
-  </joint>
-  <!-- ============================================================
-       f_column_r: f_column_z 하위의 revolute joint
-       ============================================================ -->
   <link name="f_column_r">
     <visual>
-      <origin rpy="0 0 0" xyz="0 0 0" />
+      <origin xyz="0.110001671 0.454999596 6.60174562e-07" rpy="0 2.65358979e-06 1.57079265" />
       <geometry>
-        <mesh filename="meshes/positioner/visual/f_column_r.dae"/>
+        <box size="1.234 0.114 0.1" />
       </geometry>
-      <material name="purple_color">
-        <color rgba="0.5 0.0 0.5 1.0"/>
-      </material>
+    </visual>
+    <visual>
+      <origin xyz="0.135501616 0.439999502 7.53841292e-07" rpy="0 2.65358979e-06 1.57079265" />
+      <geometry>
+        <box size="1.18 0.049 0.174" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="0.167001671 0.454999387 8.69547253e-07" rpy="0 2.65358979e-06 1.57079265" />
+      <geometry>
+        <box size="1.264 0.134 0.092" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="0.197998997 -0.272406727 0.000752528295" rpy="0 2.65358979e-06 1.57079265" />
+      <geometry>
+        <box size="0.190811 0.16 0.160337" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="0.045 -1.65294219e-07 4.2141623e-07" rpy="1.5708 0 -1.5708" />
+      <geometry>
+        <box size="0.15 0.18 0.06" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="-0.003 1.10196265e-08 2.45102385e-07" rpy="0 -1.57079113 -3.6732186e-06" />
+      <geometry>
+        <cylinder radius="0.05" length="0.036" />
+      </geometry>
     </visual>
     <collision>
-      <origin rpy="0 0 0" xyz="0 0 0" />
+      <origin xyz="0.110001671 0.454999596 6.60174562e-07" rpy="0 2.65358979e-06 1.57079265" />
       <geometry>
-        <mesh filename="meshes/positioner/collision/f_column_r.stl" scale="0.001 0.001 0.001"/>
+        <box size="1.234 0.114 0.1" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.135501616 0.439999502 7.53841292e-07" rpy="0 2.65358979e-06 1.57079265" />
+      <geometry>
+        <box size="1.18 0.049 0.174" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.167001671 0.454999387 8.69547253e-07" rpy="0 2.65358979e-06 1.57079265" />
+      <geometry>
+        <box size="1.264 0.134 0.092" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.197998997 -0.272406727 0.000752528295" rpy="0 2.65358979e-06 1.57079265" />
+      <geometry>
+        <box size="0.190811 0.16 0.160337" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.045 -1.65294219e-07 4.2141623e-07" rpy="1.5708 0 -1.5708" />
+      <geometry>
+        <box size="0.15 0.18 0.06" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.003 1.10196265e-08 2.45102385e-07" rpy="0 -1.57079113 -3.6732186e-06" />
+      <geometry>
+        <cylinder radius="0.05" length="0.036" />
       </geometry>
     </collision>
   </link>
-
-  <joint name="f_column_z_to_f_column_r" type="revolute">
-    <parent link="f_column_z" />
-    <child link="f_column_r" />
-    <origin rpy="0 0 0" xyz="0.48 1.37 1.3" />
-    <axis xyz="1 0 0" />
-    <limit effort="1000.0" lower="-3.14159" upper="3.14159" velocity="1.0" />
-  </joint>
-
-  <!-- ============================================================
-       f_column_passive_clamp: f_column_r 하위의 prismatic joint
-       ============================================================ -->
   <link name="f_column_passive_clamp">
     <visual>
-      <origin rpy="0 0 0" xyz="0 0 0" />
+      <origin xyz="0.0500038569 8.13617886e-07 3e-07" rpy="0 2.65358979e-06 1.57079265" />
       <geometry>
-        <mesh filename="meshes/positioner/visual/f_column_passive_clamp.dae"/>
+        <box size="0.23 0.112 0.24" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="0.113003857 6.08741248e-07 0.0100003" rpy="1.5708 -2.65358979e-06 -1.57080265" />
+      <geometry>
+        <box size="0.23 0.266 0.02" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="0.184753865 0.00225036509 0.017500294" rpy="1.5708 2.65358979e-06 1.57079265" />
+      <geometry>
+        <box size="0.1495 0.251 0.1235" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="0.190504466 0.165910465 0.0629998597" rpy="1.57079713 0.391796 -8.44276632e-06" />
+      <geometry>
+        <cylinder radius="0.0809307" length="0.135811" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="0.190504466 0.165910465 0.0629998597" rpy="1.57079713 0.391796 -8.44276632e-06" />
+      <geometry>
+        <cylinder radius="0.0809307" length="0.135811" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="0.190504037 0.0490004647 0.06300017" rpy="0 1.57079 -1.57079735" />
+      <geometry>
+        <cylinder radius="0.015" length="0.098" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="0.190504087 0.0980004647 0.06299986" rpy="0 1.57079 -1.57079735" />
+      <geometry>
+        <sphere radius="0.015" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="0.190503987 4.64707859e-07 0.06300048" rpy="0 1.57079 -1.57079735" />
+      <geometry>
+        <sphere radius="0.015" />
       </geometry>
     </visual>
     <collision>
-      <origin rpy="0 0 0" xyz="0 0 0" />
+      <origin xyz="0.0500038569 8.13617886e-07 3e-07" rpy="0 2.65358979e-06 1.57079265" />
       <geometry>
-        <mesh filename="meshes/positioner/collision/f_column_passive_clamp.stl" scale="0.001 0.001 0.001"/>
+        <box size="0.23 0.112 0.24" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.113003857 6.08741248e-07 0.0100003" rpy="1.5708 -2.65358979e-06 -1.57080265" />
+      <geometry>
+        <box size="0.23 0.266 0.02" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.184753865 0.00225036509 0.017500294" rpy="1.5708 2.65358979e-06 1.57079265" />
+      <geometry>
+        <box size="0.1495 0.251 0.1235" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.190504466 0.165910465 0.0629998597" rpy="1.57079713 0.391796 -8.44276632e-06" />
+      <geometry>
+        <cylinder radius="0.0809307" length="0.135811" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.190504466 0.165910465 0.0629998597" rpy="1.57079713 0.391796 -8.44276632e-06" />
+      <geometry>
+        <cylinder radius="0.0809307" length="0.135811" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.190504037 0.0490004647 0.06300017" rpy="0 1.57079 -1.57079735" />
+      <geometry>
+        <cylinder radius="0.015" length="0.098" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.190504087 0.0980004647 0.06299986" rpy="0 1.57079 -1.57079735" />
+      <geometry>
+        <sphere radius="0.015" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.190503987 4.64707859e-07 0.06300048" rpy="0 1.57079 -1.57079735" />
+      <geometry>
+        <sphere radius="0.015" />
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="0.360504466 1.13327255e-07 0.165905673" rpy="-3.14158633 -3.67321485e-06 3.14159265" />
+      <geometry>
+        <cylinder radius="0.0809307" length="0.135811" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="0.360504466 1.13327255e-07 0.165905673" rpy="-3.14158633 -3.67321485e-06 3.14159265" />
+      <geometry>
+        <cylinder radius="0.0809307" length="0.135811" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="0.366022765 -3.41217897e-07 0.00224991281" rpy="1.57079898 -3.67321485e-06 3.14159265" />
+      <geometry>
+        <box size="0.139038 0.1495 0.105" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="0.271503857 0 2.56122e-07" rpy="0 1.57078901 3.14158633" />
+      <geometry>
+        <cylinder radius="0.03" length="0.05" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="0.296503857 -1.58169665e-07 1.64292292e-07" rpy="0 1.57078901 3.14158633" />
+      <geometry>
+        <sphere radius="0.03" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="0.246503857 1.58171055e-07 3.47951708e-07" rpy="0 1.57078901 3.14158633" />
+      <geometry>
+        <sphere radius="0.03" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="0.360504037 -1.96890939e-07 0.0489999731" rpy="-3.14158531 2.65358979e-06 1.57079265" />
+      <geometry>
+        <cylinder radius="0.015" length="0.098" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="0.360504397 -6.68663621e-08 0.0979999731" rpy="-3.14158531 2.65358979e-06 1.57079265" />
+      <geometry>
+        <sphere radius="0.015" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="0.360503677 -3.26915517e-07 -2.69142627e-08" rpy="-3.14158531 2.65358979e-06 1.57079265" />
+      <geometry>
+        <sphere radius="0.015" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.360504466 1.13327255e-07 0.165905673" rpy="-3.14158633 -3.67321485e-06 3.14159265" />
+      <geometry>
+        <cylinder radius="0.0809307" length="0.135811" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.360504466 1.13327255e-07 0.165905673" rpy="-3.14158633 -3.67321485e-06 3.14159265" />
+      <geometry>
+        <cylinder radius="0.0809307" length="0.135811" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.366022765 -3.41217897e-07 0.00224991281" rpy="1.57079898 -3.67321485e-06 3.14159265" />
+      <geometry>
+        <box size="0.139038 0.1495 0.105" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.271503857 0 2.56122e-07" rpy="0 1.57078901 3.14158633" />
+      <geometry>
+        <cylinder radius="0.03" length="0.05" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.296503857 -1.58169665e-07 1.64292292e-07" rpy="0 1.57078901 3.14158633" />
+      <geometry>
+        <sphere radius="0.03" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.246503857 1.58171055e-07 3.47951708e-07" rpy="0 1.57078901 3.14158633" />
+      <geometry>
+        <sphere radius="0.03" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.360504037 -1.96890939e-07 0.0489999731" rpy="-3.14158531 2.65358979e-06 1.57079265" />
+      <geometry>
+        <cylinder radius="0.015" length="0.098" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.360504397 -6.68663621e-08 0.0979999731" rpy="-3.14158531 2.65358979e-06 1.57079265" />
+      <geometry>
+        <sphere radius="0.015" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.360503677 -3.26915517e-07 -2.69142627e-08" rpy="-3.14158531 2.65358979e-06 1.57079265" />
+      <geometry>
+        <sphere radius="0.015" />
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="0.462503857 -7.01585219e-07 -4.45460149e-07" rpy="1.5708 2.65358979e-06 1.57079265" />
+      <geometry>
+        <box size="0.192 0.192 0.162" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="0.605253857 -1.22593803e-06 -9.69810178e-07" rpy="1.57080057 -0.523596346 1.57079053" />
+      <geometry>
+        <cylinder radius="0.096" length="0.1195" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.462503857 -7.01585219e-07 -4.45460149e-07" rpy="1.5708 2.65358979e-06 1.57079265" />
+      <geometry>
+        <box size="0.192 0.192 0.162" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.605253857 -1.22593803e-06 -9.69810178e-07" rpy="1.57080057 -0.523596346 1.57079053" />
+      <geometry>
+        <cylinder radius="0.096" length="0.1195" />
       </geometry>
     </collision>
   </link>
-
+  <link name="m_column">
+    <visual>
+      <origin xyz="2.7071 0.738 0.135" rpy="0 0 0" />
+      <geometry>
+        <box size="0.74 0.744 0.1" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="2.8227 0.738 1.217" rpy="0 0 3.14159" />
+      <geometry>
+        <box size="0.1812 0.7 2.064" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="2.4621 0.738 0.295" rpy="0 0 3.14159" />
+      <geometry>
+        <box size="0.55 0.387 0.22" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="2.7006 0.983 1.12375" rpy="0 0 3.14159" />
+      <geometry>
+        <box size="0.063 0.09 1.4375" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="2.7006 0.493 1.12375" rpy="0 0 3.14159" />
+      <geometry>
+        <box size="0.063 0.09 1.4375" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="2.8071 1.013 0.285" rpy="0 0 3.14159" />
+      <geometry>
+        <box size="0.45 0.012 0.2" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="2.8071 0.463 0.285" rpy="0 0 3.14159" />
+      <geometry>
+        <box size="0.45 0.012 0.2" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="2.7071 0.738 0.135" rpy="0 0 0" />
+      <geometry>
+        <box size="0.74 0.744 0.1" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="2.8227 0.738 1.217" rpy="0 0 3.14159" />
+      <geometry>
+        <box size="0.1812 0.7 2.064" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="2.4621 0.738 0.295" rpy="0 0 3.14159" />
+      <geometry>
+        <box size="0.55 0.387 0.22" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="2.7006 0.983 1.12375" rpy="0 0 3.14159" />
+      <geometry>
+        <box size="0.063 0.09 1.4375" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="2.7006 0.493 1.12375" rpy="0 0 3.14159" />
+      <geometry>
+        <box size="0.063 0.09 1.4375" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="2.8071 1.013 0.285" rpy="0 0 3.14159" />
+      <geometry>
+        <box size="0.45 0.012 0.2" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="2.8071 0.463 0.285" rpy="0 0 3.14159" />
+      <geometry>
+        <box size="0.45 0.012 0.2" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="m_column_z">
+    <visual>
+      <origin xyz="-0.503001459 -0.549998665 1.6295" rpy="0 0 -1.57079531" />
+      <geometry>
+        <box size="0.6 0.576 0.02" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="-0.471001459 -0.54999875 1.4225" rpy="1.5708 0 1.57079" />
+      <geometry>
+        <box size="0.6 0.4 0.02" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="-0.691001459 -0.549998166 1.6495" rpy="0 0 -1.57079531" />
+      <geometry>
+        <box size="0.255 0.2 0.02" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="-0.691001454 -0.547900166 1.768" rpy="1.5708 0 -1.57079531" />
+      <geometry>
+        <box size="0.123804 0.223 0.2" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="-4.41355146 -0.549988288 -0.3636" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/slab_0_1_1_1000_c1de9490.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.503001459 -0.549998665 1.6295" rpy="0 0 -1.57079531" />
+      <geometry>
+        <box size="0.6 0.576 0.02" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.471001459 -0.54999875 1.4225" rpy="1.5708 0 1.57079" />
+      <geometry>
+        <box size="0.6 0.4 0.02" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.691001459 -0.549998166 1.6495" rpy="0 0 -1.57079531" />
+      <geometry>
+        <box size="0.255 0.2 0.02" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.691001454 -0.547900166 1.768" rpy="1.5708 0 -1.57079531" />
+      <geometry>
+        <box size="0.123804 0.223 0.2" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-4.41355146 -0.549988288 -0.3636" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/slab_0_1_1_1000_c1de9490.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="m_column_passive_r">
+    <visual>
+      <origin xyz="-0.0790006094 -8.05502161e-08 0.16590571" rpy="-3.14158898 -3.6732051e-06 4.69282041e-06" />
+      <geometry>
+        <cylinder radius="0.0809307" length="0.135811" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="-0.0790006094 -8.05502161e-08 0.16590571" rpy="-3.14158898 -3.6732051e-06 4.69282041e-06" />
+      <geometry>
+        <cylinder radius="0.0809307" length="0.135811" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="-0.0845189083 -8.61767581e-08 0.00224994954" rpy="1.57079633 -3.6732051e-06 4.69282041e-06" />
+      <geometry>
+        <box size="0.139038 0.1495 0.105" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="-0.07900018 -8.05497783e-08 0.0490000098" rpy="3.14158531 -2.65358979e-06 1.57079735" />
+      <geometry>
+        <cylinder radius="0.015" length="0.098" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="-0.07900054 -2.10576045e-07 0.0980000098" rpy="3.14158531 -2.65358979e-06 1.57079735" />
+      <geometry>
+        <sphere radius="0.015" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="-0.07899982 4.94764887e-08 9.81796115e-09" rpy="3.14158531 -2.65358979e-06 1.57079735" />
+      <geometry>
+        <sphere radius="0.015" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="0 0 2.56121e-07" rpy="0 1.57079113 3.6732186e-06" />
+      <geometry>
+        <cylinder radius="0.03" length="0.03" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="-0.015 -5.50980618e-08 2.01022777e-07" rpy="0 1.57079113 3.6732186e-06" />
+      <geometry>
+        <sphere radius="0.03" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="0.015 5.50980913e-08 3.11219223e-07" rpy="0 1.57079113 3.6732186e-06" />
+      <geometry>
+        <sphere radius="0.03" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.0790006094 -8.05502161e-08 0.16590571" rpy="-3.14158898 -3.6732051e-06 4.69282041e-06" />
+      <geometry>
+        <cylinder radius="0.0809307" length="0.135811" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.0790006094 -8.05502161e-08 0.16590571" rpy="-3.14158898 -3.6732051e-06 4.69282041e-06" />
+      <geometry>
+        <cylinder radius="0.0809307" length="0.135811" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.0845189083 -8.61767581e-08 0.00224994954" rpy="1.57079633 -3.6732051e-06 4.69282041e-06" />
+      <geometry>
+        <box size="0.139038 0.1495 0.105" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.07900018 -8.05497783e-08 0.0490000098" rpy="3.14158531 -2.65358979e-06 1.57079735" />
+      <geometry>
+        <cylinder radius="0.015" length="0.098" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.07900054 -2.10576045e-07 0.0980000098" rpy="3.14158531 -2.65358979e-06 1.57079735" />
+      <geometry>
+        <sphere radius="0.015" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.07899982 4.94764887e-08 9.81796115e-09" rpy="3.14158531 -2.65358979e-06 1.57079735" />
+      <geometry>
+        <sphere radius="0.015" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 2.56121e-07" rpy="0 1.57079113 3.6732186e-06" />
+      <geometry>
+        <cylinder radius="0.03" length="0.03" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.015 -5.50980618e-08 2.01022777e-07" rpy="0 1.57079113 3.6732186e-06" />
+      <geometry>
+        <sphere radius="0.03" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.015 5.50980913e-08 3.11219223e-07" rpy="0 1.57079113 3.6732186e-06" />
+      <geometry>
+        <sphere radius="0.03" />
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0.181 -1.84550371e-07 -4.08729148e-07" rpy="1.5708 0 -1.57079531" />
+      <geometry>
+        <box size="0.192 0.192 0.162" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="-0.31875 -3.2500238e-07 -9.14713151e-07" rpy="1.57080057 -0.523599 -1.57079743" />
+      <geometry>
+        <cylinder radius="0.096" length="0.1095" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.181 -1.84550371e-07 -4.08729148e-07" rpy="1.5708 0 -1.57079531" />
+      <geometry>
+        <box size="0.192 0.192 0.162" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.31875 -3.2500238e-07 -9.14713151e-07" rpy="1.57080057 -0.523599 -1.57079743" />
+      <geometry>
+        <cylinder radius="0.096" length="0.1095" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="base_to_f_column_z" type="prismatic">
+    <origin xyz="-3.81355 -0.55 -0.5214" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="f_column_z" />
+    <axis xyz="0 0 1" />
+    <limit lower="0" upper="0.8" effort="1000.0" velocity="1.0" />
+  </joint>
+  <joint name="f_column_z_to_f_column_r" type="revolute">
+    <origin xyz="0.811 0.55 1.9045" rpy="0 0 0" />
+    <parent link="f_column_z" />
+    <child link="f_column_r" />
+    <axis xyz="1 0 0" />
+    <limit lower="-3.14159265" upper="3.14159265" effort="1000.0" velocity="1.0" />
+  </joint>
   <joint name="f_column_r_to_f_column_passive_clamp" type="prismatic">
+    <origin xyz="0.109999633 0.899998731 -2.38221656e-06" rpy="0 0 0" />
     <parent link="f_column_r" />
     <child link="f_column_passive_clamp" />
-    <origin rpy="0 0 0" xyz="0.427 0.9 0.0" />
     <axis xyz="0 1 0" />
-    <limit effort="1000.0" lower="-0.9" upper="0.0" velocity="1.0" />
+    <limit lower="-0.85" upper="0" effort="1000.0" velocity="1.0" />
   </joint>
-
+  <joint name="base_to_m_column" type="prismatic">
+    <origin xyz="1.31145 -0.738 0.2036" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="m_column" />
+    <axis xyz="1 0 0" />
+    <limit lower="-4" upper="0" effort="1000.0" velocity="1.0" />
+  </joint>
+  <joint name="m_column_to_m_column_z" type="prismatic">
+    <origin xyz="3.1021 1.288 -0.64" rpy="0 0 0" />
+    <parent link="m_column" />
+    <child link="m_column_z" />
+    <axis xyz="0 0 1" />
+    <limit lower="0" upper="0.8" effort="1000.0" velocity="1.0" />
+    <mimic joint="base_to_f_column_z" multiplier="1.0" offset="0.0" />
+  </joint>
+  <joint name="m_column_z_to_m_column_passive_r" type="revolute">
+    <origin xyz="-0.804001459 -0.549997867 1.8195" rpy="0 0 0" />
+    <parent link="m_column_z" />
+    <child link="m_column_passive_r" />
+    <axis xyz="1 0 0" />
+    <limit lower="-3.14159265" upper="3.14159265" effort="1000.0" velocity="1.0" />
+  </joint>
 </robot>

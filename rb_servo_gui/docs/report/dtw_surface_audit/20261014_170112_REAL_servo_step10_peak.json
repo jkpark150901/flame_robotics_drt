@@ -1,0 +1,47 @@
+{
+  "run": "20261014_170112_REAL_servo_step10",
+  "source": "/home/dev/rb_servo_gui_runs/20261014_170112_REAL_servo_step10",
+  "method": "move_servo_j",
+  "matching": "extrema_anchored_dtw_v1",
+  "samples": 728,
+  "dtw_max_mm": 36.32631128073996,
+  "nearest_at_dtw_peak_mm": 0.4106781025152558,
+  "nearest_global_max_mm": 2.651293621946629,
+  "reduction_at_peak_pct": 98.86947480204798,
+  "dtw_peak_time_s": 14.54,
+  "nearest_peak_time_s": 5.3999,
+  "peak_link": "rt_link_end_0",
+  "same_link_nearest_mm": 0.4106781025152558,
+  "dtw_angle_deg": 1.6570546551034488,
+  "nearest_angle_deg": 0.015729793652889772,
+  "dtw_ref_time_s": 14.6733,
+  "nearest_ref_time_s": 14.53384617033176,
+  "dtw_peak_is_anchor": true,
+  "dtw_p95_mm": 1.666832502521434,
+  "nearest_p95_mm": 1.3374162502823206,
+  "pairs_sha256": "fc5c2385e05dffda9cfa7dad7cb31a04c7f2d1197c0131560a8e76e5afdd4522",
+  "measured_deg": [
+    -23.4627,
+    90.0224,
+    -17.9582,
+    175.1432,
+    41.5707,
+    23.6941
+  ],
+  "dtw_ref_deg": [
+    -24.4111,
+    90.0986,
+    -18.1864,
+    176.002,
+    40.6029,
+    24.0322
+  ],
+  "nearest_ref_deg": [
+    -23.450698235666053,
+    90.02125830558725,
+    -17.955168975547178,
+    175.15048367014134,
+    41.564396652076724,
+    23.694430817320384
+  ]
+}

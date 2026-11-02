@@ -1,0 +1,17 @@
+{
+  "created": "2026-10-30T17:29:00",
+  "n_total": 36,
+  "n_success": 21,
+  "n_failed": 15,
+  "unreached_groups": [],
+  "planner": "RRTstar+stomp",
+  "planner_options": {
+    "step_size": 0.1,
+    "planning_timeout": 300.0
+  },
+  "source": "evaluate_path_plans.py",
+  "snapshot": "/home/dev/flame_robotics_drt/sample/planning_snapshot_p3_6.pkl",
+  "initial_positioner_r_deg": 90.0,
+  "positioner_second_group_r_deg": 180.0,
+  "scene_snapshot": "scene_snapshot.pkl"
+}

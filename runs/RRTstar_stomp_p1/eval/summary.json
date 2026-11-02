@@ -1,0 +1,65 @@
+{
+  "metric_config": {
+    "margin": 0.005,
+    "physical_min": 0.001,
+    "approach_zone": 0.1,
+    "d_star": {
+      "dda": 0.01,
+      "rt": null
+    },
+    "eps_d": 0.01,
+    "eps_theta_deg": 5.0,
+    "ccd_step": 0.02,
+    "ccd_max_samples": 250,
+    "exact_distance_cap": 0.06,
+    "mc_trials": 0,
+    "mc_step": 0.05,
+    "mc_max_samples": 150,
+    "sigma_track_lin": 0.002,
+    "sigma_track_rot": 0.002,
+    "sigma_reg_t": 0.003,
+    "sigma_reg_r": 0.003,
+    "max_collision_rate": 0.05,
+    "approach_span": 0.1,
+    "joint_vel_deg": 50.0,
+    "joint_acc_deg": 30.0,
+    "lin_vel": 0.5,
+    "lin_acc": 0.3,
+    "sensor_kinds": [
+      "dda"
+    ],
+    "seed": 0
+  },
+  "summaries": {
+    "RRTstar+stomp": {
+      "n_requests": 12,
+      "n_planned": 8,
+      "n_safe": 5,
+      "SR_safe_pct": 41.666666666666664,
+      "SR_safe_ci95_pct": [
+        19.325746190524658,
+        68.04926643446272
+      ],
+      "planned_rate_pct": 66.66666666666667,
+      "C_eff_mean_safe_mm": 140.2618761310392,
+      "C_eff_mean_planned_mm": 97.58474119095192,
+      "C_eff_min_planned_mm": 11.126100444728063,
+      "C_nom_min_planned_mm": 16.126100444728063,
+      "P_collision_pct": null,
+      "P_violation_pct": null,
+      "E_d_mean_mm": 4.8318162580970405,
+      "E_theta_mean_deg": 35.95391879744867,
+      "approach_dir_error_mean_deg": 50.129539554227286,
+      "L_q_normalized_mean": 0.9313590253854496,
+      "DTW_RMSE_mean_mm": null,
+      "T_plan_mean_s": 61.31052239611745,
+      "T_plan_p50_s": 27.060275223338977,
+      "T_plan_p95_s": 158.23934593073787,
+      "T_motion_mean_s": 5.84479484894467,
+      "T_motion_total_s": 46.75835879155736,
+      "L_ee_mean_m": 2.9977720790907445,
+      "L_ee_total_m": 23.982176632725956,
+      "timeout_rate_pct": 33.333333333333336
+    }
+  }
+}

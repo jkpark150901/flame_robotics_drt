@@ -1,0 +1,1991 @@
+<?xml version="1.0" ?>
+<robot name="model" version="1.1">
+  <link name="base_link"/>
+  <link name="link_0_DDA">
+    <visual>
+      <origin xyz="-0.0998474 -0.0285894 -0.0165208" rpy="-1.5708 -2.99571e-13 -2.6633e-26"/>
+      <geometry>
+        <box size="0.3381 0.03 0.131"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.0998474 -0.0285894 -0.0165208" rpy="-1.5708 -2.99571e-13 -2.6633e-26"/>
+      <geometry>
+        <box size="0.3381 0.03 0.131"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0.101347 -0.0305894 -0.0505208" rpy="-1.5708 -2.99571e-13 -2.6633e-26"/>
+      <geometry>
+        <box size="0.3 0.008 0.3"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.101347 -0.0305894 -0.0505208" rpy="-1.5708 -2.99571e-13 -2.6633e-26"/>
+      <geometry>
+        <box size="0.3 0.008 0.3"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="0.0286526 -0.0305894 -0.0730123" rpy="-1.5708 -2.99571e-13 -2.6633e-26"/>
+      <geometry>
+        <box size="0.01 0.0369829 0.119966"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.0286526 -0.0305894 -0.0730123" rpy="-1.5708 -2.99571e-13 -2.6633e-26"/>
+      <geometry>
+        <box size="0.01 0.0369829 0.119966"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0.231347 -0.0305894 -0.0730123" rpy="-1.5708 -2.99571e-13 -2.6633e-26"/>
+      <geometry>
+        <box size="0.01 0.0369829 0.119966"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.231347 -0.0305894 -0.0730123" rpy="-1.5708 -2.99571e-13 -2.6633e-26"/>
+      <geometry>
+        <box size="0.01 0.0369829 0.119966"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0.101347 0.115411 -0.0500208" rpy="-1.20516e-14 1.5708 0"/>
+      <geometry>
+        <box size="0.015 0.018 0.3"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.101347 0.115411 -0.0500208" rpy="-1.20516e-14 1.5708 0"/>
+      <geometry>
+        <box size="0.015 0.018 0.3"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0.101347 0.0816606 -0.0440208" rpy="1.5708 -1.77636e-13 1.5708"/>
+      <geometry>
+        <box size="0.0855 0.015 0.3"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.101347 0.0816606 -0.0440208" rpy="1.5708 -1.77636e-13 1.5708"/>
+      <geometry>
+        <box size="0.0855 0.015 0.3"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0.101347 -0.176589 -0.0500208" rpy="-3.14159 1.5708 0"/>
+      <geometry>
+        <box size="0.015 0.018 0.3"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.101347 -0.176589 -0.0500208" rpy="-3.14159 1.5708 0"/>
+      <geometry>
+        <box size="0.015 0.018 0.3"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0.101347 -0.142839 -0.0440208" rpy="1.5708 1.77636e-13 -1.5708"/>
+      <geometry>
+        <box size="0.0855 0.015 0.3"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.101347 -0.142839 -0.0440208" rpy="1.5708 1.77636e-13 -1.5708"/>
+      <geometry>
+        <box size="0.0855 0.015 0.3"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_1_scan_body_DDA">
+    <visual>
+      <origin xyz="-7.95808e-16 0.0125 -2.27374e-16" rpy="1.5708 7.88908e-15 -3.14159"/>
+      <geometry>
+        <box size="0.8 0.52 0.025"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-7.95808e-16 0.0125 -2.27374e-16" rpy="1.5708 7.88908e-15 -3.14159"/>
+      <geometry>
+        <box size="0.8 0.52 0.025"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0.35975 0.063 -0.025" rpy="1.5708 7.88908e-15 -3.14159"/>
+      <geometry>
+        <box size="0.0805 0.165 0.076"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.35975 0.063 -0.025" rpy="1.5708 7.88908e-15 -3.14159"/>
+      <geometry>
+        <box size="0.0805 0.165 0.076"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="0.289 0.201 9.09495e-15" rpy="1.5708 7.88908e-15 -3.14159"/>
+      <geometry>
+        <box size="0.226 0.3245 0.352"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.289 0.201 9.09495e-15" rpy="1.5708 7.88908e-15 -3.14159"/>
+      <geometry>
+        <box size="0.226 0.3245 0.352"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-1.25056e-15 0.09 -3.18323e-15" rpy="1.5708 7.88908e-15 -3.14159"/>
+      <geometry>
+        <box size="0.33 0.16 0.102"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-1.25056e-15 0.09 -3.18323e-15" rpy="1.5708 7.88908e-15 -3.14159"/>
+      <geometry>
+        <box size="0.33 0.16 0.102"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-1.21645e-14 0.4515 0.035" rpy="1.5708 7.88908e-15 -3.14159"/>
+      <geometry>
+        <box size="0.352 0.53 0.621"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-1.21645e-14 0.4515 0.035" rpy="1.5708 7.88908e-15 -3.14159"/>
+      <geometry>
+        <box size="0.352 0.53 0.621"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="0.0107325 2.63285 0.0521338" rpy="0.0054756 -0.680086 -1.5708"/>
+      <geometry>
+        <box size="0.1 0.0953271 0.145436"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.0107325 2.63285 0.0521338" rpy="0.0054756 -0.680086 -1.5708"/>
+      <geometry>
+        <box size="0.1 0.0953271 0.145436"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="0.0157407 2.58451 0.00994251" rpy="-3.12431 -0.680086 -1.5708"/>
+      <geometry>
+        <box size="0.0679 0.627868 0.0901768"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.0157407 2.58451 0.00994251" rpy="-3.12431 -0.680086 -1.5708"/>
+      <geometry>
+        <box size="0.0679 0.627868 0.0901768"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="0.000232483 0.198227 -0.307389" rpy="0.0054756 0.757225 -1.5708"/>
+      <geometry>
+        <box size="0.1 0.0953271 0.145436"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.000232483 0.198227 -0.307389" rpy="0.0054756 0.757225 -1.5708"/>
+      <geometry>
+        <box size="0.1 0.0953271 0.145436"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="0.00524071 0.23361 -0.360911" rpy="-3.12431 0.757225 -1.5708"/>
+      <geometry>
+        <box size="0.0679 0.627868 0.0901768"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.00524071 0.23361 -0.360911" rpy="-3.12431 0.757225 -1.5708"/>
+      <geometry>
+        <box size="0.0679 0.627868 0.0901768"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0.673122 -0.257 -1.5" rpy="1.5708 7.88908e-15 -3.14159"/>
+      <geometry>
+        <mesh filename="meshes/slab_0_1_1_349_ccfc56fc.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.673122 -0.257 -1.5" rpy="1.5708 7.88908e-15 -3.14159"/>
+      <geometry>
+        <mesh filename="meshes/slab_0_1_1_349_ccfc56fc.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_2_RT">
+    <visual>
+      <origin xyz="9.10632e-14 -0.04725 -0.1395" rpy="-1.5708 -3.0093e-13 3.14159"/>
+      <geometry>
+        <box size="0.0725 0.24 0.1055"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="9.10632e-14 -0.04725 -0.1395" rpy="-1.5708 -3.0093e-13 3.14159"/>
+      <geometry>
+        <box size="0.0725 0.24 0.1055"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="9.11768e-14 4.29929e-13 -0.0135" rpy="-1.5708 -3.0093e-13 3.14159"/>
+      <geometry>
+        <box size="0.15 0.012 0.2"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="9.11768e-14 4.29929e-13 -0.0135" rpy="-1.5708 -3.0093e-13 3.14159"/>
+      <geometry>
+        <box size="0.15 0.012 0.2"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="9.10632e-14 4.30069e-13 9.90212e-14" rpy="-1.5708 -3.0093e-13 3.14159"/>
+      <geometry>
+        <box size="0.12 0.015 0.12"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="9.10632e-14 4.30069e-13 9.90212e-14" rpy="-1.5708 -3.0093e-13 3.14159"/>
+      <geometry>
+        <box size="0.12 0.015 0.12"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="9.11768e-14 -0.098 -0.006" rpy="-1.5708 -3.0093e-13 3.14159"/>
+      <geometry>
+        <box size="0.05 0.003 0.07"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="9.11768e-14 -0.098 -0.006" rpy="-1.5708 -3.0093e-13 3.14159"/>
+      <geometry>
+        <box size="0.05 0.003 0.07"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0.0829994 1.43094e-09 0.0159851" rpy="-1.5708 -3.0093e-13 3.14159"/>
+      <geometry>
+        <box size="0.0399988 0.0469703 0.109966"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.0829994 1.43094e-09 0.0159851" rpy="-1.5708 -3.0093e-13 3.14159"/>
+      <geometry>
+        <box size="0.0399988 0.0469703 0.109966"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="0.0829994 -1.43008e-09 0.0159851" rpy="-1.5708 -3.0093e-13 3.14159"/>
+      <geometry>
+        <box size="0.0399988 0.0469703 0.109966"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.0829994 -1.43008e-09 0.0159851" rpy="-1.5708 -3.0093e-13 3.14159"/>
+      <geometry>
+        <box size="0.0399988 0.0469703 0.109966"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="0.007 0.0535 -0.13485" rpy="3.14159 1.5708 0"/>
+      <geometry>
+        <box size="0.2467 0.097 0.258"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.007 0.0535 -0.13485" rpy="3.14159 1.5708 0"/>
+      <geometry>
+        <box size="0.2467 0.097 0.258"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0.580391 2.30659 -0.553929" rpy="-1.5708 -3.0093e-13 3.14159"/>
+      <geometry>
+        <mesh filename="meshes/slab_0_1_1_894_bf1970c6.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.580391 2.30659 -0.553929" rpy="-1.5708 -3.0093e-13 3.14159"/>
+      <geometry>
+        <mesh filename="meshes/slab_0_1_1_894_bf1970c6.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_3_scan_body_RT">
+    <visual>
+      <origin xyz="-0.513242 -1.5 0.2695" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.8 0.52 0.025"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.513242 -1.5 0.2695" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.8 0.52 0.025"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0.153492 -1.525 0.32" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.0805 0.165 0.076"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.153492 -1.525 0.32" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.0805 0.165 0.076"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0.802242 -1.5 0.458" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.226 0.3205 0.352"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.802242 -1.5 0.458" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.226 0.3205 0.352"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0.537742 -1.5025 0.347" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.281 0.155 0.102"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.537742 -1.5025 0.347" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.281 0.155 0.102"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0.513242 -1.535 0.7085" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.352 0.53 0.621"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.513242 -1.535 0.7085" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.352 0.53 0.621"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0.51251 -1.55213 2.88985" rpy="3.13612 -0.89071 1.5708"/>
+      <geometry>
+        <box size="0.1 0.0953271 0.145436"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.51251 -1.55213 2.88985" rpy="3.13612 -0.89071 1.5708"/>
+      <geometry>
+        <box size="0.1 0.0953271 0.145436"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0.507502 -1.50994 2.84151" rpy="-3.12431 0.89071 -1.5708"/>
+      <geometry>
+        <box size="0.0679 0.627868 0.0901768"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.507502 -1.50994 2.84151" rpy="-3.12431 0.89071 -1.5708"/>
+      <geometry>
+        <box size="0.0679 0.627868 0.0901768"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0.513241 -1.19258 0.455258" rpy="3.14123 -0.757225 1.5708"/>
+      <geometry>
+        <box size="0.145 0.0950325 0.100031"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.513241 -1.19258 0.455258" rpy="3.14123 -0.757225 1.5708"/>
+      <geometry>
+        <box size="0.145 0.0950325 0.100031"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0.507874 -1.14093 0.488655" rpy="-3.13022 0.757225 -1.5708"/>
+      <geometry>
+        <box size="0.0849506 0.627918 0.0683716"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.507874 -1.14093 0.488655" rpy="-3.13022 0.757225 -1.5708"/>
+      <geometry>
+        <box size="0.0849506 0.627918 0.0683716"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/slab_0_1_1_350_1832520b.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/slab_0_1_1_350_1832520b.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_4_arm_dda_base">
+    <visual>
+      <origin xyz="-5.40012e-14 0.0497499 1.25e-08" rpy="1.5708 -6.12323e-17 -2.51608e-16"/>
+      <geometry>
+        <cylinder radius="0.0980243" length="0.0995002"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-5.40012e-14 0.0497499 1.25e-08" rpy="1.5708 -6.12323e-17 -2.51608e-16"/>
+      <geometry>
+        <cylinder radius="0.0980243" length="0.0995002"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_5_arm_dda_link1">
+    <visual>
+      <origin xyz="0.00971646 -0.000677326 0.08" rpy="-1.5708 9.44836e-13 -0.0695965"/>
+      <geometry>
+        <box size="0.16052 0.179 0.143756"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.00971646 -0.000677326 0.08" rpy="-1.5708 9.44836e-13 -0.0695965"/>
+      <geometry>
+        <box size="0.16052 0.179 0.143756"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_6_arm_dda_link2">
+    <visual>
+      <origin xyz="0.0818238 -0.00178768 0.0118633" rpy="1.88892 -9.44951e-13 3.072"/>
+      <geometry>
+        <box size="0.1825 0.16602 0.151"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.0818238 -0.00178768 0.0118633" rpy="1.88892 -9.44951e-13 3.072"/>
+      <geometry>
+        <box size="0.1825 0.16602 0.151"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="0.0968857 0.183364 0.575926" rpy="1.88892 -9.44193e-13 3.072"/>
+      <geometry>
+        <box size="0.1452 0.1227 0.11714"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.0968857 0.183364 0.575926" rpy="1.88892 -9.44193e-13 3.072"/>
+      <geometry>
+        <box size="0.1452 0.1227 0.11714"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="0.104908 0.102883 0.333818" rpy="-3.14159 0.318124 1.5012"/>
+      <geometry>
+        <cylinder radius="0.059" length="0.523905"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.104908 0.102883 0.333818" rpy="-3.14159 0.318124 1.5012"/>
+      <geometry>
+        <cylinder radius="0.059" length="0.523905"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_7_arm_dda_link3">
+    <visual>
+      <origin xyz="-0.0574819 -0.00484894 0.00265555" rpy="2.8496 9.44515e-13 -0.0695965"/>
+      <geometry>
+        <box size="0.128011 0.12995 0.117902"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.0574819 -0.00484894 0.00265555" rpy="2.8496 9.44515e-13 -0.0695965"/>
+      <geometry>
+        <box size="0.128011 0.12995 0.117902"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0.086306 -0.536357 0.162636" rpy="-0.291997 9.43896e-13 -0.0695965"/>
+      <geometry>
+        <box size="0.116797 0.09035 0.0894071"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.086306 -0.536357 0.162636" rpy="-0.291997 9.43896e-13 -0.0695965"/>
+      <geometry>
+        <box size="0.116797 0.09035 0.0894071"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0.0833388 -0.301077 0.0920232" rpy="1.86279 -9.44271e-13 3.072"/>
+      <geometry>
+        <cylinder radius="0.045" length="0.50095"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.0833388 -0.301077 0.0920232" rpy="1.86279 -9.44271e-13 3.072"/>
+      <geometry>
+        <cylinder radius="0.045" length="0.50095"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_8_arm_dda_link4">
+    <visual>
+      <origin xyz="0.0435645 0.00593781 0.00306501" rpy="2.64816e-12 -1.5012 3.14159"/>
+      <geometry>
+        <box size="0.092182 0.131724 0.0993445"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.0435645 0.00593781 0.00306501" rpy="2.64816e-12 -1.5012 3.14159"/>
+      <geometry>
+        <box size="0.092182 0.131724 0.0993445"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_9_arm_dda_link5">
+    <visual>
+      <origin xyz="2.80991e-05 0.0496722 0.00593781" rpy="-1.5708 1.32571e-14 -1.18073e-14"/>
+      <geometry>
+        <box size="0.092182 0.131724 0.0993445"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="2.80991e-05 0.0496722 0.00593781" rpy="-1.5708 1.32571e-14 -1.18073e-14"/>
+      <geometry>
+        <box size="0.092182 0.131724 0.0993445"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_10_arm_rt_base">
+    <visual>
+      <origin xyz="-9.09495e-15 -1.39835e-14 0.05325" rpy="-3.14159 -1.3307e-16 -1.5708"/>
+      <geometry>
+        <cylinder radius="0.127774" length="0.1065"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-9.09495e-15 -1.39835e-14 0.05325" rpy="-3.14159 -1.3307e-16 -1.5708"/>
+      <geometry>
+        <cylinder radius="0.127774" length="0.1065"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_11_arm_dda_link6">
+    <visual>
+      <origin xyz="2.04636e-15 -0.01875 3.18323e-15" rpy="-1.5708 -1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.045" length="0.0485"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="2.04636e-15 -0.01875 3.18323e-15" rpy="-1.5708 -1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.045" length="0.0485"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_12_arm_rt_link1">
+    <visual>
+      <origin xyz="5.49316e-07 -0.0135144 0.122341" rpy="-6.18444e-17 -1.32987e-16 -6.37294e-16"/>
+      <geometry>
+        <box size="0.186391 0.212971 0.245681"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="5.49316e-07 -0.0135144 0.122341" rpy="-6.18444e-17 -1.32987e-16 -6.37294e-16"/>
+      <geometry>
+        <box size="0.186391 0.212971 0.245681"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_13_arm_rt_link2">
+    <visual>
+      <origin xyz="-5.49316e-07 -0.122341 0.0197644" rpy="-2.33784e-16 2.66454e-14 8.24823e-16"/>
+      <geometry>
+        <box size="0.186391 0.245681 0.225471"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-5.49316e-07 -0.122341 0.0197644" rpy="-2.33784e-16 2.66454e-14 8.24823e-16"/>
+      <geometry>
+        <box size="0.186391 0.245681 0.225471"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="2.20552e-14 -0.128812 0.87556" rpy="-2.33784e-16 2.66454e-14 8.24823e-16"/>
+      <geometry>
+        <box size="0.152 0.186625 0.174119"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="2.20552e-14 -0.128812 0.87556" rpy="-2.33784e-16 2.66454e-14 8.24823e-16"/>
+      <geometry>
+        <box size="0.152 0.186625 0.174119"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="1.23919e-14 -0.1345 0.461" rpy="1.39024e-16 -2.66454e-14 -3.14159"/>
+      <geometry>
+        <cylinder radius="0.076" length="0.655"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="1.23919e-14 -0.1345 0.461" rpy="1.39024e-16 -2.66454e-14 -3.14159"/>
+      <geometry>
+        <cylinder radius="0.076" length="0.655"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_14_arm_rt_link3">
+    <visual>
+      <origin xyz="1.09139e-14 0.0903097 0.00568772" rpy="-5.8671e-16 -6.44484e-14 4.74184e-16"/>
+      <geometry>
+        <box size="0.152 0.167619 0.186625"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="1.09139e-14 0.0903097 0.00568772" rpy="-5.8671e-16 -6.44484e-14 4.74184e-16"/>
+      <geometry>
+        <box size="0.152 0.167619 0.186625"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_15_arm_rt_link5">
+    <visual>
+      <origin xyz="8.63754e-16 0.0567194 0.00470974" rpy="3.6658e-16 -1.58958e-16 1.67635e-14"/>
+      <geometry>
+        <box size="0.099024 0.113439 0.14498"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="8.63754e-16 0.0567194 0.00470974" rpy="3.6658e-16 -1.58958e-16 1.67635e-14"/>
+      <geometry>
+        <box size="0.099024 0.113439 0.14498"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_16_arm_rt_link6">
+    <visual>
+      <origin xyz="0 0 0.01925" rpy="-3.14159 -1.7881e-13 -0.523599"/>
+      <geometry>
+        <cylinder radius="0.049" length="0.0525"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.01925" rpy="-3.14159 -1.7881e-13 -0.523599"/>
+      <geometry>
+        <cylinder radius="0.049" length="0.0525"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_17_arm_rt_link4">
+    <visual>
+      <origin xyz="1.10617e-13 -0.12449 0.779619" rpy="5.96745e-16 6.34492e-14 3.76001e-16"/>
+      <geometry>
+        <box size="0.099024 0.14498 0.123239"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="1.10617e-13 -0.12449 0.779619" rpy="5.96745e-16 6.34492e-14 3.76001e-16"/>
+      <geometry>
+        <box size="0.099024 0.14498 0.123239"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-1.36424e-15 -1.40972e-14 -0.0975" rpy="-2.1684e-19 0 4.33681e-19"/>
+      <geometry>
+        <mesh filename="meshes/0_1_1_915.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-1.36424e-15 -1.40972e-14 -0.0975" rpy="-2.1684e-19 0 4.33681e-19"/>
+      <geometry>
+        <mesh filename="meshes/0_1_1_915.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_18_scan_body_slide_DDA">
+    <visual>
+      <origin xyz="-0.66625 0.05775 -0.00325" rpy="1.5708 -5.36832e-16 -3.14159"/>
+      <geometry>
+        <box size="1.3315 0.3515 0.1225"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.66625 0.05775 -0.00325" rpy="1.5708 -5.36832e-16 -3.14159"/>
+      <geometry>
+        <box size="1.3315 0.3515 0.1225"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-1.9768 1.167 -0.677622" rpy="1.5708 1.5708 0"/>
+      <geometry>
+        <mesh filename="meshes/slab_0_1_1_720_212c22b0.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-1.9768 1.167 -0.677622" rpy="1.5708 1.5708 0"/>
+      <geometry>
+        <mesh filename="meshes/slab_0_1_1_720_212c22b0.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_19_scan_body_slide_RT">
+    <visual>
+      <origin xyz="-0.0188267 -0.439 -0.124014" rpy="-1.69295e-27 -5.6747e-15 6.0071e-13"/>
+      <geometry>
+        <box size="0.352 1.332 0.12"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.0188267 -0.439 -0.124014" rpy="-1.69295e-27 -5.6747e-15 6.0071e-13"/>
+      <geometry>
+        <box size="0.352 1.332 0.12"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="0.493416 0.801308 -1.23201" rpy="-1.69295e-27 -5.6747e-15 6.0071e-13"/>
+      <geometry>
+        <mesh filename="meshes/slab_0_1_1_720_e744c549.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.493416 0.801308 -1.23201" rpy="-1.69295e-27 -5.6747e-15 6.0071e-13"/>
+      <geometry>
+        <mesh filename="meshes/slab_0_1_1_720_e744c549.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_20_rail_RT">
+    <visual>
+      <origin xyz="2.04636e-15 3.63798e-15 0.161" rpy="-1.86665e-30 0 -1.22465e-16"/>
+      <geometry>
+        <box size="7.208 0.56 0.282"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="2.04636e-15 3.63798e-15 0.161" rpy="-1.86665e-30 0 -1.22465e-16"/>
+      <geometry>
+        <box size="7.208 0.56 0.282"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-1.7317 0.025 0.245" rpy="-1.5708 -3.15544e-30 -4.11927e-15"/>
+      <geometry>
+        <box size="3.4624 0.33 0.165"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-1.7317 0.025 0.245" rpy="-1.5708 -3.15544e-30 -4.11927e-15"/>
+      <geometry>
+        <box size="3.4624 0.33 0.165"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="3.489 -9.09495e-16 9.41617e-15" rpy="-1.86665e-30 0 -1.22465e-16"/>
+      <geometry>
+        <box size="0.2 1.1 0.04"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="3.489 -9.09495e-16 9.41617e-15" rpy="-1.86665e-30 0 -1.22465e-16"/>
+      <geometry>
+        <box size="0.2 1.1 0.04"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="1.7445 -9.09495e-16 -5.86486e-16" rpy="-1.86665e-30 0 -1.22465e-16"/>
+      <geometry>
+        <box size="0.2 1.1 0.04"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="1.7445 -9.09495e-16 -5.86486e-16" rpy="-1.86665e-30 0 -1.22465e-16"/>
+      <geometry>
+        <box size="0.2 1.1 0.04"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="8.35598e-15 0 -7.44575e-16" rpy="-1.86665e-30 0 -1.22465e-16"/>
+      <geometry>
+        <box size="0.2 1.1 0.04"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="8.35598e-15 0 -7.44575e-16" rpy="-1.86665e-30 0 -1.22465e-16"/>
+      <geometry>
+        <box size="0.2 1.1 0.04"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-1.7445 9.09495e-16 -7.46344e-16" rpy="-1.86665e-30 0 -1.22465e-16"/>
+      <geometry>
+        <box size="0.2 1.1 0.04"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-1.7445 9.09495e-16 -7.46344e-16" rpy="-1.86665e-30 0 -1.22465e-16"/>
+      <geometry>
+        <box size="0.2 1.1 0.04"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-3.489 1.36424e-15 -3.44107e-15" rpy="-1.86665e-30 0 -1.22465e-16"/>
+      <geometry>
+        <box size="0.2 1.1 0.04"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-3.489 1.36424e-15 -3.44107e-15" rpy="-1.86665e-30 0 -1.22465e-16"/>
+      <geometry>
+        <box size="0.2 1.1 0.04"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="3.489 -3.02407e-14 0.085" rpy="1.5708 0 -4.11927e-15"/>
+      <geometry>
+        <box size="0.015 0.13 0.74"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="3.489 -3.02407e-14 0.085" rpy="1.5708 0 -4.11927e-15"/>
+      <geometry>
+        <box size="0.015 0.13 0.74"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="1.7445 -2.27374e-14 0.085" rpy="1.5708 0 -4.11927e-15"/>
+      <geometry>
+        <box size="0.015 0.13 0.74"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="1.7445 -2.27374e-14 0.085" rpy="1.5708 0 -4.11927e-15"/>
+      <geometry>
+        <box size="0.015 0.13 0.74"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="1.58593e-14 -1.50067e-14 0.085" rpy="1.5708 0 -4.11927e-15"/>
+      <geometry>
+        <box size="0.015 0.13 0.74"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="1.58593e-14 -1.50067e-14 0.085" rpy="1.5708 0 -4.11927e-15"/>
+      <geometry>
+        <box size="0.015 0.13 0.74"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-1.7445 -7.50333e-15 0.085" rpy="1.5708 0 -4.11927e-15"/>
+      <geometry>
+        <box size="0.015 0.13 0.74"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-1.7445 -7.50333e-15 0.085" rpy="1.5708 0 -4.11927e-15"/>
+      <geometry>
+        <box size="0.015 0.13 0.74"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-3.489 -1.50067e-14 0.085" rpy="1.5708 0 -4.11927e-15"/>
+      <geometry>
+        <box size="0.015 0.13 0.74"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-3.489 -1.50067e-14 0.085" rpy="1.5708 0 -4.11927e-15"/>
+      <geometry>
+        <box size="0.015 0.13 0.74"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_21_rail_DDA">
+    <visual>
+      <origin xyz="1.36424e-15 4.09273e-15 0.161" rpy="4.75452e-30 0 -1.22465e-16"/>
+      <geometry>
+        <box size="7.208 0.56 0.282"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="1.36424e-15 4.09273e-15 0.161" rpy="4.75452e-30 0 -1.22465e-16"/>
+      <geometry>
+        <box size="7.208 0.56 0.282"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-3.489 1.36424e-15 -1.74094e-15" rpy="4.75452e-30 0 -1.22465e-16"/>
+      <geometry>
+        <box size="0.2 1.1 0.04"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-3.489 1.36424e-15 -1.74094e-15" rpy="4.75452e-30 0 -1.22465e-16"/>
+      <geometry>
+        <box size="0.2 1.1 0.04"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-1.7445 9.09495e-16 -7.50906e-16" rpy="4.75452e-30 0 -1.22465e-16"/>
+      <geometry>
+        <box size="0.2 1.1 0.04"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-1.7445 9.09495e-16 -7.50906e-16" rpy="4.75452e-30 0 -1.22465e-16"/>
+      <geometry>
+        <box size="0.2 1.1 0.04"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="3.35376e-15 0 -7.48527e-16" rpy="4.75452e-30 0 -1.22465e-16"/>
+      <geometry>
+        <box size="0.2 1.1 0.04"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="3.35376e-15 0 -7.48527e-16" rpy="4.75452e-30 0 -1.22465e-16"/>
+      <geometry>
+        <box size="0.2 1.1 0.04"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="1.7445 -9.09495e-16 -5.93382e-16" rpy="4.75452e-30 0 -1.22465e-16"/>
+      <geometry>
+        <box size="0.2 1.1 0.04"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="1.7445 -9.09495e-16 -5.93382e-16" rpy="4.75452e-30 0 -1.22465e-16"/>
+      <geometry>
+        <box size="0.2 1.1 0.04"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="3.489 -9.09495e-16 9.40989e-15" rpy="4.75452e-30 0 -1.22465e-16"/>
+      <geometry>
+        <box size="0.2 1.1 0.04"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="3.489 -9.09495e-16 9.40989e-15" rpy="4.75452e-30 0 -1.22465e-16"/>
+      <geometry>
+        <box size="0.2 1.1 0.04"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-3.489 -2.4329e-14 0.085" rpy="1.5708 0 -4.56336e-15"/>
+      <geometry>
+        <box size="0.015 0.13 0.74"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-3.489 -2.4329e-14 0.085" rpy="1.5708 0 -4.56336e-15"/>
+      <geometry>
+        <box size="0.015 0.13 0.74"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-1.7445 -1.72804e-14 0.085" rpy="1.5708 0 -4.56336e-15"/>
+      <geometry>
+        <box size="0.015 0.13 0.74"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-1.7445 -1.72804e-14 0.085" rpy="1.5708 0 -4.56336e-15"/>
+      <geometry>
+        <box size="0.015 0.13 0.74"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="5.79803e-15 -2.52385e-14 0.085" rpy="1.5708 0 -4.56336e-15"/>
+      <geometry>
+        <box size="0.015 0.13 0.74"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="5.79803e-15 -2.52385e-14 0.085" rpy="1.5708 0 -4.56336e-15"/>
+      <geometry>
+        <box size="0.015 0.13 0.74"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="1.7445 -3.31966e-14 0.085" rpy="1.5708 0 -4.56336e-15"/>
+      <geometry>
+        <box size="0.015 0.13 0.74"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="1.7445 -3.31966e-14 0.085" rpy="1.5708 0 -4.56336e-15"/>
+      <geometry>
+        <box size="0.015 0.13 0.74"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="3.489 -4.1382e-14 0.085" rpy="1.5708 0 -4.56336e-15"/>
+      <geometry>
+        <box size="0.015 0.13 0.74"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="3.489 -4.1382e-14 0.085" rpy="1.5708 0 -4.56336e-15"/>
+      <geometry>
+        <box size="0.015 0.13 0.74"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-1.7317 0.025 0.245" rpy="-1.5708 0 1.45473e-15"/>
+      <geometry>
+        <box size="3.4624 0.33 0.165"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-1.7317 0.025 0.245" rpy="-1.5708 0 1.45473e-15"/>
+      <geometry>
+        <box size="3.4624 0.33 0.165"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_22_positioner_base">
+    <visual>
+      <origin xyz="3.075 0.738 -0.0717999" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.15 2.754 0.2436"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="3.075 0.738 -0.0717999" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.15 2.754 0.2436"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="2.82322 0.199223 -0.025" rpy="-0.785398 -1.5708 0"/>
+      <geometry>
+        <box size="0.15 0.15 0.65"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="2.82322 0.199223 -0.025" rpy="-0.785398 -1.5708 0"/>
+      <geometry>
+        <box size="0.15 0.15 0.65"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="2.82322 1.27678 -0.025" rpy="-2.35619 -1.5708 0"/>
+      <geometry>
+        <box size="0.15 0.15 0.65"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="2.82322 1.27678 -0.025" rpy="-2.35619 -1.5708 0"/>
+      <geometry>
+        <box size="0.15 0.15 0.65"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-5.025 0.738 -0.0717999" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.15 2.754 0.2436"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-5.025 0.738 -0.0717999" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.15 2.754 0.2436"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-4.77322 1.27678 -0.025" rpy="2.35619 -1.5708 0"/>
+      <geometry>
+        <box size="0.15 0.15 0.65"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-4.77322 1.27678 -0.025" rpy="2.35619 -1.5708 0"/>
+      <geometry>
+        <box size="0.15 0.15 0.65"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-4.77322 0.199223 -0.025" rpy="0.785398 -1.5708 0"/>
+      <geometry>
+        <box size="0.15 0.15 0.65"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-4.77322 0.199223 -0.025" rpy="0.785398 -1.5708 0"/>
+      <geometry>
+        <box size="0.15 0.15 0.65"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0.91375 0.738 0.0065" rpy="0 0 0"/>
+      <geometry>
+        <box size="8.0725 0.724 0.213"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.91375 0.738 0.0065" rpy="0 0 0"/>
+      <geometry>
+        <box size="8.0725 0.724 0.213"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-4.73 0.738 0.075" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.74 0.724 0.05"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-4.73 0.738 0.075" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.74 0.724 0.05"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-4.845 0.738 1.132" rpy="1.19576e-15 1.77636e-15 -2.80712e-15"/>
+      <geometry>
+        <box size="0.18 0.7 2.064"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-4.845 0.738 1.132" rpy="1.19576e-15 1.77636e-15 -2.80712e-15"/>
+      <geometry>
+        <box size="0.18 0.7 2.064"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-5.07 0.738 0.9" rpy="1.5708 1.19576e-15 -1.5708"/>
+      <geometry>
+        <box size="0.7 1 0.3"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-5.07 0.738 0.9" rpy="1.5708 1.19576e-15 -1.5708"/>
+      <geometry>
+        <box size="0.7 1 0.3"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-4.56 0.738 0.21" rpy="-5.18887e-14 1.77636e-15 -2.80712e-15"/>
+      <geometry>
+        <box size="0.4 0.357 0.22"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-4.56 0.738 0.21" rpy="-5.18887e-14 1.77636e-15 -2.80712e-15"/>
+      <geometry>
+        <box size="0.4 0.357 0.22"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-4.7725 0.3375 1.26356" rpy="1.19576e-15 1.77636e-15 -2.80712e-15"/>
+      <geometry>
+        <box size="0.265 0.101 2.01413"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-4.7725 0.3375 1.26356" rpy="1.19576e-15 1.77636e-15 -2.80712e-15"/>
+      <geometry>
+        <box size="0.265 0.101 2.01413"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-4.7235 0.493 1.03875" rpy="1.19576e-15 1.77636e-15 -2.80712e-15"/>
+      <geometry>
+        <box size="0.063 0.09 1.4375"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-4.7235 0.493 1.03875" rpy="1.19576e-15 1.77636e-15 -2.80712e-15"/>
+      <geometry>
+        <box size="0.063 0.09 1.4375"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-4.7235 0.983 1.03875" rpy="1.19576e-15 1.77636e-15 -2.80712e-15"/>
+      <geometry>
+        <box size="0.063 0.09 1.4375"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-4.7235 0.983 1.03875" rpy="1.19576e-15 1.77636e-15 -2.80712e-15"/>
+      <geometry>
+        <box size="0.063 0.09 1.4375"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-4.83 0.463 0.2" rpy="1.19576e-15 1.77636e-15 -2.80712e-15"/>
+      <geometry>
+        <box size="0.45 0.012 0.2"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-4.83 0.463 0.2" rpy="1.19576e-15 1.77636e-15 -2.80712e-15"/>
+      <geometry>
+        <box size="0.45 0.012 0.2"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-4.83 1.013 0.2" rpy="1.19576e-15 1.77636e-15 -2.80712e-15"/>
+      <geometry>
+        <box size="0.45 0.012 0.2"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-4.83 1.013 0.2" rpy="1.19576e-15 1.77636e-15 -2.80712e-15"/>
+      <geometry>
+        <box size="0.45 0.012 0.2"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_23_positioner_lift_idler_link1">
+    <visual>
+      <origin xyz="2.7071 0.738 0.135" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.74 0.744 0.1"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="2.7071 0.738 0.135" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.74 0.744 0.1"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="2.8227 0.738 1.217" rpy="1.74158e-30 -1.22125e-15 3.14159"/>
+      <geometry>
+        <box size="0.1812 0.7 2.064"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="2.8227 0.738 1.217" rpy="1.74158e-30 -1.22125e-15 3.14159"/>
+      <geometry>
+        <box size="0.1812 0.7 2.064"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="2.4621 0.738 0.295" rpy="-1.26226e-15 -1.22125e-15 3.14159"/>
+      <geometry>
+        <box size="0.55 0.387 0.22"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="2.4621 0.738 0.295" rpy="-1.26226e-15 -1.22125e-15 3.14159"/>
+      <geometry>
+        <box size="0.55 0.387 0.22"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="2.7006 0.983 1.12375" rpy="1.74158e-30 -1.22125e-15 3.14159"/>
+      <geometry>
+        <box size="0.063 0.09 1.4375"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="2.7006 0.983 1.12375" rpy="1.74158e-30 -1.22125e-15 3.14159"/>
+      <geometry>
+        <box size="0.063 0.09 1.4375"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="2.7006 0.493 1.12375" rpy="1.74158e-30 -1.22125e-15 3.14159"/>
+      <geometry>
+        <box size="0.063 0.09 1.4375"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="2.7006 0.493 1.12375" rpy="1.74158e-30 -1.22125e-15 3.14159"/>
+      <geometry>
+        <box size="0.063 0.09 1.4375"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="2.8071 1.013 0.285" rpy="1.74158e-30 -1.22125e-15 3.14159"/>
+      <geometry>
+        <box size="0.45 0.012 0.2"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="2.8071 1.013 0.285" rpy="1.74158e-30 -1.22125e-15 3.14159"/>
+      <geometry>
+        <box size="0.45 0.012 0.2"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="2.8071 0.463 0.285" rpy="1.74158e-30 -1.22125e-15 3.14159"/>
+      <geometry>
+        <box size="0.45 0.012 0.2"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="2.8071 0.463 0.285" rpy="1.74158e-30 -1.22125e-15 3.14159"/>
+      <geometry>
+        <box size="0.45 0.012 0.2"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_24_positioner_lift_link1">
+    <visual>
+      <origin xyz="0.646 0.354 1.846" rpy="1.5708 0 -1.5708"/>
+      <geometry>
+        <box size="0.712 0.413 0.292"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.646 0.354 1.846" rpy="1.5708 0 -1.5708"/>
+      <geometry>
+        <box size="0.712 0.413 0.292"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="0.503 0.55 1.6295" rpy="0 0 1.5708"/>
+      <geometry>
+        <box size="0.6 0.576 0.02"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.503 0.55 1.6295" rpy="0 0 1.5708"/>
+      <geometry>
+        <box size="0.6 0.576 0.02"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="0.471 0.55 1.4225" rpy="1.5708 0 -1.5708"/>
+      <geometry>
+        <box size="0.6 0.4 0.02"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.471 0.55 1.4225" rpy="1.5708 0 -1.5708"/>
+      <geometry>
+        <box size="0.6 0.4 0.02"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="3.81355 0.55 -0.2786" rpy="-1.19576e-15 -1.77636e-15 2.80712e-15"/>
+      <geometry>
+        <mesh filename="meshes/slab_0_1_1_1000_d5032b02.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="3.81355 0.55 -0.2786" rpy="-1.19576e-15 -1.77636e-15 2.80712e-15"/>
+      <geometry>
+        <mesh filename="meshes/slab_0_1_1_1000_d5032b02.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_25_positioner_lift_idler_link2">
+    <visual>
+      <origin xyz="0.503 0.55 1.6295" rpy="0 -3.27119e-32 1.5708"/>
+      <geometry>
+        <box size="0.6 0.576 0.02"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.503 0.55 1.6295" rpy="0 -3.27119e-32 1.5708"/>
+      <geometry>
+        <box size="0.6 0.576 0.02"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="0.471 0.55 1.4225" rpy="1.5708 -1.16848e-31 -1.5708"/>
+      <geometry>
+        <box size="0.6 0.4 0.02"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.471 0.55 1.4225" rpy="1.5708 -1.16848e-31 -1.5708"/>
+      <geometry>
+        <box size="0.6 0.4 0.02"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="0.691 0.55 1.6495" rpy="2.22045e-16 -3.27119e-32 1.5708"/>
+      <geometry>
+        <box size="0.255 0.2 0.02"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.691 0.55 1.6495" rpy="2.22045e-16 -3.27119e-32 1.5708"/>
+      <geometry>
+        <box size="0.255 0.2 0.02"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="0.691 0.547902 1.768" rpy="1.5708 -3.27119e-32 1.5708"/>
+      <geometry>
+        <box size="0.123804 0.223 0.2"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.691 0.547902 1.768" rpy="1.5708 -3.27119e-32 1.5708"/>
+      <geometry>
+        <box size="0.123804 0.223 0.2"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="4.41355 0.55 -0.3636" rpy="-1.74158e-30 -1.22125e-15 -3.14159"/>
+      <geometry>
+        <mesh filename="meshes/slab_0_1_1_1000_c1de9490.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="4.41355 0.55 -0.3636" rpy="-1.74158e-30 -1.22125e-15 -3.14159"/>
+      <geometry>
+        <mesh filename="meshes/slab_0_1_1_1000_c1de9490.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_26_positioner_lift_link2">
+    <visual>
+      <origin xyz="-0.455 2.56122e-07 -0.11" rpy="1.5708 -8.13566e-17 -3.14159"/>
+      <geometry>
+        <box size="1.234 0.114 0.1"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.455 2.56122e-07 -0.11" rpy="1.5708 -8.13566e-17 -3.14159"/>
+      <geometry>
+        <box size="1.234 0.114 0.1"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0.44 2.56122e-07 -0.1355" rpy="1.5708 -8.13566e-17 -3.14159"/>
+      <geometry>
+        <box size="1.18 0.049 0.174"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.44 2.56122e-07 -0.1355" rpy="1.5708 -8.13566e-17 -3.14159"/>
+      <geometry>
+        <box size="1.18 0.049 0.174"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0.455 2.56122e-07 -0.167" rpy="1.5708 -8.13566e-17 -3.14159"/>
+      <geometry>
+        <box size="1.264 0.134 0.092"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.455 2.56122e-07 -0.167" rpy="1.5708 -8.13566e-17 -3.14159"/>
+      <geometry>
+        <box size="1.264 0.134 0.092"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="0.272406 0.000751801 -0.198" rpy="1.5708 -8.13566e-17 -3.14159"/>
+      <geometry>
+        <box size="0.190811 0.16 0.160337"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.272406 0.000751801 -0.198" rpy="1.5708 -8.13566e-17 -3.14159"/>
+      <geometry>
+        <box size="0.190811 0.16 0.160337"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-1.12525e-14 2.56122e-07 -0.045" rpy="-6.12323e-17 -1.82233e-17 0"/>
+      <geometry>
+        <box size="0.15 0.18 0.06"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-1.12525e-14 2.56122e-07 -0.045" rpy="-6.12323e-17 -1.82233e-17 0"/>
+      <geometry>
+        <box size="0.15 0.18 0.06"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-1.12027e-14 2.56122e-07 0.003" rpy="9.9887e-46 -1.71512e-15 1.5708"/>
+      <geometry>
+        <cylinder radius="0.05" length="0.036"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-1.12027e-14 2.56122e-07 0.003" rpy="9.9887e-46 -1.71512e-15 1.5708"/>
+      <geometry>
+        <cylinder radius="0.05" length="0.036"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_27_positioner_lift_link3">
+    <visual>
+      <origin xyz="1.05 -0.05 0.05" rpy="0 1.60237e-31 8.13566e-17"/>
+      <geometry>
+        <box size="0.23 0.112 0.24"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="1.05 -0.05 0.05" rpy="0 1.60237e-31 8.13566e-17"/>
+      <geometry>
+        <box size="0.23 0.112 0.24"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="1.05 -0.113 0.06" rpy="1.5708 3.69779e-32 3.14159"/>
+      <geometry>
+        <box size="0.23 0.266 0.02"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="1.05 -0.113 0.06" rpy="1.5708 3.69779e-32 3.14159"/>
+      <geometry>
+        <box size="0.23 0.266 0.02"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="1.05225 -0.18475 0.0675" rpy="1.5708 -2.28722e-15 2.07976e-15"/>
+      <geometry>
+        <box size="0.1495 0.251 0.1235"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="1.05225 -0.18475 0.0675" rpy="1.5708 -2.28722e-15 2.07976e-15"/>
+      <geometry>
+        <box size="0.1495 0.251 0.1235"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="1.21591 -0.1905 0.113" rpy="1.5708 0.391796 -1.5708"/>
+      <geometry>
+        <cylinder radius="0.0809307" length="0.135811"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="1.21591 -0.1905 0.113" rpy="1.5708 0.391796 -1.5708"/>
+      <geometry>
+        <cylinder radius="0.0809307" length="0.135811"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="1.21591 -0.1905 0.113" rpy="1.5708 0.391796 -1.5708"/>
+      <geometry>
+        <cylinder radius="0.0809307" length="0.135811"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="1.21591 -0.1905 0.113" rpy="1.5708 0.391796 -1.5708"/>
+      <geometry>
+        <cylinder radius="0.0809307" length="0.135811"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="1.099 -0.1905 0.113" rpy="3.14159 1.5708 0"/>
+      <geometry>
+        <capsule radius="0.015" length="0.098"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="1.099 -0.1905 0.113" rpy="3.14159 1.5708 0"/>
+      <geometry>
+        <capsule radius="0.015" length="0.098"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_28_positioner_lift_link4">
+    <visual>
+      <origin xyz="1.51203e-14 0.165906 0.089" rpy="1.5708 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.0809307" length="0.135811"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="1.51203e-14 0.165906 0.089" rpy="1.5708 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.0809307" length="0.135811"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="1.51203e-14 0.165906 0.089" rpy="1.5708 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.0809307" length="0.135811"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="1.51203e-14 0.165906 0.089" rpy="1.5708 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.0809307" length="0.135811"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="1.50067e-14 0.00225026 0.0945189" rpy="-6.15744e-17 1.5708 0"/>
+      <geometry>
+        <box size="0.139038 0.1495 0.105"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="1.50067e-14 0.00225026 0.0945189" rpy="-6.15744e-17 1.5708 0"/>
+      <geometry>
+        <box size="0.139038 0.1495 0.105"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="1.51203e-14 2.56122e-07 1.81899e-14" rpy="-3.14159 -7.61075e-15 -1.5708"/>
+      <geometry>
+        <capsule radius="0.03" length="0.05"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="1.51203e-14 2.56122e-07 1.81899e-14" rpy="-3.14159 -7.61075e-15 -1.5708"/>
+      <geometry>
+        <capsule radius="0.03" length="0.05"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="1.51203e-14 0.0490003 0.089" rpy="1.5708 -1.12877e-14 7.88861e-31"/>
+      <geometry>
+        <capsule radius="0.015" length="0.098"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="1.51203e-14 0.0490003 0.089" rpy="1.5708 -1.12877e-14 7.88861e-31"/>
+      <geometry>
+        <capsule radius="0.015" length="0.098"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_29_positioner_lift_link5">
+    <visual>
+      <origin xyz="0.0785 2.56122e-07 0.039" rpy="-6.12323e-17 3.65358e-17 0"/>
+      <geometry>
+        <box size="0.192 0.192 0.162"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.0785 2.56122e-07 0.039" rpy="-6.12323e-17 3.65358e-17 0"/>
+      <geometry>
+        <box size="0.192 0.192 0.162"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="0.0785 2.56122e-07 0.18175" rpy="1.91323e-16 -2.31822e-16 0.523599"/>
+      <geometry>
+        <cylinder radius="0.096" length="0.1195"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.0785 2.56122e-07 0.18175" rpy="1.91323e-16 -2.31822e-16 0.523599"/>
+      <geometry>
+        <cylinder radius="0.096" length="0.1195"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_30_positioner_lift_idler_link4">
+    <visual>
+      <origin xyz="-0.0785 2.56121e-07 0.039" rpy="4.979e-17 2.67857e-17 3.27119e-32"/>
+      <geometry>
+        <box size="0.192 0.192 0.162"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.0785 2.56121e-07 0.039" rpy="4.979e-17 2.67857e-17 3.27119e-32"/>
+      <geometry>
+        <box size="0.192 0.192 0.162"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0.0785 2.56121e-07 0.17675" rpy="3.43656e-16 -2.02833e-16 0.523599"/>
+      <geometry>
+        <cylinder radius="0.096" length="0.1095"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.0785 2.56121e-07 0.17675" rpy="3.43656e-16 -2.02833e-16 0.523599"/>
+      <geometry>
+        <cylinder radius="0.096" length="0.1095"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_31_positioner_lift_idler_link3">
+    <visual>
+      <origin xyz="-1.47473e-14 0.165906 0.079" rpy="1.5708 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.0809307" length="0.135811"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-1.47473e-14 0.165906 0.079" rpy="1.5708 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.0809307" length="0.135811"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-1.47473e-14 0.165906 0.079" rpy="1.5708 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.0809307" length="0.135811"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-1.47473e-14 0.165906 0.079" rpy="1.5708 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.0809307" length="0.135811"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-1.47422e-14 0.00225026 0.0845189" rpy="-6.12323e-17 1.5708 0"/>
+      <geometry>
+        <box size="0.139038 0.1495 0.105"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-1.47422e-14 0.00225026 0.0845189" rpy="-6.12323e-17 1.5708 0"/>
+      <geometry>
+        <box size="0.139038 0.1495 0.105"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-1.47473e-14 0.0490003 0.079" rpy="-1.5708 -2.7909e-15 3.14159"/>
+      <geometry>
+        <capsule radius="0.015" length="0.098"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-1.47473e-14 0.0490003 0.079" rpy="-1.5708 -2.7909e-15 3.14159"/>
+      <geometry>
+        <capsule radius="0.015" length="0.098"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-1.47446e-14 2.56121e-07 -1.37788e-13" rpy="3.14159 1.28248e-15 -1.5708"/>
+      <geometry>
+        <capsule radius="0.03" length="0.03"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-1.47446e-14 2.56121e-07 -1.37788e-13" rpy="3.14159 1.28248e-15 -1.5708"/>
+      <geometry>
+        <capsule radius="0.03" length="0.03"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="joint_0_DDA" type="fixed">
+    <parent link="link_11_arm_dda_link6"/>
+    <child link="link_0_DDA"/>
+    <origin xyz="0.101347 -0.0975208 0.0305894" rpy="1.5708 2.65815e-26 2.99571e-13"/>
+  </joint>
+  <joint name="joint_1_scan_body_DDA" type="prismatic">
+    <parent link="link_21_rail_DDA"/>
+    <child link="link_1_scan_body_DDA"/>
+    <origin xyz="0.995572 6.82121e-15 0.227" rpy="1.5708 -4.43595e-15 7.88908e-15"/>
+    <axis xyz="1 8.38267e-15 -4.37673e-14"/>
+    <limit lower="-3.601" upper="1.769" effort="0" velocity="0"/>
+    <mimic joint="joint_3_scan_body_RT" multiplier="1" offset="0"/>
+  </joint>
+  <joint name="joint_2_RT" type="fixed">
+    <parent link="link_16_arm_rt_link6"/>
+    <child link="link_2_RT"/>
+    <origin xyz="-4.11205e-13 1.34321e-13 0.05" rpy="3.14159 1.53791e-14 1.0472"/>
+  </joint>
+  <joint name="joint_3_scan_body_RT" type="prismatic">
+    <parent link="link_20_rail_RT"/>
+    <child link="link_3_scan_body_RT"/>
+    <origin xyz="0.32245 -1.5 -0.03" rpy="0 -1.52424e-14 3.14159"/>
+    <axis xyz="-1 5.51758e-13 5.6747e-15"/>
+    <limit lower="-3.601" upper="1.769" effort="0" velocity="0"/>
+  </joint>
+  <joint name="joint_4_arm_dda_base" type="fixed">
+    <parent link="link_18_scan_body_slide_DDA"/>
+    <child link="link_4_arm_dda_base"/>
+    <origin xyz="-1.086 -0.001 -0.00449999" rpy="3.14159 1.5708 0"/>
+  </joint>
+  <joint name="joint_5_arm_dda_link1" type="continuous">
+    <parent link="link_4_arm_dda_base"/>
+    <child link="link_5_arm_dda_link1"/>
+    <origin xyz="-5.40012e-14 0.0995 1.25e-08" rpy="-1.570800009 0.0696039783 -2.560824228e-07"/>
+    <axis xyz="-9.47187e-13 -5.49213e-16 -1"/>
+  </joint>
+  <joint name="joint_6_arm_dda_link2" type="continuous">
+    <parent link="link_5_arm_dda_link1"/>
+    <child link="link_6_arm_dda_link2"/>
+    <origin xyz="0.0897821 -0.00625863 0.0975" rpy="0.317416599 -0.02175372276 -0.003481912741"/>
+    <axis xyz="0.997579 -0.0695404 -9.44828e-13"/>
+  </joint>
+  <joint name="joint_7_arm_dda_link3" type="continuous">
+    <parent link="link_6_arm_dda_link2"/>
+    <child link="link_7_arm_dda_link3"/>
+    <origin xyz="0.0245996 0.190394 0.581957" rpy="-1.596989455 0.06957278374 -0.07141785341"/>
+    <axis xyz="-0.997579 0.0695404 9.44183e-13"/>
+  </joint>
+  <joint name="joint_8_arm_dda_link4" type="continuous">
+    <parent link="link_7_arm_dda_link3"/>
+    <child link="link_8_arm_dda_link4"/>
+    <origin xyz="-0.0283934 -0.545362 0.164126" rpy="2.848927528 -0.06664591338 -0.04953247455"/>
+    <axis xyz="0.997579 6.79388e-16 0.0695404"/>
+  </joint>
+  <joint name="joint_9_arm_dda_link5" type="continuous">
+    <parent link="link_8_arm_dda_link4"/>
+    <child link="link_9_arm_dda_link5"/>
+    <origin xyz="0.045739 0.0653 0.00318843" rpy="-2.266009536e-12 1.50119994 -2.453972516e-12"/>
+    <axis xyz="-1.22514e-14 -1 1.82491e-13"/>
+  </joint>
+  <joint name="joint_10_arm_rt_base" type="fixed">
+    <parent link="link_19_scan_body_slide_RT"/>
+    <child link="link_10_arm_rt_base"/>
+    <origin xyz="-0.0198267 -0.019 -0.0640144" rpy="-3.7704e-28 1.29728e-15 -5.1902e-16"/>
+  </joint>
+  <joint name="joint_11_arm_dda_link6" type="continuous">
+    <parent link="link_9_arm_dda_link5"/>
+    <child link="link_11_arm_dda_link6"/>
+    <origin xyz="1.47793e-15 0.05185 0.0718" rpy="-1.5708 -2.80933e-13 9.47026e-13"/>
+    <axis xyz="2.94412e-13 -1 1.84163e-13"/>
+  </joint>
+  <joint name="joint_12_arm_rt_link1" type="continuous">
+    <parent link="link_10_arm_rt_base"/>
+    <child link="link_12_arm_rt_link1"/>
+    <origin xyz="-8.98126e-15 -1.39835e-14 0.1065" rpy="0 0 -1.570793513"/>
+    <axis xyz="1.3307e-16 -1.50362e-19 -1"/>
+  </joint>
+  <joint name="joint_13_arm_rt_link2" type="continuous">
+    <parent link="link_12_arm_rt_link1"/>
+    <child link="link_13_arm_rt_link2"/>
+    <origin xyz="0 -0.12 0.1345" rpy="-4.220983096e-16 -4.043654345e-08 -1.318831347e-15"/>
+    <axis xyz="7.48923e-16 -1 -3.60127e-16"/>
+  </joint>
+  <joint name="joint_14_arm_rt_link3" type="continuous">
+    <parent link="link_13_arm_rt_link2"/>
+    <child link="link_14_arm_rt_link3"/>
+    <origin xyz="2.17142e-14 -0.0435 0.885" rpy="-1.25926938e-06 3.68469748e-08 -3.178288631e-07"/>
+    <axis xyz="-2.36046e-14 -1 2.4214e-14"/>
+  </joint>
+  <joint name="joint_15_arm_rt_link5" type="continuous">
+    <parent link="link_17_arm_rt_link4"/>
+    <child link="link_15_arm_rt_link5"/>
+    <origin xyz="1.02261e-13 -0.0597 0.7875" rpy="4.212476544e-15 -3.385769443e-09 1.035117318e-14"/>
+    <axis xyz="2.29417e-15 1 3.03796e-16"/>
+  </joint>
+  <joint name="joint_16_arm_rt_link6" type="continuous">
+    <parent link="link_15_arm_rt_link5"/>
+    <child link="link_16_arm_rt_link6"/>
+    <origin xyz="5.96634e-16 0.0597 0.0845" rpy="-5.551115123e-17 -2.220446049e-16 0.5228393415"/>
+    <axis xyz="-2.56204e-17 -2.35743e-16 1"/>
+  </joint>
+  <joint name="joint_17_arm_rt_link4" type="continuous">
+    <parent link="link_14_arm_rt_link3"/>
+    <child link="link_17_arm_rt_link4"/>
+    <origin xyz="5.00222e-15 0.0965 0.0975" rpy="2.220446049e-16 0 -3.141592498"/>
+    <axis xyz="-6.42264e-14 5.19116e-16 -1"/>
+  </joint>
+  <joint name="joint_18_scan_body_slide_DDA" type="prismatic">
+    <parent link="link_1_scan_body_DDA"/>
+    <child link="link_18_scan_body_slide_DDA"/>
+    <origin xyz="0.0045 0.91 0.476799" rpy="-3.14159 -1.5708 0"/>
+    <axis xyz="-1 -1.6621e-14 4.29365e-16"/>
+    <limit lower="0" upper="0.7" effort="0" velocity="0"/>
+  </joint>
+  <joint name="joint_19_scan_body_slide_RT" type="prismatic">
+    <parent link="link_3_scan_body_RT"/>
+    <child link="link_19_scan_body_slide_RT"/>
+    <origin xyz="-0.493416 -0.801308 1.23201" rpy="-1.71589e-27 5.6747e-15 -6.0071e-13"/>
+    <axis xyz="5.48383e-12 1 -2.58261e-16"/>
+    <limit lower="0" upper="0.7" effort="0" velocity="0"/>
+  </joint>
+  <joint name="joint_20_rail_RT" type="fixed">
+    <parent link="base_link"/>
+    <child link="link_20_rail_RT"/>
+    <origin xyz="0.32245 -1.5 0.03" rpy="0 -1.52424e-14 3.14159"/>
+  </joint>
+  <joint name="joint_21_rail_DDA" type="fixed">
+    <parent link="base_link"/>
+    <child link="link_21_rail_DDA"/>
+    <origin xyz="0.32245 1.5 0.03" rpy="0 3.88236e-14 3.14159"/>
+  </joint>
+  <joint name="joint_22_positioner_base" type="fixed">
+    <parent link="base_link"/>
+    <child link="link_22_positioner_base"/>
+    <origin xyz="1.31145 -0.738 0.2036" rpy="0 0 0"/>
+  </joint>
+  <joint name="joint_23_positioner_lift_idler_link1" type="prismatic">
+    <parent link="link_22_positioner_base"/>
+    <child link="link_23_positioner_lift_idler_link1"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="-1 7.01019e-16 -1.72442e-13"/>
+    <limit lower="0" upper="4" effort="0" velocity="0"/>
+  </joint>
+  <joint name="joint_24_positioner_lift_link1" type="prismatic">
+    <parent link="link_22_positioner_base"/>
+    <child link="link_24_positioner_lift_link1"/>
+    <origin xyz="-5.125 0.188 0.075" rpy="1.19576e-15 1.77636e-15 -2.80712e-15"/>
+    <axis xyz="-1.73608e-13 -6.89254e-16 1"/>
+    <limit lower="-0.8" upper="0" effort="0" velocity="0"/>
+  </joint>
+  <joint name="joint_25_positioner_lift_idler_link2" type="prismatic">
+    <parent link="link_23_positioner_lift_idler_link1"/>
+    <child link="link_25_positioner_lift_idler_link2"/>
+    <origin xyz="3.1021 1.288 0.16" rpy="1.74158e-30 -1.22125e-15 3.14159"/>
+    <axis xyz="1.73719e-13 3.0155e-15 1"/>
+    <limit lower="-0.8" upper="0" effort="0" velocity="0"/>
+    <mimic joint="joint_24_positioner_lift_link1" multiplier="1" offset="0"/>
+  </joint>
+  <joint name="joint_26_positioner_lift_link2" type="continuous">
+    <parent link="link_24_positioner_lift_link1"/>
+    <child link="link_26_positioner_lift_link2"/>
+    <origin xyz="0.811 0.55 1.9045" rpy="1.5708 0 -1.5708"/>
+    <axis xyz="-1.00184e-14 -1.73608e-13 1"/>
+  </joint>
+  <joint name="joint_27_positioner_lift_link3" type="prismatic">
+    <parent link="link_26_positioner_lift_link2"/>
+    <child link="link_27_positioner_lift_link3"/>
+    <origin xyz="0.15 -0.0499997 -0.11" rpy="1.5708 1.1922e-31 -3.14159"/>
+    <axis xyz="-1 9.2412e-15 -1.70583e-15"/>
+    <limit lower="0" upper="0.85" effort="0" velocity="0"/>
+  </joint>
+  <joint name="joint_28_positioner_lift_link4" type="continuous">
+    <parent link="link_27_positioner_lift_link3"/>
+    <child link="link_28_positioner_lift_link4"/>
+    <origin xyz="1.05 -0.2715 0.0499997" rpy="1.5708 -2.28722e-15 2.04322e-15"/>
+    <axis xyz="1.00184e-14 -1.73164e-13 -1"/>
+  </joint>
+  <joint name="joint_29_positioner_lift_link5" type="continuous">
+    <parent link="link_28_positioner_lift_link4"/>
+    <child link="link_29_positioner_lift_link5"/>
+    <origin xyz="-0.0785 2.59203e-14 0.152" rpy="0 -5.94228e-31 0"/>
+    <axis xyz="1 6.19865e-16 9.89589e-15"/>
+  </joint>
+  <joint name="joint_30_positioner_lift_idler_link4" type="continuous">
+    <parent link="link_31_positioner_lift_idler_link3"/>
+    <child link="link_30_positioner_lift_idler_link4"/>
+    <origin xyz="0.0785 -2.48691e-14 0.142" rpy="0 -2.12689e-45 0"/>
+    <axis xyz="-1 3.19164e-15 1.97214e-15"/>
+  </joint>
+  <joint name="joint_31_positioner_lift_idler_link3" type="continuous">
+    <parent link="link_25_positioner_lift_idler_link2"/>
+    <child link="link_31_positioner_lift_idler_link3"/>
+    <origin xyz="0.804 0.55 1.8195" rpy="1.5708 0 1.5708"/>
+    <axis xyz="-1.97214e-15 1.73718e-13 -1"/>
+  </joint>
+  <link name="tcp_RT"/>
+  <joint name="tcp_RT_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="tcp_RT"/>
+    <origin xyz="-0.579891 -0.299429 2.25309" rpy="-6.10623e-16 1.72943e-13 1.5708"/>
+  </joint>
+  <link name="tcp_DDA"/>
+  <joint name="tcp_DDA_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="tcp_DDA"/>
+    <origin xyz="-0.536895 0.358583 2.23052" rpy="-6.50527e-14 -1.78649e-13 -1.5708"/>
+  </joint>
+</robot>

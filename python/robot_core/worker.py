@@ -64,6 +64,7 @@ class RobotCoreEngine(Visualizer):
         self._positioner_r_deg = float(snapshot.get("positioner_r_deg", 0.0))
         self._planner_second_group_rotation_T = snapshot.get("second_group_rotation_T")
         self._worker_spool_points = np.asarray(snapshot.get("spool_points", []), dtype=float)
+        self._worker_field_points = snapshot.get("distance_field_pipe_points")
         self._worker_spool_mesh = self._mesh_from_snapshot(
             snapshot.get("spool_vertices"), snapshot.get("spool_triangles"))
         self._worker_positioner_mesh = self._mesh_from_snapshot(

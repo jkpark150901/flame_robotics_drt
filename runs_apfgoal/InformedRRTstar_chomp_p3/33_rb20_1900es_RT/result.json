@@ -1,0 +1,40 @@
+{
+  "index": 33,
+  "group_name": "Point 1 - Inspection pose 3",
+  "robot_name": "rb20_1900es",
+  "pose_name": "RT",
+  "status": "failed",
+  "status_kind": "failed",
+  "category": "timeout",
+  "message": "planning failed for target: path planning timeout",
+  "n_waypoints": 1,
+  "has_path": true,
+  "elapsed": 304.9148168780375,
+  "positioner_r_deg": 270.0,
+  "planner_stats": {},
+  "ik_failure": null,
+  "n_colliding_edges": 0,
+  "colliding_edges": [],
+  "goal_q": [
+    1.2600371054535842,
+    0.0,
+    -1.7196750096651263,
+    1.622047979293702,
+    0.46424965083884545,
+    0.7277825484813369,
+    -1.8699194892465656,
+    2.021651463687547
+  ],
+  "ik_goal_q": [
+    1.2600371054535842,
+    0.0,
+    -1.7196750096651263,
+    1.622047979293702,
+    0.46424965083884545,
+    0.7277825484813369,
+    -1.8699194892465656,
+    2.021651463687547
+  ],
+  "diag": null,
+  "verification": {}
+}

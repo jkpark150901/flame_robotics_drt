@@ -1,0 +1,50 @@
+{
+  "index": 27,
+  "group_name": "Point 4 - Inspection pose 2",
+  "robot_name": "rb20_1900es",
+  "pose_name": "RT",
+  "status": "failed",
+  "status_kind": "failed",
+  "category": "timeout_approximate",
+  "message": "planning failed for target: timeout_approximate",
+  "n_waypoints": 1,
+  "has_path": true,
+  "elapsed": 304.7124357649591,
+  "positioner_r_deg": 270.0,
+  "planner_stats": {
+    "state_validity_calls": 3190,
+    "collision_rejects": 436,
+    "workspace_rejects": 0,
+    "solve_time": 300.24236646294594,
+    "algorithm": "RRTstar",
+    "max_iter": 16000,
+    "iterations": 3190,
+    "timeout_sec": 299.9968819099013,
+    "iteration_ptc_error": null
+  },
+  "ik_failure": null,
+  "n_colliding_edges": 0,
+  "colliding_edges": [],
+  "goal_q": [
+    0.14411781606470897,
+    0.0,
+    -1.2448806267810892,
+    -1.201430223922956,
+    0.005455308579863281,
+    -2.801098950750474,
+    1.8153508782127339,
+    2.0023734072200328
+  ],
+  "ik_goal_q": [
+    0.14411781606470897,
+    0.0,
+    -1.2448806267810892,
+    -1.201430223922956,
+    0.005455308579863281,
+    -2.801098950750474,
+    1.8153508782127339,
+    2.0023734072200328
+  ],
+  "diag": null,
+  "verification": {}
+}

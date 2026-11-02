@@ -1,0 +1,28 @@
+{
+    "num_iterations": 100,
+    "num_points": 40,
+    "learning_rate": 0.05,
+    "w_smooth": 1.0,
+    "d0": 0.15,
+    "w_obs": 1.0,
+    "k_att": 0.0,
+    "fd_eps": 0.01,
+    "joint_update_limit": 0.1,
+    "max_step_halvings": 4,
+    "early_stop_patience": 10,
+    "early_stop_rel_tol": 0.005,
+    "time_budget_s": 30.0,
+    "save_convergence_plot": true,
+    "save_playback_trajectory": true,
+    "save_task_space_plot": true,
+    "task_space_axes": [
+        0,
+        1
+    ],
+    "approach_zone": 0.1,
+    "optimize_goal": false,
+    "goal_learning_rate": 0.05,
+    "goal_pos_tol": 0.001,
+    "goal_rot_tol": 0.01,
+    "sensor_link": "link_end"
+}

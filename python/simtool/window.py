@@ -29,7 +29,8 @@ from plugins.pluginbase.optimizerbase import OptimizerBase
 from plugins.pathplanner import Q_SPACE_PLANNER_MODULES
 from plugins.pathplanner.ompl import SUPPORTED_ALGORITHMS as OMPL_SUPPORTED_ALGORITHMS
 from plugins.robotics.inspection_workflow import InspectionWorkflowState
-from simtool.inspection_path_handler import InspectionPathHandler
+from plugins.robotics.plan_run_io import default_run_dir, save_plan_run
+from simtool.inspection_path_handler import InspectionPathHandler, resolve_planner_timeout
 from simtool.inspection_sequencer import InspectionSequencer
 from simtool.param import SimParameterMap
 
@@ -45,8 +46,8 @@ class AppWindow(QMainWindow):
 
     # 관절 테이블: (slider, edit, joint, kind, lo, hi)  kind: 'lin'(m) | 'rot'(deg)
     _SOURCE_JOINTS = [
-        ('slider_source_base_pos',   'edit_source_base_pos',   'rt_joint_linear_track', 'lin',   0.0,  7.9),
-        ('slider_source_base_pos_2', 'edit_source_base_pos_2', 'rt_joint_carriage',     'lin',  -0.5,  0.5),
+        ('slider_source_base_pos',   'edit_source_base_pos',   'rt_joint_linear_track', 'lin',   0.0,  4.87),
+        ('slider_source_base_pos_2', 'edit_source_base_pos_2', 'rt_joint_carriage',     'lin',   0.0,  0.7),
         ('slider_source_base_pos_3', 'edit_source_base_pos_3', 'rt_base',               'rot', -180.0, 180.0),
         ('slider_source_base_pos_4', 'edit_source_base_pos_4', 'rt_shoulder',           'rot', -180.0, 180.0),
         ('slider_source_base_pos_5', 'edit_source_base_pos_5', 'rt_elbow',              'rot', -180.0, 180.0),
@@ -55,8 +56,8 @@ class AppWindow(QMainWindow):
         ('slider_source_base_pos_8', 'edit_source_base_pos_8', 'rt_wrist3',             'rot', -180.0, 180.0),
     ]
     _DDA_JOINTS = [
-        ('slider_source_base_pos_9',  'edit_source_base_pos_9',  'dda_joint_linear_track', 'lin',   0.0,  7.9),
-        ('slider_source_base_pos_10', 'edit_source_base_pos_10', 'dda_joint_carriage',     'lin',  -0.5,  0.5),
+        ('slider_source_base_pos_9',  'edit_source_base_pos_9',  'dda_joint_linear_track', 'lin',   0.0,  4.87),
+        ('slider_source_base_pos_10', 'edit_source_base_pos_10', 'dda_joint_carriage',     'lin',   0.0,  0.7),
         ('slider_source_base_pos_11', 'edit_source_base_pos_11', 'dda_joint_base',         'rot', -180.0, 180.0),
         ('slider_source_base_pos_12', 'edit_source_base_pos_12', 'dda_joint_shoulder',     'rot', -180.0, 180.0),
         ('slider_source_base_pos_13', 'edit_source_base_pos_13', 'dda_joint_elbow',        'rot', -180.0, 180.0),
@@ -75,9 +76,18 @@ class AppWindow(QMainWindow):
         self.zapi = None
         self._chuck_mount_points = []
         self._chuck_mount_local_points = []
-        rt_frame_cfg = (
-            ((config.get("ef_pose", {}) or {}).get("frames", {}) or {}).get("rt", {}) or {}
-        )
+        # SimTool's own config (simtool.cfg) has no ef_pose section; the EF frames (RT pipe_facing_axis) live in
+        # viewervedo.cfg. Falling back to the hard-coded default [0,-1,0] made the reachable/rotation-needed split
+        # use a different axis than the pose determination and the Viewer (which read viewervedo.cfg), so the
+        # planning phases came out wrong. Read it from there when simtool.cfg does not define it.
+        def _rt_frame(cfg):
+            return (((cfg.get("ef_pose", {}) or {}).get("frames", {}) or {}).get("rt", {}) or {})
+        rt_frame_cfg = _rt_frame(config)
+        if "pipe_facing_axis" not in rt_frame_cfg:
+            try:
+                rt_frame_cfg = _rt_frame(self.__load_viewer_config())
+            except Exception as exc:
+                self.__console.warning(f"could not read RT pipe_facing_axis from viewervedo.cfg: {exc}")
         self._inspection_workflow = InspectionWorkflowState(
             rt_pipe_facing_axis=list(rt_frame_cfg.get("pipe_facing_axis", [0.0, -1.0, 0.0]))
         )
@@ -225,6 +235,21 @@ class AppWindow(QMainWindow):
                     self.__console.error(traceback.format_exc())
 
         # 3. Load Pipe Spool Samples and Test Weld Points
+        # Show the configured load default beside the pipe selector.
+        if hasattr(self, 'label_3'):
+            try:
+                load_cfg = self.__load_viewer_config().get("spool_load", {}) or {}
+                ratio = float(load_cfg.get("downsample_keep_ratio", 1.0) or 1.0)
+                step = max(1, int(round(1.0 / ratio))) if 0.0 < ratio < 1.0 else 1
+                self.label_3.setText(f"Pipe Spool — 기본 유지: 1/{step} ({100 / step:g}%)")
+                self.label_3.setFixedWidth(310)
+                cap = int(load_cfg.get("visual_max_points", 0))
+                self.label_3.setToolTip(
+                    f"viewervedo.cfg 로드 기본값: 점군 {step}개마다 1개 유지.\n"
+                    f"화면 표시 상한: {cap if cap > 0 else '없음'}. "
+                    "충돌 메쉬 입력에도 유지 비율 적용. 변경 후 viewer 재시작 및 배관 재로드 필요.")
+            except Exception as exc:
+                self.__console.warning(f"could not read spool sampling defaults: {exc}")
         sample_path = pathlib.Path(self.__config.get("root_path", "")) / "sample"
         
         if hasattr(self, 'cbx_pipe_spool'):
@@ -274,6 +299,8 @@ class AppWindow(QMainWindow):
         self.__ensure_load_playback_button()
         if hasattr(self, 'btn_load_playback_result'):
             self.btn_load_playback_result.clicked.connect(self.__on_btn_load_playback_result_clicked)
+        if hasattr(self, 'btn_save_plan_result'):
+            self.btn_save_plan_result.clicked.connect(self.__on_btn_save_plan_result_clicked)
         if hasattr(self, 'btn_pick_inspection_point'):
             self.btn_pick_inspection_point.clicked.connect(self.__on_btn_pick_inspection_point_clicked)
         self.__ensure_determine_ef_pose_button()
@@ -287,6 +314,8 @@ class AppWindow(QMainWindow):
             self.btn_load_inspection_points.clicked.connect(self.__on_btn_load_inspection_points_clicked)
         if hasattr(self, 'btn_save_planning_snapshot'):
             self.btn_save_planning_snapshot.clicked.connect(self.__on_btn_save_planning_snapshot_clicked)
+        if hasattr(self, 'btn_load_planning_snapshot'):
+            self.btn_load_planning_snapshot.clicked.connect(self.__on_btn_load_planning_snapshot_clicked)
         self.__ensure_chuck_mount_pick_button()
         if hasattr(self, 'btn_align_f_column'):
             self.btn_align_f_column.clicked.connect(self.__on_btn_align_f_column_clicked)
@@ -835,7 +864,7 @@ class AppWindow(QMainWindow):
             text = self.cbx_ik_solver.currentText()
             if text:
                 return str(text).strip().lower()
-        return "pybullet"
+        return "collision_free"
 
     def __current_ik_request_options(self):
         solver = self.__current_ik_solver_name()
@@ -857,7 +886,7 @@ class AppWindow(QMainWindow):
             # Must clear btn_save_planning_snapshot's bottom edge (y=522, h=32)
             # plus a bit of margin, or that button gets visually clipped by
             # the group box's border.
-            target_height = 594
+            target_height = 692
             if parent_geo.height() < target_height:
                 parent.setGeometry(parent_geo.x(), parent_geo.y(), parent_geo.width(), target_height)
         self.btn_pick_inspection_point.setGeometry(10, 348, 101, 32)
@@ -865,12 +894,34 @@ class AppWindow(QMainWindow):
             self.btn_determine_ef_pose = QPushButton("EF Pose", parent)
             self.btn_determine_ef_pose.setObjectName("btn_determine_ef_pose")
         self.btn_determine_ef_pose.setGeometry(116, 348, 101, 32)
+        if not hasattr(self, 'chk_show_rejected_ef'):
+            self.chk_show_rejected_ef = QCheckBox("충돌 후보", parent)
+            self.chk_show_rejected_ef.setObjectName("chk_show_rejected_ef")
+            self.chk_show_rejected_ef.setChecked(True)
+            self.chk_show_rejected_ef.setToolTip("충돌로 탈락한 EF 자세와 충돌 지점 표시. 채택된 자세 표시는 유지합니다.")
+            self.chk_show_rejected_ef.toggled.connect(self.__on_show_rejected_ef_toggled)
+        self.chk_show_rejected_ef.setGeometry(10, 586, 120, 26)
+        self.chk_show_rejected_ef.show()
+        if not hasattr(self, 'chk_spool_collision_mesh'):
+            self.chk_spool_collision_mesh = QCheckBox("파이프 충돌 메쉬", parent)
+            self.chk_spool_collision_mesh.setToolTip("체크: 실제 충돌 검사 메쉬 / 해제: 원래 점군 표시")
+            self.chk_spool_collision_mesh.toggled.connect(self.__on_spool_collision_mesh_toggled)
+        self.chk_spool_collision_mesh.setGeometry(150, 586, 170, 26)
+        self.chk_spool_collision_mesh.show()
         if not hasattr(self, 'btn_check_inspection_ik'):
             self.btn_check_inspection_ik = QPushButton("Check IK", parent)
             self.btn_check_inspection_ik.setObjectName("btn_check_inspection_ik")
-        self.btn_check_inspection_ik.setGeometry(10, 386, 153, 32)
+        self.btn_check_inspection_ik.setGeometry(10, 386, 100, 32)
         if hasattr(self, 'btn_plan_inspection_path'):
-            self.btn_plan_inspection_path.setGeometry(168, 386, 153, 32)
+            self.btn_plan_inspection_path.setGeometry(114, 386, 104, 32)
+        if not hasattr(self, 'btn_stop_planning'):
+            self.btn_stop_planning = QPushButton("Stop Planning", parent)
+            self.btn_stop_planning.setObjectName("btn_stop_planning")
+            self.btn_stop_planning.setToolTip(
+                "진행 중인 경로 계획을 종료한다: 남은 목표는 보내지 않고, Robot Core에서 계산 중인 목표는 중단(작업 "
+                "프로세스 재시작)한다. 그때까지 계획된 결과는 저장되고 플레이백할 수 있다.")
+            self.btn_stop_planning.clicked.connect(self.__on_btn_stop_planning_clicked)
+        self.btn_stop_planning.setGeometry(222, 386, 99, 32)
         if not hasattr(self, 'chk_path_optimization'):
             self.chk_path_optimization = QCheckBox("Optimize", parent)
             self.chk_path_optimization.setObjectName("chk_path_optimization")
@@ -886,7 +937,8 @@ class AppWindow(QMainWindow):
             self.cbx_ik_solver.addItem("DLS", "dls")
             self.cbx_ik_solver.addItem("QP IK", "qp")
             self.cbx_ik_solver.addItem("PyBullet IK", "pybullet")
-            self.cbx_ik_solver.setCurrentIndex(2)  # default: PyBullet IK
+            self.cbx_ik_solver.addItem("Collision-free IK", "collision_free")
+            self.cbx_ik_solver.setCurrentIndex(3)  # default: Collision-free IK
         self.cbx_ik_solver.setGeometry(92, 424, 125, 24)
         if not hasattr(self, 'chk_ik_normalize'):
             self.chk_ik_normalize = QCheckBox("Normalize IK joints", parent)
@@ -905,7 +957,18 @@ class AppWindow(QMainWindow):
         # Own row (not appended to the IK-solver row) - that row already runs
         # edge-to-edge with the group box's width, so a widget tacked on to
         # its right was rendered past the visible border and never showed up.
-        self.chk_lock_linear_track.setGeometry(10, 452, 311, 24)
+        self.chk_lock_linear_track.setGeometry(10, 452, 165, 24)
+        if not hasattr(self, 'chk_show_saved_ik'):
+            self.chk_show_saved_ik = QCheckBox("Show saved IK", parent)
+            self.chk_show_saved_ik.setObjectName("chk_show_saved_ik")
+            self.chk_show_saved_ik.setChecked(True)
+            self.chk_show_saved_ik.setToolTip(
+                "스냅샷에 저장된 IK 목표 자세(precompute_ik_goals.py의 ik_goal_q)를 반투명 로봇으로 표시한다 "
+                "(DDA 주황 / RT 하늘색, 충돌 링크 빨강). 포지셔너 회전 후 계획되는 group은 회전 후에 보인다. "
+                "Viewer에서 F8로도 전환.")
+            self.chk_show_saved_ik.toggled.connect(self.__on_chk_show_saved_ik_toggled)
+        self.chk_show_saved_ik.setGeometry(180, 452, 141, 24)
+        self.chk_show_saved_ik.show()
         self.btn_clear_inspection_path.setGeometry(222, 348, 99, 32)
         if hasattr(self, 'edit_inspection_point'):
             self.edit_inspection_point.setGeometry(10, 484, 171, 22)
@@ -924,7 +987,27 @@ class AppWindow(QMainWindow):
             self.btn_save_planning_snapshot.setObjectName("btn_save_planning_snapshot")
             self.btn_save_planning_snapshot.setToolTip(
                 "결정된 EF pose + collision scene을 벤치마킹용 snapshot(.pkl)으로 저장")
-        self.btn_save_planning_snapshot.setGeometry(10, 550, 311, 32)
+        self.btn_save_planning_snapshot.setText("Save Snapshot")
+        self.btn_save_planning_snapshot.setGeometry(10, 550, 153, 32)
+        if not hasattr(self, 'btn_load_planning_snapshot'):
+            self.btn_load_planning_snapshot = QPushButton("Load Snapshot", parent)
+            self.btn_load_planning_snapshot.setObjectName("btn_load_planning_snapshot")
+            self.btn_load_planning_snapshot.setToolTip(
+                "저장된 planning snapshot(.pkl)으로 배관/positioner/로봇 상태와 EF pose를 복원한다 "
+                "(복원 후 바로 Plan Inspection Path 실행 가능). 신뢰하는 파일만 선택할 것")
+        self.btn_load_planning_snapshot.setGeometry(168, 550, 153, 32)
+        if not hasattr(self, 'btn_random_snapshot_points'):
+            self.btn_random_snapshot_points = QPushButton("Random 5 Points", parent)
+            self.btn_random_snapshot_points.setToolTip("스냅샷에서 포인트 5개를 무작위 선택해 불러옵니다. 포인트별 모든 DDA/RT 자세는 유지합니다.")
+            self.btn_random_snapshot_points.clicked.connect(self.__on_random_snapshot_points)
+        self.btn_random_snapshot_points.setGeometry(10, 620, 311, 30)
+        self.btn_random_snapshot_points.show()
+        if not hasattr(self, 'chk_auto_rotate_positioner'):
+            self.chk_auto_rotate_positioner = QCheckBox("Auto rotate positioner", parent)
+            self.chk_auto_rotate_positioner.setChecked(bool((self.__config.get("path_planning", {}) or {}).get("auto_rotate_positioner", True)))
+            self.chk_auto_rotate_positioner.setToolTip("현재 각도에서 접근 가능한 그룹을 먼저 계획한 후, 필요한 그룹은 포지셔너를 회전해 계획합니다. 처음부터 회전이 필요한 그룹만 있으면 바로 회전합니다.")
+        self.chk_auto_rotate_positioner.setGeometry(10, 654, 311, 26)
+        self.chk_auto_rotate_positioner.show()
         display_group = getattr(self, 'groupBox_3', None)
         if display_group is not None:
             geo = display_group.geometry()
@@ -942,6 +1025,7 @@ class AppWindow(QMainWindow):
         self.btn_save_inspection_points.show()
         self.btn_load_inspection_points.show()
         self.btn_save_planning_snapshot.show()
+        self.btn_load_planning_snapshot.show()
 
     def __ensure_load_playback_button(self):
         """Grow the "Operation" groupBox (btn_start_simulation's parent) to
@@ -953,7 +1037,7 @@ class AppWindow(QMainWindow):
         sim_geo = self.btn_start_simulation.geometry()
         if parent is not None and hasattr(parent, 'geometry'):
             group_geo = parent.geometry()
-            target_height = sim_geo.y() + sim_geo.height() + 8 + 36 + 10
+            target_height = sim_geo.y() + sim_geo.height() + 8 + 36 + 8 + 36 + 10
             if group_geo.height() < target_height:
                 parent.setGeometry(group_geo.x(), group_geo.y(), group_geo.width(), target_height)
         if not hasattr(self, 'btn_load_playback_result'):
@@ -962,9 +1046,49 @@ class AppWindow(QMainWindow):
             self.btn_load_playback_result.setToolTip(
                 "test_ompl_planning.py --target all이 저장한 debug/<method>_<timestamp>/ "
                 "폴더를 선택해 Start Simulation으로 재생 가능하게 불러온다")
+        half_w = (sim_geo.width() - 4) // 2
+        self.btn_load_playback_result.setText("Load Result...")
         self.btn_load_playback_result.setGeometry(
-            sim_geo.x(), sim_geo.y() + sim_geo.height() + 8, sim_geo.width(), 36)
+            sim_geo.x(), sim_geo.y() + sim_geo.height() + 8, half_w, 36)
         self.btn_load_playback_result.show()
+        if not hasattr(self, 'btn_save_plan_result'):
+            self.btn_save_plan_result = QPushButton("Save Result...", parent)
+            self.btn_save_plan_result.setObjectName("btn_save_plan_result")
+            self.btn_save_plan_result.setToolTip(
+                "마지막 경로 계획 결과(경로 + 실패 원인)를 폴더로 저장한다. "
+                "계획이 끝날 때마다 debug/plan_runs/ 에도 자동 저장된다")
+        self.btn_save_plan_result.setGeometry(
+            sim_geo.x() + half_w + 4, sim_geo.y() + sim_geo.height() + 8, half_w, 36)
+        self.btn_save_plan_result.show()
+        if not hasattr(self, 'btn_evaluate_plan_result'):
+            self.btn_evaluate_plan_result = QPushButton("Evaluate Result...", parent)
+            self.btn_evaluate_plan_result.setObjectName("btn_evaluate_plan_result")
+            self.btn_evaluate_plan_result.setToolTip(
+                "저장된 경로 계획 결과 폴더(debug/plan_runs/...)를 평가 지표로 평가한다 (evaluate_plan_run.py, "
+                "백그라운드 실행). 결과: <폴더>/eval/summary.md, targets.csv")
+            self.btn_evaluate_plan_result.clicked.connect(self.__on_btn_evaluate_plan_result_clicked)
+        self.btn_evaluate_plan_result.setGeometry(
+            sim_geo.x(), sim_geo.y() + sim_geo.height() + 8 + 36 + 8, half_w, 36)
+        self.btn_evaluate_plan_result.show()
+        if not hasattr(self, 'btn_sac_inference'):
+            self.btn_sac_inference = QPushButton("SAC Inference…", parent)
+            self.btn_sac_inference.setObjectName("btn_sac_inference")
+            self.btn_sac_inference.setToolTip("학습 모델로 저장된 기준 경로를 보정하고 시뮬레이션 결과를 불러옵니다")
+            self.btn_sac_inference.clicked.connect(self.__on_sac_inference_clicked)
+        self.btn_sac_inference.setGeometry(
+            sim_geo.x() + half_w + 4, sim_geo.y() + sim_geo.height() + 8 + 36 + 8, half_w, 36)
+        self.btn_sac_inference.show()
+
+    def __on_sac_inference_clicked(self):
+        from simtool.sac_inference_dialog import SACInferenceDialog
+        dialog = getattr(self, '_sac_inference_dialog', None)
+        if dialog is None:
+            dialog = SACInferenceDialog(self)
+            dialog.load_result.connect(self.__on_btn_load_playback_result_clicked)
+            self._sac_inference_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
 
     def __ensure_chuck_mount_pick_button(self):
         if not hasattr(self, 'btn_spool_pose_load'):
@@ -1236,11 +1360,73 @@ class AppWindow(QMainWindow):
             )
             if not file_name:
                 return
+            if pathlib.Path(file_name).suffix.lower() not in (".pkl", ".pickle"):
+                file_name += ".pkl"  # 항상 .pkl로 저장해야 불러오기 파일 선택창 필터에서 보인다
             self.zapi._ZAPI_request_save_planning_snapshot(file_name)
             self.__set_path_plan_status(f"Planning snapshot save requested -> {pathlib.Path(file_name).name}")
         except Exception as e:
             self.__console.error(f"Error saving planning snapshot: {e}")
             self.__set_path_plan_status(f"[!] {e}")
+
+    def __on_random_snapshot_points(self):
+        import pickle
+        import secrets
+        import datetime
+        from simtool.snapshot_sampling import sample_snapshot_points
+        try:
+            if not self.zapi:
+                raise RuntimeError("ZAPI not available")
+            root = pathlib.Path(self.__config.get("root_path", ""))
+            default = root / "sample" / "planning_snapshot_p3_10(90).pkl"
+            source, _ = QFileDialog.getOpenFileName(self, "Random 5 Points — trusted snapshot only",
+                                                  str(default), "Planning Snapshot (*.pkl)")
+            if not source:
+                return
+            with open(source, "rb") as stream:
+                snapshot = pickle.load(stream)
+            selected = sample_snapshot_points(snapshot, seed=secrets.randbits(32))
+            selected["random_point_selection"]["source"] = str(pathlib.Path(source).resolve())
+            folder = root / "debug" / "random_snapshots"
+            folder.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            output = folder / f"random5_{stamp}.pkl"
+            with output.open("wb") as stream:
+                pickle.dump(selected, stream)
+            self._inspection_sequencer_reset_for_snapshot()
+            self.zapi._ZAPI_request_load_planning_snapshot(str(output.resolve()))
+            points = selected["random_point_selection"]["source_point_indices"]
+            self.__set_path_plan_status(f"Random 5 Points: {[i + 1 for i in points]}")
+        except Exception as exc:
+            self.__console.error(f"Random snapshot load failed: {exc}")
+            self.__set_path_plan_status(f"[!] {exc}")
+
+    def __on_btn_load_planning_snapshot_clicked(self):
+        """저장된 planning snapshot을 viewer로 보내 scene과 EF pose를 복원한다."""
+        try:
+            if not self.zapi:
+                self.__set_path_plan_status("[!] ZAPI not available")
+                return
+            file_name, _ = QFileDialog.getOpenFileName(
+                self,
+                "Load Planning Snapshot (pickle - only open files you trust)",
+                str(pathlib.Path(self.__config.get("root_path", "")) / "sample"),
+                "Planning Snapshot Files (*.pkl);;All Files (*)"
+            )
+            if not file_name:
+                return
+            self._inspection_sequencer_reset_for_snapshot()
+            self.zapi._ZAPI_request_load_planning_snapshot(file_name)
+            self.__set_path_plan_status(f"Planning snapshot load requested -> {pathlib.Path(file_name).name}")
+        except Exception as e:
+            self.__console.error(f"Error loading planning snapshot: {e}")
+            self.__set_path_plan_status(f"[!] {e}")
+
+    def _inspection_sequencer_reset_for_snapshot(self):
+        """새 scene을 불러오기 전에 이전 계획/재생 결과를 비운다 (이전 EF pose 기준의 plan_sequence가 남지 않게)."""
+        try:
+            self._inspection_workflow.clear_pose_and_path()
+        except Exception:
+            pass
 
     def __on_btn_load_inspection_points_clicked(self):
         try:
@@ -1276,6 +1462,21 @@ class AppWindow(QMainWindow):
             self.__console.error(f"Error requesting EF pose determination: {e}")
             self.__set_path_plan_status(f"[!] {e}")
 
+    def __on_spool_collision_mesh_toggled(self, checked):
+        if getattr(self, 'zapi', None) is not None:
+            self.zapi._ZAPI_request_show_spool_collision_mesh(bool(checked))
+
+    def __on_show_rejected_ef_toggled(self, checked):
+        if getattr(self, 'zapi', None) is not None:
+            self.zapi._ZAPI_request_show_rejected_ef_candidates(bool(checked))
+
+    def __on_chk_show_saved_ik_toggled(self, checked):
+        try:
+            if self.zapi:
+                self.zapi._ZAPI_request_show_saved_ik_goals(bool(checked))
+        except Exception as e:
+            self.__console.error(f"Error toggling saved IK goals display: {e}")
+
     def __on_btn_check_inspection_ik_clicked(self):
         try:
             if not self.zapi:
@@ -1293,6 +1494,18 @@ class AppWindow(QMainWindow):
             self.__set_path_plan_status(f"EF pose IK check requested: solver={ik_solver}, normalize={ik_normalize}")
         except Exception as e:
             self.__console.error(f"Error requesting inspection IK check: {e}")
+            self.__set_path_plan_status(f"[!] {e}")
+
+    def __on_btn_stop_planning_clicked(self):
+        """End the running planning sequence (see InspectionSequencer.cancel) and abort the Robot Core request in
+        flight. What was planned so far is summarised, saved to debug/plan_runs and available for playback."""
+        try:
+            stopped = self._inspection_sequencer.cancel("planning stopped by user")
+            if self.zapi:
+                self.zapi._ZAPI_request_cancel_planning()
+            self.__set_path_plan_status("Planning stopped" if stopped else "No planning is running")
+        except Exception as e:
+            self.__console.error(f"Error stopping planning: {e}")
             self.__set_path_plan_status(f"[!] {e}")
 
     def __on_btn_plan_inspection_path_clicked(self):
@@ -1323,19 +1536,43 @@ class AppWindow(QMainWindow):
             # slate; _handle_plan_single_target_completed still appends
             # (clear=False) so this run's own targets accumulate correctly,
             # just on top of whatever was already drawn.
+            # Scene of this run (pipe, alignment, positioner angle, target poses, robot postures) as it is BEFORE planning
+            # starts: saved by the Viewer now (requests are handled in order, so before the first plan_single_target),
+            # copied into the run folder when the run is saved - "Load Result..." restores it, evaluate_plan_run.py
+            # evaluates against it.
+            self._run_scene_snapshot_path = None
+            self._run_initial_positioner_r_deg = float(self.__get_positioner_pose_from_ui().get("r", 0.0))
+            try:
+                import time as _time
+                pending_dir = (pathlib.Path(self.__config.get("root_path", "")) / self.__config.get("debug_dir", "debug")
+                               / "plan_runs" / "_pending")
+                pending_dir.mkdir(parents=True, exist_ok=True)
+                scene_path = pending_dir / f"scene_{_time.strftime('%Y%m%d_%H%M%S')}.pkl"
+                self.zapi._ZAPI_request_save_planning_snapshot(str(scene_path))
+                self._run_scene_snapshot_path = scene_path
+            except Exception as exc:
+                self.__console.warning(f"could not request the run's scene snapshot: {exc}")
             self._inspection_sequencer.start(
                 self.zapi, target_groups,
                 planner=planner,
                 planner_options={
-                    "step_size": 0.1, "max_iter": 8000,
+                    # simtool.cfg planner_options {step_size, max_iter}: max_iter caps the planner's state-validity checks
+                    # (OMPL); a hard instance that hits it ends as "timeout_approximate" (only an approximate path).
+                    "step_size": float((self.__config.get("planner_options", {}) or {}).get("step_size", 0.1)),
+                    "max_iter": int((self.__config.get("planner_options", {}) or {}).get("max_iter", 8000)),
                     "optimizer": optimizer, "optimize_path": optimize_path,
                     "ik_solver": ik_solver, "ik_normalize": ik_normalize,
                     "lock_linear_track": lock_linear_track,
+                    # simtool.cfg planner_timeouts[planner] (default 60 s): per-target planning time limit. It used to be
+                    # defined but never sent, so planning ran unbounded until Robot Core's request watchdog fired.
+                    "planning_timeout": resolve_planner_timeout(self.__config, planner) or None,
                 },
                 rt_pipe_facing_axis=self._inspection_workflow.rt_pipe_facing_axis,
                 positioner_second_group_r_deg=float(
                     (self.__config.get("path_planning", {}) or {}).get(
                         "positioner_second_group_r_deg", 180.0)),
+                auto_rotate_positioner=self.chk_auto_rotate_positioner.isChecked(),
+                initial_positioner_r_deg=float(self.__get_positioner_pose_from_ui().get("r", 0.0)),
                 on_progress=lambda text: self.__set_path_plan_status(text),
                 on_finished=self.__on_inspection_sequence_finished,
             )
@@ -1370,6 +1607,10 @@ class AppWindow(QMainWindow):
         for line in summary.get("summary_lines") or []:
             self.__console.info(line)
         self.__set_path_plan_status(text)
+        self._last_plan_summary = summary
+        saved_dir = self.__save_plan_run_from_summary(summary, run_dir=None)
+        if saved_dir:
+            self.__set_path_plan_status(f"{text} | saved: {saved_dir}")
 
         # Wire whatever this run planned into "Start Simulation" playback -
         # reuses the pre-existing InspectionPathHandler.accept_result()/
@@ -1380,13 +1621,166 @@ class AppWindow(QMainWindow):
         if plan_sequence:
             self._inspection_path_handler.accept_result({
                 "plan_sequence": plan_sequence,
-                "playback_initial_r_deg": 0.0,
+                # the positioner angle the run started from (was 0.0: the Viewer then reset the positioner to 0 deg
+                # before every playback)
+                "playback_initial_r_deg": float(getattr(self, "_run_initial_positioner_r_deg", None)
+                                                or plan_sequence[0].get("positioner_r_deg") or 0.0),
             })
             self.__console.info(
                 f"Inspection sequence: {len(plan_sequence)} group(s) available for "
                 "playback (Start Simulation)")
         else:
             self._inspection_workflow.set_planning_result({})
+
+    def __save_plan_run_from_summary(self, summary: dict, run_dir=None):
+        """Persist a finished InspectionSequencer run (paths + per-target failure cause).
+
+        run_dir=None -> <root>/<debug_dir>/plan_runs/<timestamp>_<planner>/ (auto-save).
+        Returns the saved folder path, or None if nothing was saved.
+        """
+        results = (summary or {}).get("results") or []
+        if not results:
+            return None
+        try:
+            if run_dir is None:
+                root_path = self.__config.get("root_path", "")
+                base = pathlib.Path(root_path) / self.__config.get("debug_dir", "debug") / "plan_runs"
+                run_dir = default_run_dir(base, summary.get("planner"))
+            spool_path = self.__get_current_spool_path()
+            saved = save_plan_run(
+                run_dir, results,
+                meta={
+                    "planner": summary.get("planner"),
+                    "planner_options": summary.get("planner_options") or {},
+                    "status": summary.get("status"),
+                    "n_planned": summary.get("n_planned"),
+                    "n_total_jobs": summary.get("n_total"),
+                    "spool_path": str(spool_path) if spool_path else None,
+                    "initial_positioner_r_deg": getattr(self, "_run_initial_positioner_r_deg", None),
+                    "positioner_second_group_r_deg": float(
+                        (self.__config.get("path_planning", {}) or {}).get("positioner_second_group_r_deg", 180.0)),
+                    "scene_snapshot": None,
+                },
+                unreached_groups=summary.get("deferred_groups") or [])
+            scene = getattr(self, "_run_scene_snapshot_path", None)
+            if scene is not None and pathlib.Path(scene).exists():
+                import shutil
+                target = pathlib.Path(saved["run_dir"]) / "scene_snapshot.pkl"
+                shutil.copyfile(scene, target)
+                run_json = pathlib.Path(saved["run_dir"]) / "run.json"
+                try:
+                    meta = json.load(open(run_json, encoding="utf-8"))
+                    meta["scene_snapshot"] = target.name
+                    json.dump(meta, open(run_json, "w", encoding="utf-8"), indent=2)
+                except Exception:
+                    pass
+                self.__console.info(f"  scene snapshot of the run: {target}")
+            elif scene is not None:
+                self.__console.warning(f"  scene snapshot {scene} was not written by the Viewer - run saved without it")
+            self.__console.info(
+                f"Saved plan run: {saved['run_dir']} "
+                f"({saved['n_success']}/{saved['n_total']} succeeded, {saved['n_failed']} failed)")
+            for failure in saved["failures"]:
+                self.__console.warning(
+                    f"  [{failure['category']}] {failure['robot_name']} {failure['group_name']}:"
+                    f"{failure['pose_name']} - {failure['message']}")
+            self._last_saved_run_dir = saved["run_dir"]
+            return saved["run_dir"]
+        except Exception as e:
+            self.__console.error(f"Failed to save plan run: {e}")
+            return None
+
+    def __on_btn_evaluate_plan_result_clicked(self):
+        """Evaluate a saved plan run with python/evaluate_plan_run.py in a background process (it restores the run's scene
+        in its own headless Viewer, so the GUI stays responsive). Default folder: the last loaded / saved run."""
+        try:
+            if getattr(self, "_eval_process_state", None) and self._eval_process_state.get("running"):
+                self.__set_path_plan_status("[!] an evaluation is already running")
+                return
+            root = pathlib.Path(self.__config.get("root_path", ""))
+            default_dir = getattr(self, "_last_loaded_run_dir", None) or getattr(self, "_last_saved_run_dir", None) \
+                or str(root / self.__config.get("debug_dir", "debug") / "plan_runs")
+            run_dir = QFileDialog.getExistingDirectory(self, "Select a saved plan run (debug/plan_runs/<run>/)",
+                                                       str(default_dir))
+            if not run_dir:
+                return
+            run_dir = pathlib.Path(run_dir)
+            cmd = [sys.executable, str(root / "python" / "evaluate_plan_run.py"), "--run-dir", str(run_dir)]
+            if not (run_dir / "scene_snapshot.pkl").exists():
+                # runs saved before the scene was stored with the run: ask for the planning snapshot they came from
+                snap, _ = QFileDialog.getOpenFileName(
+                    self, f"{run_dir.name} has no scene_snapshot.pkl - select the planning snapshot it was planned from",
+                    str(root / "sample"), "Planning snapshot (*.pkl)")
+                if not snap:
+                    return
+                cmd += ["--snapshot", snap]
+            state = {"running": True, "returncode": None, "lines": [], "run_dir": run_dir}
+            self._eval_process_state = state
+
+            def _run():
+                try:
+                    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                            cwd=str(root), env={**os.environ, "PYTHONNOUSERSITE": "1"})
+                    for line in proc.stdout:
+                        state["lines"].append(line.rstrip())
+                    state["returncode"] = proc.wait()
+                except Exception as exc:
+                    state["lines"].append(f"evaluation failed to start: {exc}")
+                    state["returncode"] = -1
+                state["running"] = False
+
+            threading.Thread(target=_run, daemon=True).start()
+            self.__console.info(f"Evaluating plan run {run_dir} ...")
+            self.__set_path_plan_status(f"Evaluating {run_dir.name} ... (background)")
+            self._eval_poll_timer = QTimer(self)
+            self._eval_poll_timer.timeout.connect(self.__poll_plan_result_evaluation)
+            self._eval_poll_timer.start(1000)
+        except Exception as e:
+            self.__console.error(f"Error starting plan run evaluation: {e}")
+            self.__set_path_plan_status(f"[!] {e}")
+
+    def __poll_plan_result_evaluation(self):
+        state = getattr(self, "_eval_process_state", None) or {}
+        lines = state.get("lines") or []
+        progress = [l for l in lines if l.startswith("[") and "/" in l.split("]")[0]]
+        if state.get("running"):
+            if progress:
+                self.__set_path_plan_status(f"Evaluating: {progress[-1][:160]}")
+            return
+        self._eval_poll_timer.stop()
+        run_dir = state.get("run_dir")
+        if state.get("returncode") == 0:
+            for line in progress:
+                self.__console.info(f"  {line}")
+            md = pathlib.Path(run_dir) / "eval" / "summary.md"
+            table = md.read_text(encoding="utf-8") if md.exists() else ""
+            self.__console.info(f"Plan run evaluation -> {md}\n{table}")
+            first_row = next((l for l in table.splitlines() if l.startswith("| ") and "Planner" not in l), "")
+            self.__set_path_plan_status(f"Evaluation done ({pathlib.Path(run_dir).name}): {first_row} -> eval/summary.md")
+        else:
+            tail = "\n".join(lines[-15:])
+            self.__console.error(f"Plan run evaluation failed (exit {state.get('returncode')}):\n{tail}")
+            self.__set_path_plan_status(f"[!] evaluation failed (exit {state.get('returncode')}) - see console")
+
+    def __on_btn_save_plan_result_clicked(self):
+        """Save the last planning result to a folder chosen by the user."""
+        try:
+            summary = getattr(self, '_last_plan_summary', None)
+            if not summary or not (summary.get("results") or []):
+                self.__set_path_plan_status("[!] no planning result to save (run Plan Inspection Path first)")
+                return
+            root_path = self.__config.get("root_path", "")
+            default_dir = str(pathlib.Path(root_path) / self.__config.get("debug_dir", "debug") / "plan_runs")
+            parent_dir = QFileDialog.getExistingDirectory(self, "Select folder to save the plan result into", default_dir)
+            if not parent_dir:
+                return
+            run_dir = default_run_dir(parent_dir, summary.get("planner"))
+            saved_dir = self.__save_plan_run_from_summary(summary, run_dir=run_dir)
+            self.__set_path_plan_status(
+                f"Saved plan result: {saved_dir}" if saved_dir else "[!] failed to save plan result")
+        except Exception as e:
+            self.__console.error(f"Error saving plan result: {e}")
+            self.__set_path_plan_status(f"[!] {e}")
 
     def __on_btn_clear_inspection_path_clicked(self):
         try:
@@ -1412,7 +1806,7 @@ class AppWindow(QMainWindow):
             self.__console.error(f"Error starting simulation: {e}")
             self.__set_path_plan_status(f"[!] {e}")
 
-    def __on_btn_load_playback_result_clicked(self):
+    def __on_btn_load_playback_result_clicked(self, run_dir=None):
         """Load a test_ompl_planning.py run folder and wire it into the same
         plan_sequence/"Start Simulation" playback machinery a live
         InspectionSequencer run uses - see playback_loader.py and
@@ -1429,15 +1823,20 @@ class AppWindow(QMainWindow):
           recoverable from the folder) - prompted for below.
         """
         try:
-            from simtool.playback_loader import load_playback_plan_sequence, load_playback_single_target
+            from simtool.playback_loader import (load_playback_plan_sequence, load_playback_single_target,
+                                                  resolve_playback_run_dir)
 
             root_path = self.__config.get("root_path", "")
             default_dir = str(pathlib.Path(root_path) / self.__config.get("debug_dir", "debug"))
-            run_dir = QFileDialog.getExistingDirectory(
-                self, "Select test_ompl_planning.py run folder (debug/<method>_<timestamp>/)",
-                default_dir)
+            if not isinstance(run_dir, str) or not run_dir:
+                run_dir = QFileDialog.getExistingDirectory(
+                    self, "Select planning or SAC inference result folder", default_dir)
             if not run_dir:
                 return
+            resolved_run_dir = resolve_playback_run_dir(run_dir)
+            if pathlib.Path(run_dir) != resolved_run_dir:
+                self.__console.info(f"Resolved saved paths folder: {resolved_run_dir}")
+                run_dir = str(resolved_run_dir)
             # benchmark_path_planners.py's --save-paths writes spool.ply (+ a
             # .json alignment sidecar, if the source snapshot had one) next to
             # summary.csv - see export_snapshot_spool.py's export_spool_from_
@@ -1448,9 +1847,27 @@ class AppWindow(QMainWindow):
             # matches what execute_inspection_path's "needs positioner to
             # rotate but no pipe is loaded" check requires below.
             spool_path = pathlib.Path(run_dir) / "spool.ply"
-            if spool_path.exists() and self.zapi:
+            scene_snapshot = pathlib.Path(run_dir) / "scene_snapshot.pkl"
+            self._pending_loaded_playback = None
+            if scene_snapshot.exists() and self.zapi:
+                # the exact scene the run was planned in (pipe + alignment + positioner angle + target poses + robot
+                # postures), saved by SimTool at sequence start
+                self.zapi._ZAPI_request_load_planning_snapshot(str(scene_snapshot.absolute()))
+                self.__console.info(f"Restoring the run's scene: {scene_snapshot}")
+            elif spool_path.exists() and self.zapi:
                 self.zapi._ZAPI_request_load_spool(str(spool_path.absolute()))
                 self.__console.info(f"Auto-loading spool from playback result: {spool_path}")
+            elif self.zapi:
+                # Runs saved by __save_plan_run_from_summary record which spool they were planned on.
+                run_meta_path = pathlib.Path(run_dir) / "run.json"
+                try:
+                    recorded_spool = (json.load(open(run_meta_path, encoding="utf-8")).get("spool_path")
+                                      if run_meta_path.exists() else None)
+                except Exception:
+                    recorded_spool = None
+                if recorded_spool and pathlib.Path(recorded_spool).exists():
+                    self.zapi._ZAPI_request_load_spool(str(pathlib.Path(recorded_spool).absolute()))
+                    self.__console.info(f"Auto-loading spool recorded in run.json: {recorded_spool}")
             if (pathlib.Path(run_dir) / "summary.csv").exists():
                 result = load_playback_plan_sequence(run_dir)
             else:
@@ -1480,10 +1897,21 @@ class AppWindow(QMainWindow):
             if not plan_sequence:
                 self.__set_path_plan_status(f"[!] no playable targets found in {run_dir}")
                 return
-            self._inspection_path_handler.accept_result({
+            loaded = {
                 "plan_sequence": plan_sequence,
-                "playback_initial_r_deg": 0.0,
-            })
+                "playback_initial_r_deg": float(plan_sequence[0].get("positioner_r_deg") or 0.0),
+                "loaded_playback_result": True,
+            }
+            if scene_snapshot.exists() and self.zapi:
+                # restoring the snapshot makes the Viewer send its EF poses again (reply_ef_pose ->
+                # set_pose_result clears plan_sequence): accept the loaded paths once the snapshot load has replied
+                self._pending_loaded_playback = loaded
+            else:
+                self._inspection_path_handler.accept_result(loaded)
+                if self.zapi:
+                    self.zapi._ZAPI_request_show_plan_sequence(
+                        plan_sequence, playback_initial_r_deg=loaded["playback_initial_r_deg"])
+            self._last_loaded_run_dir = str(run_dir)
             n_skipped = len(result["skipped"])
             text = (
                 f"Loaded {result['n_loaded']}/{result['n_targets']} target(s) from {run_dir} "
@@ -1492,6 +1920,16 @@ class AppWindow(QMainWindow):
             self.__console.info(text)
             if result["skipped"]:
                 self.__console.warning(f"skipped: {result['skipped']}")
+            failures = result.get("failures") or []
+            if failures:
+                by_category = {}
+                for failure in failures:
+                    by_category[failure.get("category")] = by_category.get(failure.get("category"), 0) + 1
+                text += f" | {len(failures)} failed target(s): {by_category} (see console/failures.json)"
+                for failure in failures:
+                    self.__console.warning(
+                        f"  [{failure.get('category')}] {failure.get('robot_name')} "
+                        f"{failure.get('group_name')}:{failure.get('pose_name')} - {failure.get('message')}")
             self.__set_path_plan_status(text)
         except Exception as e:
             self.__console.error(f"Error loading playback result: {e}")
@@ -1673,7 +2111,48 @@ class AppWindow(QMainWindow):
             if topic == "reply_planning_snapshot":
                 try:
                     result = json.loads(msg)
-                    if result.get("status") == "success":
+                    if result.get("action") == "load":
+                        if result.get("status") == "success":
+                            # viewer가 복원한 고정 상태/스풀 경로를 UI에도 반영한다. 체크박스가 해제된 채로
+                            # 남으면 다음 positioner 이동 요청이 고정 해제 값을 실어 보내 정렬이 풀린다.
+                            fixation = result.get("fixation") or {}
+                            self.__set_spool_fix_checks(
+                                bool(fixation.get("fix_f_column_r", False)),
+                                bool(fixation.get("fix_m_column_z", False)))
+                            restored_spool = result.get("spool_path")
+                            if restored_spool:
+                                self._current_spool_path = pathlib.Path(restored_spool)
+                                self.__refresh_spool_combo_with_file(restored_spool)
+                                if hasattr(self, 'cbx_pipe_spool'):
+                                    index = self.cbx_pipe_spool.findText(pathlib.Path(restored_spool).name)
+                                    if index >= 0:
+                                        blocked = self.cbx_pipe_spool.blockSignals(True)
+                                        self.cbx_pipe_spool.setCurrentIndex(index)
+                                        self.cbx_pipe_spool.blockSignals(blocked)
+                            text = (
+                                f"Planning snapshot loaded: {result.get('n_target_groups')} pose group(s), "
+                                f"{result.get('n_points')} point(s) <- {pathlib.Path(result.get('path', '')).name}")
+                            notes = result.get("notes") or []
+                            if notes:
+                                text += " | " + "; ".join(notes)
+                                for note in notes:
+                                    self.__console.warning(f"snapshot load: {note}")
+                            pending = getattr(self, "_pending_loaded_playback", None)
+                            if pending:
+                                self._pending_loaded_playback = None
+                                self._inspection_path_handler.accept_result(pending)
+                                if self.zapi:
+                                    # after the snapshot restore (which redraws the EF poses): goal frames + EE paths
+                                    self.zapi._ZAPI_request_show_plan_sequence(
+                                        pending["plan_sequence"],
+                                        playback_initial_r_deg=pending.get("playback_initial_r_deg"))
+                                text += (f" | loaded plan result ready for playback: "
+                                         f"{len(pending['plan_sequence'])} group(s) (Start Simulation)")
+                            self.__set_path_plan_status(text)
+                        else:
+                            self.__set_path_plan_status(
+                                f"[!] Planning snapshot load failed: {result.get('message', 'unknown')}")
+                    elif result.get("status") == "success":
                         self.__set_path_plan_status(
                             f"Planning snapshot saved -> {pathlib.Path(result.get('path', '')).name}")
                     else:

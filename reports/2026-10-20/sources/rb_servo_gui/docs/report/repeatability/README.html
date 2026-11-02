@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>동일 조건 반복 기록 확인 — 2026-10-20</title>
+<style>
+/* A4 문서 레이아웃: 화면에서는 A4 폭의 종이처럼, 인쇄/PDF 에서는 A4 쪽 단위로 나뉜다 */
+@page { size: A4; margin: 16mm 15mm 16mm 15mm;
+        @bottom-center { content: counter(page) " / " counter(pages); font-size: 8pt; color: #59636e; } }
+:root { --fg:#1f2328; --muted:#59636e; --line:#c9d1d9; --soft:#f4f6f8; --accent:#0b5cad; }
+* { box-sizing: border-box; }
+html { background: #d9dde3; }
+body { margin: 0; color: var(--fg);
+       font-family: "Noto Sans KR", "Noto Sans CJK KR", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+       font-size: 10pt; line-height: 1.55; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+main { width: 210mm; min-height: 297mm; margin: 12mm auto; padding: 16mm 15mm; background: #fff; box-shadow: 0 1px 6px rgba(0,0,0,.25); }
+h1 { font-size: 18pt; line-height: 1.3; border-bottom: 2px solid var(--fg); padding-bottom: 3mm; margin: 0 0 4mm; }
+h2 { font-size: 14pt; border-bottom: 1px solid var(--line); padding-bottom: 1.5mm; margin: 9mm 0 3mm; }
+h3 { font-size: 11.5pt; margin: 6mm 0 2mm; }
+h4 { font-size: 10.5pt; margin: 4mm 0 1.5mm; }
+h2, h3, h4, p:has(> strong:first-child) { break-after: avoid; }
+p, ul, ol, pre { margin: 1.6mm 0; }
+ul, ol { padding-left: 5.5mm; }
+li { margin: .4mm 0; }
+li > ul, li > ol { margin: .4mm 0; }
+a { color: var(--accent); text-decoration: none; }
+code { font-family: "D2Coding", "Consolas", "Noto Sans Mono CJK KR", monospace; font-size: .88em;
+       background: var(--soft); padding: 0 .3em; border-radius: 3px; }
+pre { background: var(--soft); border: 1px solid var(--line); border-radius: 3px; padding: 2.5mm 3mm;
+      white-space: pre-wrap; word-break: break-all; line-height: 1.35; break-inside: avoid; }
+pre code { background: none; padding: 0; font-size: 7.6pt; }
+.tbl { margin: 2mm 0; }
+table { border-collapse: collapse; width: 100%; font-size: 8.2pt; line-height: 1.35; }
+th, td { border: 1px solid var(--line); padding: 1mm 1.6mm; vertical-align: top; word-break: keep-all; overflow-wrap: break-word; }
+th { background: var(--soft); font-weight: 600; text-align: left; }
+thead { display: table-header-group; }
+tr { break-inside: avoid; }
+td code, th code { font-size: .92em; }
+figure { margin: 2.5mm 0; break-inside: avoid; text-align: center; }
+figure img { max-width: 100%; max-height: 215mm; height: auto; border: 1px solid #e3e7eb; }
+figure.formula { text-align: left; margin: 1.5mm 0 1.5mm 3mm; }
+figure.formula img { border: none; height: 9mm; max-width: 100%; object-fit: contain; object-position: left; }
+figcaption { color: var(--muted); font-size: 8pt; margin-top: .8mm; }
+hr { display: none; }
+nav.toc { background: var(--soft); border: 1px solid var(--line); border-radius: 3px; padding: 1mm 5mm; }
+nav.toc ul { margin: .6mm 0; }
+@media print {
+  html { background: none; }
+  main { width: auto; min-height: 0; margin: 0; padding: 0; box-shadow: none; }
+  h2 { break-before: page; margin-top: 0; }
+  h2.nobreak { break-before: auto; margin-top: 6mm; }
+}
+</style>
+</head>
+<body>
+<main>
+<h1>동일 조건 반복 기록 확인 — 2026-10-20</h1>
+<p>검사 범위: <code>/home/dev/rb_servo_gui_runs</code>의 config 보유 실행 145개 및 <code>rb_servo_test/jb2_gui/out</code>의 201개. 데이터셋 복제 폴더는 중복 실행으로 세지 않았다. 완료 마크/manifest가 있는 실행만 비교. 저장된 유효 설정에서 경로 위치·표시/평가 관련 필드를 제외한 설정 일치 및 저장 전송점 파일 SHA-256 일치로 묶었다. 실제 코드 버전·외부 부하·온도까지 동일하다는 보장은 없다. servo 실제 파라미터는 follow 메타데이터도 확인했다. 전체 목록은 matching_runs.json.</p>
+<h2>실기 반복</h2>
+<ul><li>servo, waypoints_sample.csv: 20261008_111008_REAL_servo_step10 / 20261008_111351_REAL_servo_step10.</li></ul>
+<p>75개 지령점, 0.2초 간격, 실제 t1=t2=0.2초, gain=alpha=1. config의 t2=0.4는 실행 시 0.2로 제한됨. speed=100, accel=200은 당시 servo 자체의 속도 프로파일을 의미하지 않는다.</p>
+<ul><li>jb2: 20261016_141046_862354 / 20261016_141107_694066.</li></ul>
+<p>0 자세 → [0,0,0,20,20,20]°, speed=30, accel=60, blend=100, 1분할.</p>
+<ul><li>jb2: 20261016_141054_813994 / 20261016_141137_793703.</li></ul>
+<p>0 자세 → [20,20,20,20,20,20]°, 같은 speed/accel/blend/분할 조건.</p>
+<p>10/14 보고서 실기 프로파일 시험은 A·B·C 각 1회이므로 위 반복과 구분해야 한다.</p>
+<h2>방향 예비 분석</h2>
+<p>10/08 servo 두 실행의 엔코더각을 원본 6관절 꺾은선의 최근접 선분에 투영하고, <code>오차 = 측정각 - 투영점</code>의 부호를 비교했다. 경로 누적 길이 5~95%를 1% 폭 90구간으로 나눠 각 실행에서 최소 2개 측정점이 있는 구간의 평균 오차를 비교했다. 시간 오차를 제거한 관절공간 경로 잔차이므로 TCP/작업공간 오차 방향과는 다르다. 전역 최근접 투영은 자기 교차·가까운 반복 구간에서 대응이 모호할 수 있으며 시간 순서는 보장하지 않는다.</p>
+<p>두 실행의 평균 오차 벡터 크기가 모두 0.02°를 초과한 76구간:</p>
+<ul><li>방향 코사인 중앙값 0.98494 (1에 가까울수록 같은 방향)</li><li>내적이 양수인 구간 72/76 = 94.7%</li></ul>
+<p>관절별로는 두 실행 모두 |평균 오차| &gt;0.02°인 구간에서 부호 일치: J1 100%(44구간), J2 98.1%(54), J3 100%(48), J4 95.3%(43), J5 100%(45), J6 100%(40). 0.02°는 미소 오차의 불안정한 부호를 제외하기 위한 분석 기준이며 센서 정확도 인증값이 아니다. 동일 방향으로 반복되는 경향은 있으나 2회만으로 통계적 반복 정밀도나 보정 가능성을 확정할 수 없다.</p>
+<p>jb2 두 쌍은 같은 기준을 넘는 공통 구간이 없어 이 기준으로 방향성을 판단하지 않았다. 그래프 real_servo_signed_errors.png 및 원자료 집계 CSV/JSON 참조. 원래 실행 폴더의 분석 결과는 수정하지 않았다.</p>
+<p>재현 (프로젝트 루트):</p>
+<pre><code class="lang-text">python3 rb_servo_gui/docs/report/repeatability/audit_repeats.py
+venv/bin/python rb_servo_gui/docs/report/repeatability/analyze_direction.py</code></pre>
+</main>
+</body>
+</html>

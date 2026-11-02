@@ -1,0 +1,29 @@
+<html lang="ko"><meta charset="utf-8"><title>경로 추종 성능 확인 요약</title><style>@page{size:A4;margin:14mm 15mm}*{box-sizing:border-box}body{margin:0;color:#203040;font-family:"Noto Sans CJK KR",sans-serif;font-size:9.5pt;line-height:1.5}section{break-after:page}section:last-child{break-after:auto}h1{font-size:21pt;line-height:1.2;margin:0 0 3mm;color:#143b58;border-bottom:2px solid #168c92;padding-bottom:3mm}h2{font-size:12pt;color:#143b58;margin:5mm 0 2mm}p{margin:2mm 0}ul{padding-left:5mm;margin:2mm 0}li{margin:1mm 0}table{width:100%;border-collapse:collapse;font-size:9pt;line-height:1.45;margin:3mm 0}th{background:#e7f0f3;text-align:left}th,td{padding:1.8mm;border-bottom:1px solid #ccd8de;vertical-align:top}tr:nth-child(even){background:#f7f9fa}strong{font-weight:700}section>p:last-child{font-size:8pt;color:#607080;border-top:1px solid #ccd8de;padding-top:2mm}a{color:inherit;text-decoration:none}</style><body><section>
+<h1>경로 추종 성능 확인 요약</h1>
+<p><strong>평가 방법과 확인 순서 · 1 / 2</strong>  |  RB rb20_1900es · rb_servo_gui · 2026.10.20 요약</p>
+<h2>1. 무엇을 확인하는가</h2>
+<p>추종 성능은 <strong>경로 정확도, 시간·속도 추종, 정지 정확도</strong>를 나누어 확인한다. 경로를 비슷하게 지나갔더라도 시점이 늦거나 반전점을 건너뛰면 동일한 성능으로 볼 수 없다. 속도가 부드럽다는 이유만으로 경로 정확도가 높다고 판단하지 않는다.</p>
+<h2>2. 측정과 비교의 원칙</h2>
+<ul><li>기준은 원본 경로와 실제 전송한 지령을 함께 보관한다. 분할·보간 때문에 생긴 경로 차이를 로봇 추종 오차와 구분한다.</li><li><strong>실기:</strong> 엔코더각 jnt_ang, <strong>시뮬레이션:</strong> 지령각 jnt_ref로 평가한다. 모드·궤적·속도·가속도·명령 주기·분할 수·gain/alpha·blending을 기록한다.</li><li>관절별 위치·부호 있는 속도·가속도를 같은 시간축에 겹쳐 본다. 이상 프로파일과 실측의 시간 차이를 먼저 확인하고, DTW는 시간 차이를 줄여 경로 형상을 비교하는 보조 수단으로 사용한다.</li></ul>
+<h2>3. 추종 성능 확인표</h2>
+<div class="tbl"><table><thead><tr><th>확인 항목</th><th>볼 지표·그래프</th><th>판단할 내용</th></tr></thead><tbody><tr><td>경로 정확도</td><td>매칭쌍의 6관절 L2 오차 p95·최대, 시간별 오차</td><td>p95는 전반적 수준, 최대는 국소 이탈. 최대 발생 시점의 자세를 확인</td></tr><tr><td>경로 누락·반전</td><td>커버리지, 진행도, 관절별 극값</td><td>DTW가 숨길 수 있는 건너뜀·찍턴 미도달 확인. 목표 극값과 실측 극값을 직접 비교</td></tr><tr><td>시간·속도 추종</td><td>이상/실측 속도·가속도, 추종 시간, 전송 시각</td><td>지연·감속·속도 제한·주기 흔들림 확인. 경로 정확도와 별도 판단</td></tr><tr><td>시작·종료 정확도</td><td>안정 구간의 관절각과 목표각 차이</td><td>최종 자세 오차 및 오버슈트 확인. 경로 오차가 작아도 별도 평가</td></tr><tr><td>이동 안정성</td><td>속도 리플, 횡방향 흔들림, 정체 비율</td><td>가다 서다 반복과 빠른 떨림 구분. 리플은 방식별 비교 지표</td></tr><tr><td>실제 공간 영향</td><td>링크 표면의 최대 변위 [mm]</td><td>작은 관절각 오차도 긴 팔 끝에서 큰 위치 차이로 확대될 수 있음</td></tr></tbody></table></div>
+<p><strong>원문 초기 판정값:</strong> 매칭쌍 오차 p95 ≤ 1.0°, 최대 ≤ 2.0°, 횡방향 흔들림 ≤ 0.3°, 정체 비율 ≤ 2%. 응용 요구로 검증된 합격선이 아닌 초기값이다. 원문 10/08 종합 판정에서는 속도 리플을 제외했다.</p>
+<h2>4. 결과를 읽는 순서</h2>
+<p><strong>① 전체 위치·시간 비교 → ② 최대 오차 구간 확대 → ③ 반전점·종료점 확인 → ④ 속도·가속도와 전송 간격 확인 → ⑤ 같은 조건끼리 비교.</strong> 관절별 값과 6관절 L2 값을 혼동하지 않는다. 최단 경로 거리만 작다고 순서·시간 추종까지 검증된 것은 아니다.</p>
+<p>출처: 원문 「RB 협동로봇 외부 스크립트 기반 궤적 추종 성능 평가 보고서」 1.3~1.7, 3.8절. 수치는 기존 보고서의 요약이며 신규 실험 결과가 아니다.</p>
+</section><section>
+<h1>실측 결과와 판단</h1>
+<p><strong>추종 성능 검증 결과 · 2 / 2</strong>  |  2026.10.08 방식 비교 / 2026.10.14 프로파일 타이밍 실험</p>
+<h2>1. 명령 방식별 정확도와 부드러움 — 10/08</h2>
+<p>궤적 A·B·C × 시뮬레이션·실기 × 4방식, <strong>총 24회</strong>. 아래 값은 방식별 6회 중앙값이며, 당시 분석 코드의 DTW 매칭쌍 기준이다.</p>
+<div class="tbl"><table><thead><tr><th>명령 방식</th><th>추종 오차 p95 [°]</th><th>최대 오차 [°]</th><th>속도 리플</th></tr></thead><tbody><tr><td>jb2 · blend 0</td><td>0.31</td><td>0.59</td><td>48%</td></tr><tr><td>jb2 · blend 50</td><td>0.35</td><td>0.58</td><td>23%</td></tr><tr><td>servo · gain 1, alpha 1</td><td>0.37</td><td>0.58</td><td>15%</td></tr><tr><td>jb2 · blend 100</td><td>0.41</td><td>0.58</td><td>8%</td></tr></tbody></table></div>
+<p><strong>관찰:</strong> blending 증가 시 리플은 감소했지만 p95 오차는 증가했다. 최대 오차는 거의 같아 최대값만으로 방식 차이를 구분하기 어렵다. 원문은 0.2초 간격 지령점의 직선 연결과 원본 경로 사이 차이를 주요 오차 요인으로 분석했다. 리플을 제외한 종합 판정은 20/24회 PASS, 4회는 진행도 기준 미달이었다.</p>
+<h2>2. 속도·가속도 프로파일 추종 — 10/14 실기</h2>
+<p>설정 속도 <strong>30°/s</strong>, 가속도 <strong>50°/s²</strong>, 전송 주기 <strong>20ms</strong>, gain/alpha=1, t2=0.04초. A·B·C 각 1회. 이 표의 경로 오차는 <strong>측정점에서 원본 경로까지 최단 거리</strong>다.</p>
+<div class="tbl"><table><thead><tr><th>궤적</th><th>이상 / 측정 시간 [s]</th><th>거리 p95 / 최대 [°]</th><th>최대 속도 [°/s]</th><th>최대 가속도 [°/s²]</th></tr></thead><tbody><tr><td>A</td><td>14.84 / 14.72</td><td>0.054 / 0.074</td><td>31.8</td><td>77</td></tr><tr><td>B</td><td>8.62 / 8.52</td><td>0.035 / 0.051</td><td>27.8</td><td>67</td></tr><tr><td>C</td><td>7.30 / 7.18</td><td>0.029 / 0.040</td><td>20.4</td><td>59</td></tr></tbody></table></div>
+<p><strong>확인된 성능:</strong> 세 실험의 경로 거리 최대는 0.074° 이하, 종료 오차는 약 0.001°. 다만 A의 측정 최대속도는 설정을 약 6% 초과했고, 세 실험 모두 측정 최대가속도가 설정값 50을 초과했다. 지령 최대가속도는 48.9~49.9로 제한 이내였다. 제어기 응답과 엔코더 차분 노이즈 중 무엇이 초과의 원인인지는 미확정이다.</p>
+<h2>3. 결론과 후속 확인</h2>
+<p><strong>경로 형상·종료 자세 추종은 해당 실험에서 양호했지만, 실측 속도·가속도 제한 준수까지 확인된 것은 아니다.</strong> 반전·최대 오차 구간 확대, 동일 필터 조건의 가속도 재계산, 반복 실험을 통해 확인해야 한다. 원문에서 링크 표면의 최악 순간 변위는 8~16mm였으므로 작업 정밀도는 관절각뿐 아니라 공간 오차로 판단한다.</p>
+<p><strong>비교 시 주의:</strong> 두 실험은 분석 버전과 오차 정의가 다르므로 위 두 표의 수치로 개선 배율을 계산하지 않는다. 10/14 최단 거리는 시간·순서를 검증하지 않으며, 극값 앵커 매칭의 스파이크 역시 무조건 실제 경로 이탈로 해석하지 않는다.</p>
+<p>출처: 원문 3.5, 3.7, 3.8절 및 4~5절. 원본: rb_servo_gui/docs/report/report.md. 실기 프로파일 시험은 궤적당 1회로 반복 재현성은 추가 확인이 필요하다.</p>
+</section></body></html>

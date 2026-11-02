@@ -1,0 +1,17 @@
+[
+  {
+    "file": "blend_0_0.csv",
+    "blend": 0.0,
+    "completed": true
+  },
+  {
+    "file": "blend_1_50.csv",
+    "blend": 50.0,
+    "completed": true
+  },
+  {
+    "file": "blend_2_100.csv",
+    "blend": 100.0,
+    "completed": true
+  }
+]

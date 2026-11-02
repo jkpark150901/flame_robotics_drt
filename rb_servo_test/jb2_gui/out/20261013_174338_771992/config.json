@@ -1,0 +1,32 @@
+{
+  "ip": "10.0.2.7",
+  "base": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "end": [
+    -30.0,
+    -20.0,
+    -10.0,
+    0.0,
+    10.0,
+    20.0
+  ],
+  "segments": 30,
+  "mode": "simulation",
+  "method": "jb2",
+  "basis": "max_joint",
+  "blend": 100.0,
+  "gain": 0.1,
+  "alpha": 0.5,
+  "speed": 50.0,
+  "accel": 200.0,
+  "hz": 100.0,
+  "window": 0.1,
+  "timeout": 120.0,
+  "speed_bar": 1.0
+}

@@ -1,0 +1,25 @@
+{
+    "_comment": "MoveIt 2 CHOMP (reference implementation) seeded with the planner path - see chomp.py. potential: 'apf' (0.5*eta*(1/d-1/d0)^2, d0 = collision_clearance) or 'chomp' (CHOMP's own potential).",
+    "potential": "apf",
+    "apf_eta": 1.0,
+    "collision_clearance": 0.15,
+    "resolution": 0.03,
+    "max_propagation": 0.25,
+    "c_space_bound": [8.5, 5.0, 3.7],
+    "timeout_s": 120.0,
+    "chomp": {
+        "planning_time_limit": 10.0,
+        "max_iterations": 200,
+        "max_iterations_after_collision_free": 5,
+        "smoothness_cost_weight": 0.1,
+        "obstacle_cost_weight": 1.0,
+        "learning_rate": 0.01,
+        "smoothness_cost_velocity": 0.0,
+        "smoothness_cost_acceleration": 1.0,
+        "smoothness_cost_jerk": 0.0,
+        "ridge_factor": 0.0,
+        "joint_update_limit": 0.1,
+        "collision_threshold": 0.07,
+        "use_stochastic_descent": 1
+    }
+}

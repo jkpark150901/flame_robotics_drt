@@ -1,0 +1,13 @@
+index,group_name,robot_name,pose_name,status,message,n_waypoints,iterations,max_iter,solve_time,iteration_ptc_error,positioner_r_deg,status_kind,failure_category,elapsed
+0,Point 2 - Inspection pose 1,dda_rb10_1300e,DDA,success,,23,4013,16000,32.90672050905414,,90.0,success,,44.29320523003116
+1,Point 2 - Inspection pose 1,rb20_1900es,RT,success,,9,469,16000,2.130207682028413,,90.0,success,,9.305982769001275
+2,Point 1 - Inspection pose 1,dda_rb10_1300e,DDA,failed,planning failed for target: timeout_approximate,1,16006,16000,83.72236057487316,,90.0,failed,timeout_approximate,93.67064405698329
+3,Point 1 - Inspection pose 1,rb20_1900es,RT,success,,4,275,16000,0.4642722560092807,,90.0,success,,1.012351161101833
+4,Point 1 - Inspection pose 3,dda_rb10_1300e,DDA,success,,20,1351,16000,1.1820119440089911,,270.0,success,,5.7693413470406085
+5,Point 1 - Inspection pose 3,rb20_1900es,RT,success,,12,394,16000,0.5875818310305476,,270.0,success,,4.98900341312401
+6,Point 1 - Inspection pose 2,dda_rb10_1300e,DDA,failed,planning failed for target: timeout_approximate,1,16000,16000,101.23641713312827,,270.0,failed,timeout_approximate,129.89383660908788
+7,Point 1 - Inspection pose 2,rb20_1900es,RT,success,,6,4797,16000,30.025908167939633,,270.0,success,,42.21422170102596
+8,Point 2 - Inspection pose 3,dda_rb10_1300e,DDA,failed,planning failed for target: timeout_approximate,1,16004,16000,130.4189991040621,,270.0,failed,timeout_approximate,137.23016005312093
+9,Point 2 - Inspection pose 3,rb20_1900es,RT,success,,17,1190,16000,0.9233751110732555,,270.0,success,,5.721422757022083
+10,Point 2 - Inspection pose 2,dda_rb10_1300e,DDA,failed,planning failed for target: timeout_approximate,1,16001,16000,90.3608288061805,,270.0,failed,timeout_approximate,105.05161263607442
+11,Point 2 - Inspection pose 2,rb20_1900es,RT,success,,11,307,16000,1.2294738278724253,,270.0,success,,14.76368206506595

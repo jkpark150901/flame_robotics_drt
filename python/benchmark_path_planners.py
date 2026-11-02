@@ -237,7 +237,7 @@ def _path_max_apf_cost(engine, robot_name, q_path, d0, eta):
         return None, None
     worst_cost, worst_min_dist = None, None
     for q in q_path:
-        entries = backend.link_obstacle_distances(robot_name, q)
+        entries = apf.obstacle_distances(backend, robot_name, q)
         cost = apf.repulsive_cost(entries, d0, eta)
         if worst_cost is None or cost > worst_cost:
             worst_cost = cost
@@ -378,16 +378,54 @@ def _write_path_summary_csv(save_paths_dir, path_summary_rows):
     looked like it drove straight through the pipe, for every group
     partition_and_sort_target_groups put in the rotated phase."""
     save_paths_dir.mkdir(parents=True, exist_ok=True)
+    from plugins.robotics.plan_run_io import SUMMARY_FIELDS, classify_failure
+    path_summary_rows = [dict(row) for row in path_summary_rows]
+    for row in path_summary_rows:
+        row.setdefault("status_kind", "success" if row.get("status") == "success" else "failed")
+        row.setdefault("failure_category", classify_failure(row))
     with open(save_paths_dir / "summary.csv", "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=[
-            "index", "group_name", "robot_name", "pose_name", "status", "message", "n_waypoints",
-            "iterations", "max_iter", "solve_time", "iteration_ptc_error", "positioner_r_deg"])
+        writer = csv.DictWriter(f, fieldnames=SUMMARY_FIELDS, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(path_summary_rows)
+    # Why each non-success target failed - includes targets that produced no path at all (these used to
+    # leave neither a summary.csv row nor any other trace).
+    failures = [
+        {k: row.get(k) for k in ("index", "group_name", "robot_name", "pose_name", "status",
+                                 "failure_category", "message", "n_waypoints", "iterations", "max_iter",
+                                 "solve_time", "elapsed", "positioner_r_deg")}
+        for row in path_summary_rows if row.get("status") != "success"
+    ]
+    by_category = {}
+    for failure in failures:
+        by_category[failure["failure_category"]] = by_category.get(failure["failure_category"], 0) + 1
+    with open(save_paths_dir / "failures.json", "w", encoding="utf-8") as f:
+        json.dump({
+            "n_total": len(path_summary_rows), "n_failed": len(failures), "by_category": by_category,
+            "failures": [{**item, "category": item["failure_category"]} for item in failures],
+        }, f, indent=2, ensure_ascii=False, default=str)
+
+
+def apply_phase2_positioner(engine, snapshot, console=None):
+    """Phase 2 (positioner rotated): swap the engine's positioner collision mesh for the rotated one.
+
+    RobotCoreEngine takes the positioner mesh as saved in the snapshot (initial r). SimTool rotates the positioner for
+    real before phase 2 and sends a fresh snapshot, but here only the pipe was rotated (obstacle_rotation_T) and the
+    positioner stayed at the initial angle - its r-axis parts are up to 2 m elsewhere (p3 Point 1 pose 2 RT: the target
+    overlapped the stale positioner, IK impossible; actual clearance 439 mm). precompute_ik_goals.py stores the rotated
+    mesh as positioner_vertices_phase2 / positioner_triangles_phase2. Returns True when swapped."""
+    verts, tris = snapshot.get("positioner_vertices_phase2"), snapshot.get("positioner_triangles_phase2")
+    if verts is None or tris is None:
+        (console or ConsoleLogger.get_logger()).warning(
+            "snapshot has no phase-2 positioner mesh (run precompute_ik_goals.py) - phase 2 is checked against the "
+            "positioner at its initial angle")
+        return False
+    engine._worker_positioner_mesh = engine._mesh_from_snapshot(verts, tris)
+    return True
 
 
 def _run_once(config, snapshot, planner_name, *, timeout, seed, step_size=0.08, save_paths_dir=None,
-              apf_d0=apf.DEFAULT_D0, apf_eta=apf.DEFAULT_ETA, approach=None, dda_min_clearance=0.10):
+              apf_d0=apf.DEFAULT_D0, apf_eta=apf.DEFAULT_ETA, approach=None, dda_min_clearance=0.10,
+              metric_hook=None, use_preset_goals=True):
     """Plan every target in the snapshot (both phases) with a fresh engine,
     one plan_single_target call per target - mirroring exactly what
     SimTool's InspectionSequencer does, plus the positioner-rotation phase it
@@ -407,6 +445,10 @@ def _run_once(config, snapshot, planner_name, *, timeout, seed, step_size=0.08, 
     dda_min_clearance: distance (m) below which a DDA end-link waypoint counts
     as "hugging the surface" in _dda_path_metrics - applied identically
     whether or not the constraint is on.
+    metric_hook: optional callable(**kw) -> dict, called right after every plan_single_target (while that
+    target's collision scene is still configured) with engine, robot_name, pose_name, group, target_pose, q_path,
+    result, rotate and plan_wall (seconds); its dict is merged into the target row. The positioner-rotation phase
+    logic is unchanged - see evaluate_path_plans.py / plugins/robotics/path_metrics.py.
     """
     from robot_core.worker import RobotCoreEngine
     from robot_core.path_planning_service import plan_single_target
@@ -479,6 +521,8 @@ def _run_once(config, snapshot, planner_name, *, timeout, seed, step_size=0.08, 
         the last pre-rotation target left it - an arbitrary pose with no
         guaranteed clearance once the pipe/positioner rotates under it. Only
         the linear track (which doesn't move with the rotation) is kept."""
+        if not bool((config.get("path_planning", {}) or {}).get("reset_pose_before_rotation", False)):
+            return  # no pose reset between targets: the next plan continues from the last target's final posture
         backend = getattr(engine, "_robotics_backend", None)
         robot_backend_model = backend.robot_model(robot_name) if backend is not None else None
         joint_names = engine._robot_joint_names(robot_name, robot_backend_model)
@@ -503,16 +547,22 @@ def _run_once(config, snapshot, planner_name, *, timeout, seed, step_size=0.08, 
                 "target_pose": target_pose,
                 "planner": base_planner_name,
                 "step_size": step_size,
+                # planner state-validity-check cap; same source as SimTool (simtool.cfg planner_options.max_iter)
+                "max_iter": int(((config.get("planner_options") or {}).get("max_iter")) or 3000),
                 "optimizer": optimizer_name,
                 "optimize_path": bool(optimizer_name),
                 "optimizer_config": optimizer_overrides or None,
                 "planning_timeout": timeout,
                 "context_label": f"{group.get('name')}:{pose_name}",
                 "obstacle_rotation_T": rotation_T if rotate else None,
+                # goal q stored in the snapshot (precompute_ik_goals.py): no IK solve during planning
+                "preset_goal_q": (group.get("ik_goal_q") or {}).get(robot_name) if use_preset_goals else None,
             }
             if approach is not None:
                 request["approach"] = approach
+            plan_t0 = time.perf_counter()
             output = plan_single_target(engine, request)
+            plan_wall = time.perf_counter() - plan_t0
             result = output.get("result", {})
             total_elapsed += float(result.get("elapsed", 0.0))
             q_path = output.get("q_path") or []
@@ -524,7 +574,16 @@ def _run_once(config, snapshot, planner_name, *, timeout, seed, step_size=0.08, 
                 "min_clearance_link": None, "min_clearance_obstacle": None,
                 "apf_max_cost": None, "apf_max_cost_min_distance": None,
                 "ee_min_clearance_outside_approach": None, "ee_hug_points": None, "final_angle_deg": None,
+                "plan_wall_s": plan_wall,
             }
+            if metric_hook is not None:
+                try:
+                    target_row.update(metric_hook(
+                        engine=engine, robot_name=robot_name, pose_name=pose_name, group=group,
+                        target_pose=target_pose, q_path=q_path, result=result, rotate=rotate,
+                        plan_wall=plan_wall))
+                except Exception as exc:
+                    target_row["metric_error"] = f"{type(exc).__name__}: {exc}"
             if save_paths_dir is not None and q_path:
                 # Save regardless of status (success or failed) - a failed
                 # optimizer/planner result (e.g. STOMP's "could not find any
@@ -538,7 +597,14 @@ def _run_once(config, snapshot, planner_name, *, timeout, seed, step_size=0.08, 
                 joint_names = _joint_names_for(engine, robot_name, len(q_path[0]))
                 _save_joint_states_csv(subdir / "joint_states.csv", joint_names, q_path)
                 _save_collision_sidecar(subdir / "collisions.json", result)
+                if result.get("path_metrics"):
+                    (subdir / "metrics.json").write_text(
+                        json.dumps(result["path_metrics"], indent=2), encoding="utf-8")
+            if save_paths_dir is not None:
+                # Recorded for EVERY target - a failure with no q_path (IK failure, timeout, planner never
+                # found anything) used to be skipped here, leaving no trace of why that target was missing.
                 planner_stats = result.get("planner_stats") or {}
+                metrics = result.get("path_metrics") or {}
                 path_summary_rows.append({
                     "index": target_index, "group_name": group.get("name"), "robot_name": robot_name,
                     "pose_name": pose_name, "status": result.get("status"), "message": result.get("message"),
@@ -546,6 +612,23 @@ def _run_once(config, snapshot, planner_name, *, timeout, seed, step_size=0.08, 
                     "max_iter": planner_stats.get("max_iter"), "solve_time": planner_stats.get("solve_time"),
                     "iteration_ptc_error": planner_stats.get("iteration_ptc_error"),
                     "positioner_r_deg": r_deg_label,
+                    "status_kind": result.get("status_kind") or ("success" if result.get("status") == "success" else "failed"),
+                    "elapsed": result.get("elapsed"),
+                    "planning_time_s": result.get("elapsed"),
+                    "request_total": result.get("request_total"),
+                    "clearance_min_m": metrics.get("clearance_min_m"),
+                    "clearance_margin_m": metrics.get("clearance_margin_m"),
+                    "physical_min_distance_m": metrics.get("physical_min_distance_m"),
+                    "smoothness": metrics.get("smoothness"),
+                    "n_clearance_samples": metrics.get("clearance_samples"),
+                    "ee_path_length_m": metrics.get("ee_path_length_m"),
+                    "joint_path_length_normalized": metrics.get("joint_path_length_normalized"),
+                    "estimated_motion_s": metrics.get("estimated_motion_s"),
+                    "estimated_ee_mean_speed_m_s": metrics.get("estimated_ee_mean_speed_m_s"),
+                    "joint_velocity_limit_deg_s": metrics.get("joint_velocity_limit_deg_s"),
+                    "linear_velocity_limit_m_s": metrics.get("linear_velocity_limit_m_s"),
+                    "path_metrics_error": result.get("path_metrics_error"),
+                    "ik_failure": result.get("ik_failure"),
                 })
             target_index += 1
             if result.get("status") == "success" and q_path:
@@ -628,6 +711,8 @@ def _run_once(config, snapshot, planner_name, *, timeout, seed, step_size=0.08, 
                         if robot_name not in retreated:
                             _retreat_before_rotation(robot_name)
                             retreated.add(robot_name)
+                # the positioner really rotates before phase 2 (SimTool) - use its rotated collision mesh
+                apply_phase2_positioner(engine, snapshot)
                 for group in rotation_groups:
                     _plan_group(group, rotate=True, r_deg_label=second_r_deg)
     except Exception as exc:
@@ -1170,6 +1255,7 @@ def main():
     # find *which* target/robot was the closest call or the roughest path.
     _write_csv(target_metrics_path, target_metric_rows, fieldnames=[
         "planner", "repeat", "group_name", "robot", "pose_name", "positioner_r_deg",
+        "plan_wall_s",
         "status", "message", "smoothness", "min_clearance", "min_clearance_link", "min_clearance_obstacle",
         "apf_max_cost", "apf_max_cost_min_distance",
         "ee_min_clearance_outside_approach", "ee_hug_points", "final_angle_deg",

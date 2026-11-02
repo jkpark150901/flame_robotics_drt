@@ -1,0 +1,82 @@
+{
+    "env": {
+        "robot": "dda_rb10_1300e",
+        "train_snapshots": [
+            "sample/planning_snapshot_p1_2.apfgoal.pkl",
+            "sample/planning_snapshot_p2_3.apfgoal.pkl"
+        ],
+        "eval_snapshots": [
+            "sample/planning_snapshot_p3_6.apfgoal.pkl"
+        ],
+        "max_steps": 500,
+        "dt": 0.1,
+        "max_rot_vel_deg": 50.0,
+        "max_lin_vel": 0.5,
+        "obs_distance_cap": 0.3,
+        "approach_zone": 0.1,
+        "reach_tol": 0.05,
+        "link_reach": 2.0,
+        "near_margin": 0.03,
+        "start_perturb_prob": 0.0,
+        "start_perturb_scale": 0.3,
+        "episodes_per_scene": 20,
+        "joint_weights": {
+            "base": 2.0,
+            "wrist3": 2.0
+        },
+        "curriculum": {
+            "enabled": false
+        },
+        "residual": {
+            "enabled": true,
+            "scale": 0.5,
+            "reference_runs": {
+                "p1": "runs_apfgoal/RRTConnect_none_p1",
+                "p2": "runs_apfgoal/RRTConnect_none_p2",
+                "p3": "runs_apfgoal/RRTConnect_none_p3"
+            },
+            "random_reference": false,
+            "mid_start_prob": 0.0,
+            "start_noise_prob": 0.0,
+            "start_noise": 0.3,
+            "shield": true
+        }
+    },
+    "reward": {
+        "progress": 0.0,
+        "apf": 5.0,
+        "apf_d0": 0.15,
+        "apf_clip": 50.0,
+        "margin": 200.0,
+        "safety_margin": 0.005,
+        "side": 50.0,
+        "time": 1.0,
+        "smooth": 0.05,
+        "collision": 5000.0,
+        "goal": 0.0,
+        "residual": 0.05,
+        "apf_baseline": {
+            "enabled": true,
+            "sigma": 0.15
+        }
+    },
+    "sac": {
+        "net_arch": [
+            256,
+            256,
+            256
+        ],
+        "learning_rate": 0.0003,
+        "buffer_size": 1000000,
+        "batch_size": 512,
+        "gamma": 0.99,
+        "tau": 0.005,
+        "ent_coef": "auto",
+        "train_freq": 1,
+        "gradient_steps": 8,
+        "learning_starts": 5000,
+        "n_envs": 16,
+        "total_timesteps": 1000000,
+        "device": "cuda"
+    }
+}

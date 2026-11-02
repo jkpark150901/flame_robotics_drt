@@ -1,0 +1,103 @@
+{
+  "dda": {
+    "mount_parent": "link_18_scan_body_slide_DDA",
+    "mount_xyz": [
+      -1.0859997484678154,
+      -0.10049999999968295,
+      -0.004499990000869869
+    ],
+    "mount_rpy_deg": [
+      -89.99984796127933,
+      0.00021045970773361344,
+      179.99978954140877
+    ],
+    "yaw_deg": -90.00015203949572,
+    "flipped": false,
+    "tool_roll_deg": 0.0,
+    "tool_frame_rotated": false,
+    "tool_rotate": [
+      1,
+      180.0
+    ],
+    "tool_joint": "joint_0_DDA",
+    "tool_xyz": [
+      0.1013470000054319,
+      -0.0975206041874558,
+      0.030590024236874118
+    ],
+    "tool_rpy_deg": [
+      89.99984374474437,
+      -3.840294594595749e-08,
+      1.5254690863203852e-08
+    ],
+    "vendor_meshes": 14,
+    "dropped_cad_links": [
+      "link_11_arm_dda_link6",
+      "link_4_arm_dda_base",
+      "link_5_arm_dda_link1",
+      "link_6_arm_dda_link2",
+      "link_7_arm_dda_link3",
+      "link_8_arm_dda_link4",
+      "link_9_arm_dda_link5"
+    ],
+    "base_shift_m": -0.09695871908871166,
+    "base_was_overlapping": false,
+    "tool_shift_m": 0.07335020361041727,
+    "tool_plane_penetration_vertices": 0,
+    "tcp_z_outward": true,
+    "tcp_in_tool_xyz": [
+      -0.09683918423457294,
+      -0.0283093166054722,
+      -0.0015053298781966262
+    ]
+  },
+  "rt": {
+    "mount_parent": "link_19_scan_body_slide_RT",
+    "mount_xyz": [
+      -0.019826700000007524,
+      -0.019000000000014006,
+      -0.19851439999999987
+    ],
+    "mount_rpy_deg": [
+      0.0,
+      3.3077768687220577e-13,
+      -179.9998479601893
+    ],
+    "yaw_deg": 179.99984796078488,
+    "flipped": false,
+    "tool_roll_deg": 0.0,
+    "tool_frame_rotated": false,
+    "tool_rotate": null,
+    "tool_joint": "joint_2_RT",
+    "tool_xyz": [
+      -9.756659538477236e-12,
+      6.296355795059215e-08,
+      0.049999999999960375
+    ],
+    "tool_rpy_deg": [
+      179.999848026787,
+      -7.215079035669199e-05,
+      -90.04337219612026
+    ],
+    "vendor_meshes": 14,
+    "dropped_cad_links": [
+      "link_10_arm_rt_base",
+      "link_12_arm_rt_link1",
+      "link_13_arm_rt_link2",
+      "link_14_arm_rt_link3",
+      "link_15_arm_rt_link5",
+      "link_16_arm_rt_link6",
+      "link_17_arm_rt_link4"
+    ],
+    "base_shift_m": 0.13455050853194817,
+    "base_was_overlapping": true,
+    "tool_shift_m": 0.08755015842367805,
+    "tool_plane_penetration_vertices": 0,
+    "tcp_z_outward": true,
+    "tcp_in_tool_xyz": [
+      -0.0004979260875724867,
+      0.05349947306347014,
+      -0.25449625038386975
+    ]
+  }
+}

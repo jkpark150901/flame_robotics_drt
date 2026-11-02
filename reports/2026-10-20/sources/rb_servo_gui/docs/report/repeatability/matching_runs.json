@@ -1,0 +1,1183 @@
+[
+  {
+    "config": {
+      "accel": 120.0,
+      "alpha": 1.0,
+      "blend": 50.0,
+      "gain": 0.5,
+      "home_accel": 40.0,
+      "home_first": false,
+      "home_joints": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "home_speed": 20.0,
+      "interp_rate": 50.0,
+      "ip": "10.0.2.7",
+      "max_wait": 1800.0,
+      "mode": "servo",
+      "move_thr": 0.2,
+      "reach_hold": 0.3,
+      "reach_tol": 1.0,
+      "real_speed_cap": 0.0,
+      "record_hz": 50.0,
+      "revert_to_sim": false,
+      "robot_mode": "simulation",
+      "settle_timeout": 15.0,
+      "speed": 100.0,
+      "step": 10,
+      "t1": 0.2,
+      "t2": 0.4,
+      "timeout": 20.0,
+      "traj_kind": "waypoint",
+      "use_mock": false,
+      "vmax": 20.0
+    },
+    "paths": [
+      "/home/dev/rb_servo_gui_runs/20261008_103902_servo_step10",
+      "/home/dev/rb_servo_gui_runs/20261008_104226_servo_step10",
+      "/home/dev/rb_servo_gui_runs/20261008_104255_servo_step10"
+    ],
+    "hash": "36f0978571cf8f295d0befe14d84ab857fbe4e3feeac63835152c5a9f455b7e9"
+  },
+  {
+    "config": {
+      "accel": 200.0,
+      "alpha": 1.0,
+      "blend": 0.0,
+      "gain": 1.0,
+      "home_accel": 40.0,
+      "home_first": false,
+      "home_joints": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "home_speed": 20.0,
+      "interp_rate": 50.0,
+      "ip": "10.0.2.7",
+      "max_wait": 1800.0,
+      "mode": "servo",
+      "move_thr": 0.2,
+      "reach_hold": 0.3,
+      "reach_tol": 1.0,
+      "real_speed_cap": 0.0,
+      "record_hz": 50.0,
+      "revert_to_sim": false,
+      "robot_mode": "real",
+      "settle_timeout": 15.0,
+      "speed": 100.0,
+      "step": 10,
+      "t1": 0.2,
+      "t2": 0.4,
+      "timeout": 20.0,
+      "traj_kind": "waypoint",
+      "use_mock": false,
+      "vmax": 20.0
+    },
+    "paths": [
+      "/home/dev/rb_servo_gui_runs/20261008_111008_REAL_servo_step10",
+      "/home/dev/rb_servo_gui_runs/20261008_111351_REAL_servo_step10"
+    ],
+    "hash": "36f0978571cf8f295d0befe14d84ab857fbe4e3feeac63835152c5a9f455b7e9"
+  },
+  {
+    "config": {
+      "accel": 400.0,
+      "alpha": 1.0,
+      "blend": 100.0,
+      "gain": 1.0,
+      "home_accel": 40.0,
+      "home_first": false,
+      "home_joints": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "home_speed": 20.0,
+      "interp_rate": 50.0,
+      "ip": "10.0.2.7",
+      "max_wait": 1800.0,
+      "mode": "jb2",
+      "move_thr": 0.2,
+      "reach_hold": 0.3,
+      "reach_tol": 1.0,
+      "real_speed_cap": 0.0,
+      "record_hz": 50.0,
+      "revert_to_sim": false,
+      "robot_mode": "simulation",
+      "settle_timeout": 15.0,
+      "speed": 40.0,
+      "step": 10,
+      "t1": 0.2,
+      "t2": 0.4,
+      "timeout": 20.0,
+      "traj_kind": "waypoint",
+      "use_mock": false,
+      "vmax": 20.0
+    },
+    "paths": [
+      "/home/dev/rb_servo_gui_runs/20261008_113739_jb2_step10",
+      "/home/dev/rb_servo_gui_runs/20261008_125934_jb2_step10"
+    ],
+    "hash": "cffb95841b0d60507aa8e6c5db5208d40ae31987e82383e5fb6b9b27422da298"
+  },
+  {
+    "config": {
+      "accel": 400.0,
+      "alpha": 1.0,
+      "blend": 100.0,
+      "gain": 1.0,
+      "home_accel": 40.0,
+      "home_first": false,
+      "home_joints": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "home_speed": 20.0,
+      "interp_rate": 50.0,
+      "ip": "10.0.2.7",
+      "max_wait": 1800.0,
+      "mode": "jb2",
+      "move_thr": 0.2,
+      "reach_hold": 0.3,
+      "reach_tol": 1.0,
+      "real_speed_cap": 0.0,
+      "record_hz": 50.0,
+      "revert_to_sim": false,
+      "robot_mode": "simulation",
+      "settle_timeout": 15.0,
+      "speed": 40.0,
+      "step": 10,
+      "t1": 0.2,
+      "t2": 0.4,
+      "timeout": 20.0,
+      "traj_kind": "waypoint",
+      "use_mock": false,
+      "vmax": 20.0
+    },
+    "paths": [
+      "/home/dev/rb_servo_gui_runs/20261008_125914_jb2_step10",
+      "/home/dev/rb_servo_gui_runs/20261008_125954_jb2_step10"
+    ],
+    "hash": "7a1af817fbbab112dcd14be97eb1a745f16643e4f4b0c30694982fd98eb62e70"
+  },
+  {
+    "config": {
+      "accel": 500.0,
+      "alpha": 1.0,
+      "blend": 0.0,
+      "final_hold": 30,
+      "final_t2": 0.0,
+      "gain": 0.2,
+      "home_accel": 40.0,
+      "home_first": false,
+      "home_joints": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "home_speed": 20.0,
+      "interp_rate": 50.0,
+      "ip": "10.0.2.7",
+      "max_wait": 1800.0,
+      "mode": "jb2",
+      "move_thr": 0.2,
+      "reach_hold": 0.3,
+      "reach_tol": 1.0,
+      "real_speed_cap": 0.0,
+      "record_hz": 50.0,
+      "revert_to_sim": false,
+      "robot_mode": "simulation",
+      "settle_timeout": 15.0,
+      "speed": 50.0,
+      "step": 10,
+      "t1": 0.0,
+      "t2": 0.0,
+      "timeout": 20.0,
+      "traj_kind": "waypoint",
+      "use_mock": false,
+      "vmax": 20.0
+    },
+    "paths": [
+      "/home/dev/rb_servo_gui_runs/20261008_163038_jb2_step10",
+      "/home/dev/rb_servo_gui_runs/20261008_163302_jb2_step10"
+    ],
+    "hash": "7d870298ee140e5e6cbc3abfa4b88cefe46c3c48d2c1179501c9a05ecc4a43f5"
+  },
+  {
+    "config": {
+      "accel": 100.0,
+      "alpha": 1.0,
+      "blend": 50.0,
+      "extrema_max_shift": 0.35,
+      "extrema_prominence": 0.05,
+      "final_hold": 100,
+      "final_t2": 0.0,
+      "gain": 1.0,
+      "home_accel": 20.0,
+      "home_first": false,
+      "home_joints": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "home_speed": 10.0,
+      "interp_rate": 50.0,
+      "ip": "10.0.2.7",
+      "max_wait": 1800.0,
+      "mode": "servo",
+      "move_thr": 0.2,
+      "reach_hold": 0.3,
+      "reach_tol": 1.0,
+      "real_speed_cap": 0.0,
+      "record_hz": 50.0,
+      "revert_to_sim": false,
+      "robot_mode": "simulation",
+      "servo_basis": "max_joint",
+      "servo_period": 0.02,
+      "servo_timing": "profile",
+      "settle_timeout": 15.0,
+      "speed": 50.0,
+      "step": 10,
+      "t1": 0.0,
+      "t2": 0.0,
+      "timeout": 20.0,
+      "traj_kind": "waypoint",
+      "use_mock": false,
+      "vmax": 20.0
+    },
+    "paths": [
+      "/home/dev/rb_servo_gui_runs/20261014_164017_servo_step10",
+      "/home/dev/rb_servo_gui_runs/20261014_164643_servo_step10"
+    ],
+    "hash": "7d0ed2d201f80ed67b107c0ad7ec5749801b6debdae57ffa6c4571ea17891723"
+  },
+  {
+    "config": {
+      "accel": 200.0,
+      "alpha": 0.5,
+      "base": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "basis": "max_joint",
+      "blend": 100.0,
+      "end": [
+        0.0,
+        10.0,
+        20.0,
+        30.0,
+        40.0,
+        50.0
+      ],
+      "gain": 0.1,
+      "hz": 100.0,
+      "ip": "10.0.2.7",
+      "method": "jb2",
+      "mode": "simulation",
+      "segments": 30,
+      "speed": 50.0,
+      "speed_bar": 1.0
+    },
+    "paths": [
+      "rb_servo_test/jb2_gui/out/20261013_174437_927362",
+      "rb_servo_test/jb2_gui/out/20261013_174516_421822"
+    ],
+    "hash": "d517e5ef89d2b516a45547c8a2fe7150925fc33adae027437fe29afafbe24448"
+  },
+  {
+    "config": {
+      "accel": 300.0,
+      "alpha": 1.0,
+      "base": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "basis": "max_joint",
+      "blend": 100.0,
+      "end": [
+        0.0,
+        10.0,
+        120.0,
+        60.0,
+        120.0,
+        60.0
+      ],
+      "gain": 1.0,
+      "hz": 100.0,
+      "ip": "10.0.2.7",
+      "method": "jb2",
+      "mode": "simulation",
+      "segments": 20,
+      "speed": 100.0,
+      "speed_bar": 1.0
+    },
+    "paths": [
+      "rb_servo_test/jb2_gui/out/20261013_174821_247308",
+      "rb_servo_test/jb2_gui/out/20261013_174839_571425"
+    ],
+    "hash": "d367226cd04db26b817850b1a740e99f268e86c41de346cd5367e8adce01255c"
+  },
+  {
+    "config": {
+      "accel": 1000.0,
+      "alpha": 1.0,
+      "base": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "basis": "max_joint",
+      "blend": 100.0,
+      "end": [
+        60.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "gain": 1.0,
+      "hz": 100.0,
+      "ip": "10.0.2.7",
+      "method": "jb2",
+      "mode": "simulation",
+      "segments": 1,
+      "speed": 100.0,
+      "speed_bar": 1.0
+    },
+    "paths": [
+      "rb_servo_test/jb2_gui/out/20261013_175038_843786",
+      "rb_servo_test/jb2_gui/out/20261013_175225_172012"
+    ],
+    "hash": "a2fd48c00a32f6f3ab144e0569dcc6eee6019a80e22acba8c4ec650a245b0040"
+  },
+  {
+    "config": {
+      "accel": 1000.0,
+      "alpha": 1.0,
+      "base": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "basis": "max_joint",
+      "blend": 100.0,
+      "end": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        60.0
+      ],
+      "gain": 1.0,
+      "hz": 100.0,
+      "ip": "10.0.2.7",
+      "method": "jb2",
+      "mode": "simulation",
+      "segments": 1,
+      "speed": 60.0,
+      "speed_bar": 1.0
+    },
+    "paths": [
+      "rb_servo_test/jb2_gui/out/20261013_175255_055486",
+      "rb_servo_test/jb2_gui/out/20261013_175407_253666"
+    ],
+    "hash": "50ade2fbfa2dd5b60b61b012f64f66896e0c11a100c0378d852ff501b74ce410"
+  },
+  {
+    "config": {
+      "accel": 1000.0,
+      "alpha": 1.0,
+      "base": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "basis": "max_joint",
+      "blend": 100.0,
+      "end": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        60.0,
+        60.0
+      ],
+      "gain": 1.0,
+      "hz": 100.0,
+      "ip": "10.0.2.7",
+      "method": "jb2",
+      "mode": "simulation",
+      "segments": 1,
+      "speed": 60.0,
+      "speed_bar": 1.0
+    },
+    "paths": [
+      "rb_servo_test/jb2_gui/out/20261013_175309_553634",
+      "rb_servo_test/jb2_gui/out/20261013_175416_915628"
+    ],
+    "hash": "c25cabbefff24ad9c6370c8af4948433780077927049372985aadf55b61e6595"
+  },
+  {
+    "config": {
+      "accel": 100.0,
+      "alpha": 1.0,
+      "base": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "basis": "max_joint",
+      "blend": 100.0,
+      "end": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "gain": 1.0,
+      "hz": 100.0,
+      "ip": "10.0.2.7",
+      "method": "servo",
+      "mode": "simulation",
+      "segments": 4,
+      "servo_period_ms": 100.0,
+      "speed": 50.0,
+      "speed_bar": 1.0,
+      "via": [
+        [
+          0.0,
+          0.0,
+          30.0,
+          60.0,
+          60.0,
+          60.0
+        ]
+      ]
+    },
+    "paths": [
+      "rb_servo_test/jb2_gui/out/20261013_182140_460855",
+      "rb_servo_test/jb2_gui/out/20261013_182257_788665"
+    ],
+    "hash": "2b73a9c89bcde2a513f0e1033307192b32086203de175954af0e9db0030941fd"
+  },
+  {
+    "config": {
+      "accel": 100.0,
+      "alpha": 1.0,
+      "base": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "basis": "max_joint",
+      "blend": 100.0,
+      "end": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "gain": 1.0,
+      "hz": 100.0,
+      "ip": "10.0.2.7",
+      "method": "servo",
+      "mode": "simulation",
+      "segments": 10,
+      "servo_period_ms": 100.0,
+      "speed": 50.0,
+      "speed_bar": 1.0,
+      "via": [
+        [
+          30.0,
+          30.0,
+          30.0,
+          60.0,
+          60.0,
+          60.0
+        ]
+      ]
+    },
+    "paths": [
+      "rb_servo_test/jb2_gui/out/20261013_182409_919856",
+      "rb_servo_test/jb2_gui/out/20261013_182429_865364",
+      "rb_servo_test/jb2_gui/out/20261013_182507_041204"
+    ],
+    "hash": "dee6ccc2302f8c56a6c0eb1c5f95cbf27449cdc5821b8124702b4ad076eba17d"
+  },
+  {
+    "config": {
+      "accel": 200.0,
+      "alpha": 1.0,
+      "base": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "basis": "max_joint",
+      "blend": 100.0,
+      "end": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "gain": 1.0,
+      "hz": 100.0,
+      "ip": "10.0.2.7",
+      "method": "jb2",
+      "mode": "simulation",
+      "segments": 50,
+      "servo_period_ms": 20.0,
+      "servo_t2": 0.04,
+      "speed": 100.0,
+      "speed_bar": 1.0,
+      "via": [
+        [
+          10.0,
+          20.0,
+          30.0,
+          40.0,
+          50.0,
+          60.0
+        ]
+      ]
+    },
+    "paths": [
+      "rb_servo_test/jb2_gui/out/20261013_183118_476812",
+      "rb_servo_test/jb2_gui/out/20261013_183153_990540"
+    ],
+    "hash": "fcbb186b5c5815930458f9abc5b5f50cf60419164f22e2cdb14b32677d37c6b4"
+  },
+  {
+    "config": {
+      "accel": 40.0,
+      "alpha": 1.0,
+      "base": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "basis": "max_joint",
+      "blend": 100.0,
+      "end": [
+        0.0,
+        0.0,
+        0.0,
+        30.0,
+        30.0,
+        60.0
+      ],
+      "gain": 1.0,
+      "hz": 100.0,
+      "ip": "10.0.2.7",
+      "method": "jb2",
+      "mode": "simulation",
+      "segments": 1,
+      "servo_period_ms": 20.0,
+      "servo_t2": 0.1,
+      "speed": 20.0,
+      "speed_bar": 1.0,
+      "via": []
+    },
+    "paths": [
+      "rb_servo_test/jb2_gui/out/20261016_134209_022339",
+      "rb_servo_test/jb2_gui/out/20261016_134257_524480"
+    ],
+    "hash": "0ccd8d10ec77e87d59f9711a0908ab5a56e3990abe84f82f55598a0b2669cc4e"
+  },
+  {
+    "config": {
+      "accel": 100.0,
+      "alpha": 1.0,
+      "base": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "basis": "max_joint",
+      "blend": 100.0,
+      "end": [
+        0.0,
+        0.0,
+        50.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "gain": 1.0,
+      "hz": 100.0,
+      "ip": "10.0.2.7",
+      "method": "jb2",
+      "mode": "simulation",
+      "segments": 1,
+      "servo_period_ms": 20.0,
+      "servo_t2": 0.1,
+      "speed": 50.0,
+      "speed_bar": 1.0,
+      "via": []
+    },
+    "paths": [
+      "rb_servo_test/jb2_gui/out/20261016_134507_020153",
+      "rb_servo_test/jb2_gui/out/20261016_134633_816038"
+    ],
+    "hash": "77d381f869960e98fdf14d40a137d1ea3557238ecf6fa666a1fdecaa9542212a"
+  },
+  {
+    "config": {
+      "accel": 100.0,
+      "alpha": 1.0,
+      "base": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "basis": "max_joint",
+      "blend": 100.0,
+      "end": [
+        0.0,
+        50.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "gain": 1.0,
+      "hz": 100.0,
+      "ip": "10.0.2.7",
+      "method": "jb2",
+      "mode": "simulation",
+      "segments": 1,
+      "servo_period_ms": 20.0,
+      "servo_t2": 0.1,
+      "speed": 50.0,
+      "speed_bar": 1.0,
+      "via": []
+    },
+    "paths": [
+      "rb_servo_test/jb2_gui/out/20261016_134538_210020",
+      "rb_servo_test/jb2_gui/out/20261016_134617_918007"
+    ],
+    "hash": "c0d2345e660b1f85df742fa7ba41299a605d0c1657adf95f4996a13356444dfc"
+  },
+  {
+    "config": {
+      "accel": 60.0,
+      "alpha": 1.0,
+      "base": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "basis": "max_joint",
+      "blend": 100.0,
+      "end": [
+        0.0,
+        0.0,
+        0.0,
+        20.0,
+        20.0,
+        20.0
+      ],
+      "gain": 1.0,
+      "hz": 100.0,
+      "ip": "10.0.2.7",
+      "method": "jb2",
+      "mode": "real",
+      "segments": 1,
+      "servo_period_ms": 20.0,
+      "servo_t2": 0.1,
+      "speed": 30.0,
+      "speed_bar": 1.0,
+      "via": []
+    },
+    "paths": [
+      "rb_servo_test/jb2_gui/out/20261016_141046_862354",
+      "rb_servo_test/jb2_gui/out/20261016_141107_694066"
+    ],
+    "hash": "c85cbcf56035f2958dd1ca54329da14735733f41d30fc1540c94c014ea03281d"
+  },
+  {
+    "config": {
+      "accel": 60.0,
+      "alpha": 1.0,
+      "base": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "basis": "max_joint",
+      "blend": 100.0,
+      "end": [
+        20.0,
+        20.0,
+        20.0,
+        20.0,
+        20.0,
+        20.0
+      ],
+      "gain": 1.0,
+      "hz": 100.0,
+      "ip": "10.0.2.7",
+      "method": "jb2",
+      "mode": "real",
+      "segments": 1,
+      "servo_period_ms": 20.0,
+      "servo_t2": 0.1,
+      "speed": 30.0,
+      "speed_bar": 1.0,
+      "via": []
+    },
+    "paths": [
+      "rb_servo_test/jb2_gui/out/20261016_141054_813994",
+      "rb_servo_test/jb2_gui/out/20261016_141137_793703"
+    ],
+    "hash": "a621d4bb0d94bf85935b5f55998337699faf08c5cd100a9c87b95ab5e1a057b2"
+  },
+  {
+    "config": {
+      "accel": 20.0,
+      "alpha": 0.5,
+      "base": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "basis": "max_joint",
+      "blend": 100.0,
+      "end": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "gain": 0.1,
+      "hz": 100.0,
+      "ip": "10.0.2.7",
+      "method": "jb2",
+      "mode": "simulation",
+      "segments": 10,
+      "servo_period_ms": 10.0,
+      "servo_t2": 0.1,
+      "speed": 10.0,
+      "speed_bar": 1.0,
+      "via": [
+        [
+          20.0,
+          20.0,
+          20.0,
+          20.0,
+          20.0,
+          20.0
+        ]
+      ]
+    },
+    "paths": [
+      "rb_servo_test/jb2_gui/out/20261016_143230_944670",
+      "rb_servo_test/jb2_gui/out/20261016_150012_432920"
+    ],
+    "hash": "35a1c4a21f2c5bc676ad8c432be25a89b9e77c596be1f127dff084fc52951700"
+  },
+  {
+    "config": {
+      "accel": 20.0,
+      "alpha": 0.5,
+      "base": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "basis": "max_joint",
+      "blend": 100.0,
+      "end": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "gain": 0.1,
+      "hz": 100.0,
+      "ip": "10.0.2.7",
+      "method": "jb2",
+      "mode": "simulation",
+      "segments": 2,
+      "servo_period_ms": 10.0,
+      "servo_t2": 0.1,
+      "speed": 10.0,
+      "speed_bar": 1.0,
+      "via": [
+        [
+          20.0,
+          20.0,
+          20.0,
+          20.0,
+          20.0,
+          20.0
+        ]
+      ]
+    },
+    "paths": [
+      "rb_servo_test/jb2_gui/out/20261016_143320_502964",
+      "rb_servo_test/jb2_gui/out/20261016_150026_190617"
+    ],
+    "hash": "6a90e993cb9b662de52d947cae1da8e7a7831aab0c8f5af6f8fb9f3a456b490c"
+  },
+  {
+    "config": {
+      "accel": 20.0,
+      "alpha": 0.5,
+      "base": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "basis": "max_joint",
+      "blend": 100.0,
+      "end": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "gain": 0.1,
+      "hz": 100.0,
+      "ip": "10.0.2.7",
+      "method": "jb2",
+      "mode": "simulation",
+      "segments": 4,
+      "servo_period_ms": 10.0,
+      "servo_t2": 0.1,
+      "speed": 10.0,
+      "speed_bar": 1.0,
+      "via": [
+        [
+          20.0,
+          20.0,
+          20.0,
+          20.0,
+          20.0,
+          20.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          30.0,
+          30.0,
+          30.0,
+          30.0,
+          30.0,
+          30.0
+        ]
+      ]
+    },
+    "paths": [
+      "rb_servo_test/jb2_gui/out/20261016_143407_345095",
+      "rb_servo_test/jb2_gui/out/20261016_152549_182162"
+    ],
+    "hash": "30ce1e16e2efb0126f9fc9b1ce40192c598580009bbd0abd340d3e16d875f4b8"
+  },
+  {
+    "config": {
+      "accel": 20.0,
+      "alpha": 0.5,
+      "base": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "basis": "max_joint",
+      "blend": 0.0,
+      "end": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "gain": 0.1,
+      "hz": 100.0,
+      "ip": "10.0.2.7",
+      "method": "jb2",
+      "mode": "simulation",
+      "segments": 4,
+      "servo_period_ms": 10.0,
+      "servo_t2": 0.1,
+      "speed": 10.0,
+      "speed_bar": 1.0,
+      "via": [
+        [
+          20.0,
+          20.0,
+          20.0,
+          20.0,
+          20.0,
+          20.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          30.0,
+          30.0,
+          30.0,
+          30.0,
+          30.0,
+          30.0
+        ]
+      ]
+    },
+    "paths": [
+      "rb_servo_test/jb2_gui/out/20261016_143428_733207",
+      "rb_servo_test/jb2_gui/out/20261016_152212_970048"
+    ],
+    "hash": "30ce1e16e2efb0126f9fc9b1ce40192c598580009bbd0abd340d3e16d875f4b8"
+  },
+  {
+    "config": {
+      "accel": 20.0,
+      "alpha": 0.5,
+      "base": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "basis": "max_joint",
+      "blend": 50.0,
+      "end": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "gain": 0.1,
+      "hz": 100.0,
+      "ip": "10.0.2.7",
+      "method": "jb2",
+      "mode": "simulation",
+      "segments": 2,
+      "servo_period_ms": 10.0,
+      "servo_t2": 0.1,
+      "speed": 10.0,
+      "speed_bar": 1.0,
+      "via": [
+        [
+          20.0,
+          20.0,
+          20.0,
+          20.0,
+          20.0,
+          20.0
+        ]
+      ]
+    },
+    "paths": [
+      "rb_servo_test/jb2_gui/out/20261016_145835_670118",
+      "rb_servo_test/jb2_gui/out/20261016_145905_287472",
+      "rb_servo_test/jb2_gui/out/20261016_150045_619540"
+    ],
+    "hash": "6a90e993cb9b662de52d947cae1da8e7a7831aab0c8f5af6f8fb9f3a456b490c"
+  },
+  {
+    "config": {
+      "accel": 20.0,
+      "alpha": 0.5,
+      "base": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "basis": "max_joint",
+      "blend": 50.0,
+      "end": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "gain": 0.1,
+      "hz": 100.0,
+      "ip": "10.0.2.7",
+      "method": "jb2",
+      "mode": "simulation",
+      "segments": 10,
+      "servo_period_ms": 10.0,
+      "servo_t2": 0.1,
+      "speed": 10.0,
+      "speed_bar": 1.0,
+      "via": [
+        [
+          20.0,
+          20.0,
+          20.0,
+          20.0,
+          20.0,
+          20.0
+        ]
+      ]
+    },
+    "paths": [
+      "rb_servo_test/jb2_gui/out/20261016_145849_171344",
+      "rb_servo_test/jb2_gui/out/20261016_145955_887025"
+    ],
+    "hash": "35a1c4a21f2c5bc676ad8c432be25a89b9e77c596be1f127dff084fc52951700"
+  },
+  {
+    "config": {
+      "accel": 20.0,
+      "alpha": 0.5,
+      "base": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "basis": "max_joint",
+      "blend": 0.0,
+      "end": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "gain": 0.1,
+      "hz": 100.0,
+      "ip": "10.0.2.7",
+      "method": "jb2",
+      "mode": "simulation",
+      "segments": 2,
+      "servo_period_ms": 10.0,
+      "servo_t2": 0.1,
+      "speed": 10.0,
+      "speed_bar": 1.0,
+      "via": [
+        [
+          20.0,
+          20.0,
+          20.0,
+          20.0,
+          20.0,
+          20.0
+        ]
+      ]
+    },
+    "paths": [
+      "rb_servo_test/jb2_gui/out/20261016_145917_377118",
+      "rb_servo_test/jb2_gui/out/20261016_150057_228317"
+    ],
+    "hash": "6a90e993cb9b662de52d947cae1da8e7a7831aab0c8f5af6f8fb9f3a456b490c"
+  }
+]

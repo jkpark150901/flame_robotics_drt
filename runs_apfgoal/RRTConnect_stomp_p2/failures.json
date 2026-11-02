@@ -1,0 +1,101 @@
+{
+  "n_total": 18,
+  "n_success": 16,
+  "n_failed": 2,
+  "by_category": {
+    "ik_failure": 2
+  },
+  "unreached_groups": [],
+  "failures": [
+    {
+      "index": 8,
+      "group_name": "Point 3 - Inspection pose 2",
+      "robot_name": "dda_rb10_1300e",
+      "pose_name": "DDA",
+      "status": "failed",
+      "status_kind": "failed",
+      "category": "ik_failure",
+      "message": "ik_fallback",
+      "n_waypoints": 11,
+      "has_path": true,
+      "elapsed": 35.5661850720644,
+      "positioner_r_deg": 270.0,
+      "planner_stats": {
+        "state_validity_calls": 1375,
+        "collision_rejects": 395,
+        "workspace_rejects": 0,
+        "solve_time": 19.91451357700862,
+        "algorithm": "RRTConnect",
+        "max_iter": 16000,
+        "iterations": 1375,
+        "timeout_sec": 299.9647225169465,
+        "iteration_ptc_error": null,
+        "path_cost": 0.9180057494938889
+      },
+      "ik_failure": {
+        "reason": "preset_goal_pose_mismatch",
+        "position_error": 0.008954723102909625,
+        "orientation_error": 0.0020522273155103654
+      },
+      "n_colliding_edges": 0,
+      "colliding_edges": [],
+      "goal_q": [
+        0.7446500078885359,
+        0.6937127954289233,
+        1.6855195587788185,
+        2.117675898291271,
+        -2.8311890537560918,
+        2.216664402127452,
+        -1.0499472381953496,
+        0.1341432061812786
+      ],
+      "ik_goal_q": null,
+      "diag": null
+    },
+    {
+      "index": 12,
+      "group_name": "Point 2 - Inspection pose 2",
+      "robot_name": "dda_rb10_1300e",
+      "pose_name": "DDA",
+      "status": "failed",
+      "status_kind": "failed",
+      "category": "ik_failure",
+      "message": "ik_fallback",
+      "n_waypoints": 11,
+      "has_path": true,
+      "elapsed": 26.63036077306606,
+      "positioner_r_deg": 270.0,
+      "planner_stats": {
+        "state_validity_calls": 169,
+        "collision_rejects": 33,
+        "workspace_rejects": 0,
+        "solve_time": 3.5730833602137864,
+        "algorithm": "RRTConnect",
+        "max_iter": 16000,
+        "iterations": 169,
+        "timeout_sec": 299.9692985098809,
+        "iteration_ptc_error": null,
+        "path_cost": 0.9518054859939867
+      },
+      "ik_failure": {
+        "reason": "preset_goal_pose_mismatch",
+        "position_error": 0.009742027709988981,
+        "orientation_error": 0.0022502112315078635
+      },
+      "n_colliding_edges": 0,
+      "colliding_edges": [],
+      "goal_q": [
+        0.3827315019923066,
+        0.6953910281988854,
+        1.7176882182437212,
+        2.089467606414159,
+        -2.8677629357166956,
+        2.262938522010369,
+        -1.0523696318105644,
+        0.1713228558465058
+      ],
+      "ik_goal_q": null,
+      "diag": null
+    }
+  ]
+}

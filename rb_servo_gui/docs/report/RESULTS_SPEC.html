@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>결과 데이터 명세서 (결과 CSV · 원본 궤적 CSV)</title>
+<style>
+/* A4 문서 레이아웃: 화면에서는 A4 폭의 종이처럼, 인쇄/PDF 에서는 A4 쪽 단위로 나뉜다 */
+@page { size: A4; margin: 16mm 15mm 16mm 15mm;
+        @bottom-center { content: counter(page) " / " counter(pages); font-size: 8pt; color: #59636e; } }
+:root { --fg:#1f2328; --muted:#59636e; --line:#c9d1d9; --soft:#f4f6f8; --accent:#0b5cad; }
+* { box-sizing: border-box; }
+html { background: #d9dde3; }
+body { margin: 0; color: var(--fg);
+       font-family: "Noto Sans KR", "Noto Sans CJK KR", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+       font-size: 10pt; line-height: 1.55; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+main { width: 210mm; min-height: 297mm; margin: 12mm auto; padding: 16mm 15mm; background: #fff; box-shadow: 0 1px 6px rgba(0,0,0,.25); }
+h1 { font-size: 18pt; line-height: 1.3; border-bottom: 2px solid var(--fg); padding-bottom: 3mm; margin: 0 0 4mm; }
+h2 { font-size: 14pt; border-bottom: 1px solid var(--line); padding-bottom: 1.5mm; margin: 9mm 0 3mm; }
+h3 { font-size: 11.5pt; margin: 6mm 0 2mm; }
+h4 { font-size: 10.5pt; margin: 4mm 0 1.5mm; }
+h2, h3, h4, p:has(> strong:first-child) { break-after: avoid; }
+p, ul, ol, pre { margin: 1.6mm 0; }
+ul, ol { padding-left: 5.5mm; }
+li { margin: .4mm 0; }
+li > ul, li > ol { margin: .4mm 0; }
+a { color: var(--accent); text-decoration: none; }
+code { font-family: "D2Coding", "Consolas", "Noto Sans Mono CJK KR", monospace; font-size: .88em;
+       background: var(--soft); padding: 0 .3em; border-radius: 3px; }
+pre { background: var(--soft); border: 1px solid var(--line); border-radius: 3px; padding: 2.5mm 3mm;
+      white-space: pre-wrap; word-break: break-all; line-height: 1.35; break-inside: avoid; }
+pre code { background: none; padding: 0; font-size: 7.6pt; }
+.tbl { margin: 2mm 0; }
+table { border-collapse: collapse; width: 100%; font-size: 8.2pt; line-height: 1.35; }
+th, td { border: 1px solid var(--line); padding: 1mm 1.6mm; vertical-align: top; word-break: keep-all; overflow-wrap: break-word; }
+th { background: var(--soft); font-weight: 600; text-align: left; }
+thead { display: table-header-group; }
+tr { break-inside: avoid; }
+td code, th code { font-size: .92em; }
+figure { margin: 2.5mm 0; break-inside: avoid; text-align: center; }
+figure img { max-width: 100%; max-height: 215mm; height: auto; border: 1px solid #e3e7eb; }
+figure.formula { text-align: left; margin: 1.5mm 0 1.5mm 3mm; }
+figure.formula img { border: none; height: 9mm; max-width: 100%; object-fit: contain; object-position: left; }
+figcaption { color: var(--muted); font-size: 8pt; margin-top: .8mm; }
+hr { display: none; }
+nav.toc { background: var(--soft); border: 1px solid var(--line); border-radius: 3px; padding: 1mm 5mm; }
+nav.toc ul { margin: .6mm 0; }
+@media print {
+  html { background: none; }
+  main { width: auto; min-height: 0; margin: 0; padding: 0; box-shadow: none; }
+  h2 { break-before: page; margin-top: 0; }
+  h2.nobreak { break-before: auto; margin-top: 6mm; }
+}
+</style>
+</head>
+<body>
+<main>
+<h1>결과 데이터 명세서 (결과 CSV · 원본 궤적 CSV)</h1>
+<ul><li>대상 보고서: 「RB 협동로봇 외부 스크립트 기반 궤적 추종 성능 평가 보고서」</li><li>수록 범위: 보고서 표의 원본 수치 (<code>results/</code>, CSV 7개), 실험에 쓴 궤적 (<code>trajectories/</code>, CSV 6개). 원시 측정 데이터는 미수록</li><li>로봇: rb20_1900es (RT), 실험일 2026-10-08, 비교 대상 24회 (jb2 blend 0 / 50 / 100, servo × 궤적 A·B·C × 시뮬레이션·실기)</li><li>형식: 구분자 쉼표. <code>results/</code> 는 UTF-8 (BOM 포함, 엑셀에서 바로 열림), <code>trajectories/</code> 는 UTF-8</li></ul>
+<p><strong><code>results/</code></strong></p>
+<div class="tbl"><table><thead><tr><th>파일</th><th>내용</th><th>보고서 위치</th></tr></thead><tbody><tr><td><code>runs_index.csv</code></td><td>실행 목록과 명령 파라미터</td><td>3.1절</td></tr><tr><td><code>run_metrics.csv</code></td><td>실행별 지표와 판정</td><td>3.3 ~ 3.4절</td></tr><tr><td><code>method_summary.csv</code></td><td>방식별 요약</td><td>3.5절</td></tr><tr><td><code>link_displacement_rb20.csv</code></td><td>궤적·방식·모드별 링크 변위</td><td>3.7절</td></tr><tr><td><code>sim_real_pairs.csv</code></td><td>시뮬레이션 대 실기</td><td>3.6절</td></tr><tr><td><code>trajectory_chord_error.csv</code></td><td>궤적별 지령 간격 현 오차</td><td>1.3절</td></tr><tr><td><code>joint_sensitivity_rb20.csv</code></td><td>관절별 1° 당 표면 변위</td><td>3.7절</td></tr></tbody></table></div>
+<p><strong><code>trajectories/</code></strong></p>
+<div class="tbl"><table><thead><tr><th>파일</th><th>내용</th><th>보고서 위치</th></tr></thead><tbody><tr><td><code>waypoints_sample.csv</code>, <code>waypoints_robot1.csv</code>, <code>waypoints_robot2.csv</code></td><td>궤적 A / B / C 의 입력 웨이포인트 (경로 계획기 출력)</td><td>1.2절, 3.1절</td></tr><tr><td><code>reference_A_50Hz.csv</code>, <code>reference_B_50Hz.csv</code>, <code>reference_C_50Hz.csv</code></td><td>입력 웨이포인트를 내삽한 원본 궤적 (평가 기준)</td><td>1.2 ~ 1.3절</td></tr></tbody></table></div>
+<h2>0. 공통 정의</h2>
+<ul><li>궤적: A <code>waypoints_sample</code> (14.67 s), B <code>waypoints_robot1</code> (8.16 s), C <code>waypoints_robot2</code> (5.78 s)</li><li>방식: jb2 = <code>move_jb2_add(J, 50, 120, 0, blend)</code> (blend 0 / 50 / 100), servo = <code>move_servo_j(J, 0.2, 0.2, 1, 1)</code> 0.2 s 주기, 마지막 점 30회 반복</li><li>궤적 추종 오차 <code>d_i</code>: 측정 관절각과 DTW 로 짝지은 원본 경로 위 점의 6관절 L2 거리 [deg]</li><li>표면 편차 (최악 점 변위) <code>D_i</code>: 측정 자세와 짝지은 원본 자세를 rb20_1900es_RT URDF 로 배치했을 때 같은 메시 점끼리 거리의 최댓값 [mm], 추종 구간의 매칭쌍 전체로 계산</li><li>통계: <code>_mean</code> 평균, <code>_p95</code> 95 백분위수, <code>_max</code> 최댓값 (모두 추종 구간 전체에 대한 값)</li><li>판정 (<code>verdict</code>): 속도 리플을 제외한 8개 항목 (추종 오차 p95 ≤ 1°, 최대 ≤ 2°, 커버리지 ≤ 2°, 진행도 ≥ 0.99, 샘플 간 이동 ≤ 5°, 시작/종료 각 오차 ≤ 0.5°, 흔들림 ≤ 0.3°, 정체 ≤ 2 %)</li></ul>
+<h2>1. 파일별 명세</h2>
+<h3>1.1 <code>runs_index.csv</code> — 실행 목록</h3>
+<div class="tbl"><table><thead><tr><th>열</th><th>내용</th></tr></thead><tbody><tr><td><code>run</code></td><td>실행 폴더 이름</td></tr><tr><td><code>role</code></td><td><code>비교 대상</code> 또는 <code>보조: &lt;용도&gt;</code></td></tr><tr><td><code>method_group</code></td><td><code>jb2 blend 0</code> / <code>jb2 blend 50</code> / <code>jb2 blend 100</code> / <code>servo</code></td></tr><tr><td><code>trajectory</code>, <code>trajectory_file</code></td><td>A / B / C, 입력 파일</td></tr><tr><td><code>mode</code></td><td>시뮬레이션 / 실기</td></tr><tr><td><code>command</code></td><td><code>move_jb2_add</code> / <code>move_servo_j</code></td></tr><tr><td><code>speed</code>, <code>accel</code>, <code>blend</code></td><td>jb2 파라미터 [deg/s, deg/s², %]</td></tr><tr><td><code>t1</code>, <code>t2</code>, <code>gain</code>, <code>alpha</code>, <code>final_hold</code></td><td>servo 파라미터 [s, s, -, -, 회]</td></tr><tr><td><code>subsample_step</code></td><td>서브샘플링 비율</td></tr></tbody></table></div>
+<h3>1.2 <code>run_metrics.csv</code> — 실행별 지표 (비교 대상 24회)</h3>
+<div class="tbl"><table><thead><tr><th>열</th><th>단위</th><th>내용</th></tr></thead><tbody><tr><td><code>run</code>, <code>method_group</code>, <code>trajectory</code>, <code>mode</code></td><td>-</td><td>실행 식별</td></tr><tr><td><code>t_track</code></td><td>s</td><td>추종 시간 (참고)</td></tr><tr><td><code>path_dev_mean</code>, <code>path_dev_p95</code>, <code>path_dev_max</code></td><td>deg</td><td>궤적 추종 오차</td></tr><tr><td><code>cover_max</code>, <code>progress_max</code>, <code>max_step</code></td><td>deg, 0 ~ 1, deg</td><td>커버리지 최대, 진행도, 샘플 간 최대 이동</td></tr><tr><td><code>start_err</code>, <code>end_err</code></td><td>deg</td><td>시작 / 종료 각 오차</td></tr><tr><td><code>smooth_ripple</code>, <code>smooth_wobble</code>, <code>smooth_stall</code></td><td>비율, deg, 비율</td><td>속도 리플(참고), 횡방향 흔들림, 정체 비율</td></tr><tr><td><code>t_latency</code></td><td>s</td><td>지령 → 모션 시작</td></tr><tr><td><code>surf_disp_mean</code>, <code>surf_disp_p95</code>, <code>surf_disp_max</code></td><td>mm</td><td>최악 점 변위 <code>D_i</code> 의 추종 구간 평균, 95 백분위수, 최댓값 (rb20)</td></tr><tr><td><code>surf_chamfer_max</code>, <code>surf_hausdorff_max</code></td><td>mm</td><td>Chamfer, Hausdorff 의 추종 구간 최댓값</td></tr><tr><td><code>surf_worst_link</code></td><td>-</td><td>추종 구간 중 최대 변위가 나온 링크</td></tr><tr><td><code>verdict</code>, <code>failed_items</code></td><td>-</td><td><strong>보고서 판정</strong> (리플 제외 8개 항목), 불합격 항목</td></tr></tbody></table></div>
+<h3>1.3 <code>method_summary.csv</code> — 방식별 요약 (보고서 3.5절 종합 표)</h3>
+<ul><li>행: <code>jb2 blend 0</code>, <code>jb2 blend 50</code>, <code>servo</code>, <code>jb2 blend 100</code> (각 6회)</li><li>열: <code>n_runs</code>, 그리고 <code>path_dev_p95</code>, <code>path_dev_max</code>, <code>smooth_ripple</code>, <code>smooth_wobble</code>, <code>surf_disp_mean</code>, <code>surf_disp_p95</code>, <code>surf_disp_max</code> 각각의 <code>_median</code>, <code>_min</code>, <code>_max</code></li></ul>
+<h3>1.4 <code>sim_real_pairs.csv</code> — 시뮬레이션 대 실기 (보고서 3.6절)</h3>
+<div class="tbl"><table><thead><tr><th>열</th><th>단위</th><th>내용</th></tr></thead><tbody><tr><td><code>method_group</code>, <code>trajectory</code></td><td>-</td><td>조건</td></tr><tr><td><code>sim_run</code>, <code>real_run</code></td><td>-</td><td>짝지은 실행</td></tr><tr><td><code>path_dist_p95_deg</code>, <code>path_dist_max_deg</code></td><td>deg</td><td>실기 측정 경로의 각 점에서 시뮬레이션 측정 경로까지 거리 (시간 무관)</td></tr><tr><td><code>sim_path_dev_p95</code>, <code>real_path_dev_p95</code></td><td>deg</td><td>각각의 궤적 추종 오차 p95</td></tr><tr><td><code>sim_surf_disp_p95</code>, <code>real_surf_disp_p95</code></td><td>mm</td><td>각각의 표면 변위 p95</td></tr></tbody></table></div>
+<h3>1.5 <code>trajectory_chord_error.csv</code> — 지령 간격에 따른 현 오차 (보고서 1.3절)</h3>
+<div class="tbl"><table><thead><tr><th>열</th><th>단위</th><th>내용</th></tr></thead><tbody><tr><td><code>trajectory</code>, <code>file</code></td><td>-</td><td>궤적</td></tr><tr><td><code>duration_s</code></td><td>s</td><td>원본 길이</td></tr><tr><td><code>n_ref_points_50Hz</code>, <code>n_command_points</code></td><td>개</td><td>원본 점 수, 지령점 수</td></tr><tr><td><code>path_length_deg</code></td><td>deg</td><td>경로 길이 (6관절 L2 호길이)</td></tr><tr><td><code>chord_err_p95_deg</code>, <code>chord_err_max_deg</code></td><td>deg</td><td>원본 각 점에서 지령 꺾은선까지 거리의 95 백분위수, 최댓값</td></tr></tbody></table></div>
+<h3>1.6 <code>joint_sensitivity_rb20.csv</code> — 관절별 1° 감도 (보고서 3.7절)</h3>
+<div class="tbl"><table><thead><tr><th>열</th><th>단위</th><th>내용</th></tr></thead><tbody><tr><td><code>joint</code></td><td>-</td><td>J1 ~ J6</td></tr><tr><td><code>surface_disp_max_mm_per_1deg</code></td><td>mm</td><td>해당 관절만 1° 돌렸을 때 최악 점 변위 (궤적 A 시작 자세 기준)</td></tr></tbody></table></div>
+<h3>1.7 <code>link_displacement_rb20.csv</code> — 궤적별 링크 변위 (보고서 3.7절)</h3>
+<ul><li>행 = 실행 1개 × 링크 1개 (24 × 7 = 168행)</li><li>링크마다 "그 순간 해당 링크의 최악 점 변위" 시계열을 매칭쌍 전체로 구해 요약</li></ul>
+<div class="tbl"><table><thead><tr><th>열</th><th>단위</th><th>내용</th></tr></thead><tbody><tr><td><code>trajectory</code>, <code>method_group</code>, <code>mode</code>, <code>run</code></td><td>-</td><td>실행 식별</td></tr><tr><td><code>link</code></td><td>-</td><td><code>link1</code> ~ <code>link6</code>, <code>link_end</code> (URDF 의 <code>rt_link1</code> ~ <code>rt_link_end</code>, 베이스 제외)</td></tr><tr><td><code>disp_max_mm</code></td><td>mm</td><td>추종 구간 중 해당 링크 변위의 최댓값</td></tr><tr><td><code>disp_p95_mm</code></td><td>mm</td><td>95 백분위수 (추종 시간의 95 % 는 이 값 이하)</td></tr><tr><td><code>disp_mean_mm</code></td><td>mm</td><td>평균</td></tr></tbody></table></div>
+<hr>
+<h2>2. 궤적 파일 명세 (<code>trajectories/</code>)</h2>
+<h3>2.1 입력 웨이포인트 <code>waypoints_*.csv</code></h3>
+<div class="tbl"><table><thead><tr><th>파일</th><th>궤적</th><th>열</th><th>단위</th><th>비고</th></tr></thead><tbody><tr><td><code>waypoints_sample.csv</code></td><td>A</td><td><code>waypoint, rt_joint_linear_track, rt_joint_carriage, rt_base, rt_shoulder, rt_elbow, rt_wrist1, rt_wrist2, rt_wrist3</code></td><td>rad (팔 6관절)</td><td>앞 2열(외부축: 리니어 트랙, 캐리지)은 사용하지 않음</td></tr><tr><td><code>waypoints_robot1.csv</code></td><td>B</td><td><code>Order, J1_rad .. J6_rad, Speed, Acceleration</code></td><td>rad</td><td><code>Speed</code>, <code>Acceleration</code> 열은 사용하지 않음</td></tr><tr><td><code>waypoints_robot2.csv</code></td><td>C</td><td><code>Order, J1_rad .. J6_rad, Speed, Acceleration</code></td><td>rad</td><td>위와 같음</td></tr></tbody></table></div>
+<ul><li>행 = 웨이포인트 1개, 시간 정보 없음 (순서만 의미)</li></ul>
+<h3>2.2 원본 궤적 <code>reference_*_50Hz.csv</code></h3>
+<ul><li>생성: 연속 중복 웨이포인트 제거 → 구간 시간 부여 (최대 이동 관절 기준 20 deg/s, 하한 0.2 s) → 3차 스플라인 (시작·끝 속도 0) → 50 Hz 샘플링</li><li>같은 궤적을 쓴 모든 실행에서 동일 (실행 폴더의 <code>traj_ref.csv</code> 와 같은 내용)</li><li>로봇 지령점은 이 파일의 10번째 점마다 (0.2 s 간격, 마지막 점 포함)</li></ul>
+<div class="tbl"><table><thead><tr><th>열</th><th>단위</th><th>내용</th></tr></thead><tbody><tr><td><code>t</code></td><td>s</td><td>원본 시간 (0 시작, 0.02 s 간격)</td></tr><tr><td><code>j0</code> ~ <code>j5</code></td><td><strong>rad</strong></td><td>관절각 J1(base) ~ J6(wrist3)</td></tr></tbody></table></div>
+<div class="tbl"><table><thead><tr><th>파일</th><th>길이</th><th>점 수</th></tr></thead><tbody><tr><td><code>reference_A_50Hz.csv</code></td><td>14.67 s</td><td>735</td></tr><tr><td><code>reference_B_50Hz.csv</code></td><td>8.16 s</td><td>410</td></tr><tr><td><code>reference_C_50Hz.csv</code></td><td>5.78 s</td><td>291</td></tr></tbody></table></div>
+<h2>3. 주의사항</h2>
+<ul><li>시뮬레이션 측정각은 제어기 지령 추종값 <code>jnt_ref</code>, 실기는 관절 엔코더 <code>jnt_ang</code> → 링크 처짐, 백래시, 공구 끝 위치 미포함</li><li>표면 편차는 URDF 와 실제 로봇이 같다는 가정에 기반 (일치 여부 미확인), 공구·케이블 미포함</li><li>각도 단위: 궤적 파일은 rad, 결과 CSV 는 deg</li><li><code>runs_index.csv</code> 의 보조 실행 2개는 보고서 설명 그림용이며 다른 표에는 포함되지 않음</li></ul>
+</main>
+</body>
+</html>

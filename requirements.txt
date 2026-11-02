@@ -26,3 +26,18 @@ pybullet
 
 urdf-parser-py
 ompl
+
+# QP IK backend (plugins/robotics/pinocchio_backend.py). If an unrelated `pink`
+# is installed: pip uninstall -y pink; pip install pin-pink qpsolvers quadprog
+pin-pink
+qpsolvers
+quadprog
+
+# Reinforcement learning (SAC on the path-planning metrics). GPU build of torch:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu126
+torch
+stable-baselines3
+gymnasium
+tensorboard
+tqdm
+rich

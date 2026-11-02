@@ -1,0 +1,19 @@
+{
+  "created": "2026-10-30T17:32:14",
+  "n_total": 18,
+  "n_success": 15,
+  "n_failed": 3,
+  "unreached_groups": [],
+  "planner": "RRTConnect+SAC (aug_train)",
+  "planner_options": {
+    "step_size": 0.1,
+    "planning_timeout": 300.0
+  },
+  "source": "rl/export_playback.py",
+  "snapshot": "/home/dev/flame_robotics_drt/sample/planning_snapshot_p2_3.pkl",
+  "initial_positioner_r_deg": 90.0,
+  "positioner_second_group_r_deg": 180.0,
+  "scene_snapshot": "scene_snapshot.pkl",
+  "sac_eval": "debug/rl/dda_residual_aug/eval_train.json",
+  "sac_targets_replaced": 7
+}

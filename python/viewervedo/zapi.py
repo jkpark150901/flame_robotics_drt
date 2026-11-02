@@ -729,6 +729,47 @@ class ZAPI(ZAPIBase):
         else:
             self.push_to_queue(request_payload)
 
+    def zapi_show_spool_collision_mesh(self, kwargs=None):
+        payload = {"command": "show_spool_collision_mesh", "show": bool((kwargs or {}).get("show", False))}
+        if self._visualizer:
+            self._visualizer.push_request(payload)
+        else:
+            self.push_to_queue(payload)
+
+    def zapi_show_rejected_ef_candidates(self, kwargs=None):
+        kwargs = kwargs or {}
+        payload = {"command": "show_rejected_ef_candidates", "show": bool(kwargs.get("show", True))}
+        if self._visualizer:
+            self._visualizer.push_request(payload)
+        else:
+            self.push_to_queue(payload)
+
+    def zapi_show_saved_ik_goals(self, kwargs=None):
+        """스냅샷에 저장된 IK 목표 자세(ik_goal_q) 표시 on/off."""
+        kwargs = kwargs or {}
+        request_payload = {"command": "show_saved_ik_goals", "show": bool(kwargs.get("show", True)),
+                           "_identity": kwargs.get("_identity")}
+        if self._visualizer:
+            self._visualizer.push_request(request_payload)
+        else:
+            self.push_to_queue(request_payload)
+
+    def zapi_load_planning_snapshot(self, kwargs=None):
+        """Handle load_planning_snapshot request (저장된 snapshot으로 배관/positioner/로봇/EF pose를 복원)."""
+        self.__console.info(f"Received zapi_load_planning_snapshot with kwargs: {kwargs}")
+        if not kwargs or "path" not in kwargs:
+            self.__console.warning("[ZAPI_VIEWERVEDO] load_planning_snapshot without path")
+            return
+        request_payload = {
+            "command": "load_planning_snapshot",
+            "path": kwargs.get("path"),
+            "_identity": kwargs.get("_identity"),
+        }
+        if self._visualizer:
+            self._visualizer.push_request(request_payload)
+        else:
+            self.push_to_queue(request_payload)
+
     def reply_planning_snapshot(self, result: dict, identity=None):
         """Send save_planning_snapshot outcome back to SimTool."""
         if self.__router_socket and self.__router_socket.is_joined and identity:
@@ -796,12 +837,13 @@ class ZAPI(ZAPIBase):
             "fixed_joint_values": kwargs.get("fixed_joint_values"),
             "context_label": kwargs.get("context_label"),
             "request_id": kwargs.get("request_id"),
-            "ik_solver": kwargs.get("ik_solver", "pybullet"),
+            "ik_solver": kwargs.get("ik_solver", "collision_free"),
             "ik_normalize": kwargs.get("ik_normalize", False),
             "optimizer": kwargs.get("optimizer"),
             "optimize_path": kwargs.get("optimize_path", bool(kwargs.get("optimizer"))),
             "obstacle_rotation_T": kwargs.get("obstacle_rotation_T"),
             "lock_linear_track": kwargs.get("lock_linear_track", False),
+            "preset_goal_q": kwargs.get("preset_goal_q"),
             "_identity": kwargs.get("_identity"),
         }
         if kwargs.get("planning_timeout") is not None:
@@ -907,7 +949,7 @@ class ZAPI(ZAPIBase):
             "step_size": (kwargs or {}).get("step_size", 0.08),
             "max_iter": (kwargs or {}).get("max_iter", 3000),
             "max_workers": (kwargs or {}).get("max_workers", 2),
-            "ik_solver": (kwargs or {}).get("ik_solver", "pybullet"),
+            "ik_solver": (kwargs or {}).get("ik_solver", "collision_free"),
             "ik_normalize": (kwargs or {}).get("ik_normalize", False),
             "_identity": (kwargs or {}).get("_identity"),
         }
@@ -995,6 +1037,25 @@ class ZAPI(ZAPIBase):
             self._visualizer.push_request(request_payload)
         else:
             self.push_to_queue(request_payload)
+
+    def zapi_cancel_planning(self, kwargs=None):
+        """Abort the planning requests running in Robot Core."""
+        self.__console.info("Received zapi_cancel_planning")
+        if self._visualizer:
+            self._visualizer.push_request({"command": "cancel_planning",
+                                           "_identity": (kwargs or {}).get("_identity") if kwargs else None})
+
+    def zapi_show_plan_sequence(self, kwargs=None):
+        """Draw a plan sequence's goal frames and end-effector trajectories (loaded plan result)."""
+        self.__console.info(f"Received zapi_show_plan_sequence: {len((kwargs or {}).get('plan_sequence') or [])} group(s)")
+        request_payload = {
+            "command": "show_plan_sequence",
+            "plan_sequence": (kwargs or {}).get("plan_sequence"),
+            "playback_initial_r_deg": (kwargs or {}).get("playback_initial_r_deg"),
+            "_identity": (kwargs or {}).get("_identity") if kwargs else None,
+        }
+        if self._visualizer:
+            self._visualizer.push_request(request_payload)
 
     def zapi_execute_inspection_path(self, kwargs=None):
         """Handle simulation playback request for the last planned EF path."""

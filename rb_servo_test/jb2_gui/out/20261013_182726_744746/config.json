@@ -1,0 +1,47 @@
+{
+  "ip": "10.0.2.7",
+  "base": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "end": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "segments": 100,
+  "mode": "simulation",
+  "method": "servo",
+  "basis": "max_joint",
+  "blend": 50.0,
+  "gain": 0.1,
+  "alpha": 0.5,
+  "speed": 10.0,
+  "accel": 20.0,
+  "hz": 100.0,
+  "window": 0.1,
+  "timeout": 120.0,
+  "servo_period_ms": 10.0,
+  "servo_t2": 0.1,
+  "via": [
+    [
+      10.0,
+      20.0,
+      30.0,
+      40.0,
+      50.0,
+      60.0
+    ]
+  ],
+  "speed_bar": 1.0,
+  "via_sample_indices": [
+    50
+  ]
+}

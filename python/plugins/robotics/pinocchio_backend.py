@@ -5,7 +5,7 @@ import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 import open3d as o3d
@@ -34,6 +34,13 @@ from plugins.robotics.backend import (
     RoboticsBackend,
 )
 from plugins.robotics.hppfcl_compat import build_bvh_model
+
+try:
+    from plugins.robotics.pybullet_scene import PyBulletRobotScene
+except Exception:  # pragma: no cover - pybullet missing
+    PyBulletRobotScene = None
+
+
 @dataclass
 class PinocchioRobotHandle:
     description: RobotDescription
@@ -49,6 +56,14 @@ class PinocchioRobotHandle:
     # mesh_key(id 기반) 캐시 비교가 안전하려면 이전에 configure_collision에 넘겨졌던
     # mesh 객체들이 다음 호출 전까지 GC되지 않도록 여기서 강하게 붙잡아 둬야 한다.
     _configured_meshes: Any = None
+    # PyBullet mesh-based collision scene (see pybullet_scene.py) - the collision engine used for planning/verification/metrics
+    pb_scene: Any = None
+    # precomputed signed-distance field of the static scene for the APF cost (see plugins/optimizer/sdf_field.py)
+    sdf_field: Any = None
+    _sdf_mesh_key: Any = None
+    _sdf_parameters: Any = None
+    _distance_field_pipe_points: Any = None
+    _distance_field_pipe_mesh: Any = None
 
 
 def damped_least_squares_step(
@@ -131,11 +146,60 @@ class PinocchioRoboticsBackend(RoboticsBackend):
     """RoboticsBackend implementation using Pinocchio and hpp-fcl/coal."""
 
     name = "pinocchio"
+    # "pybullet": every collision/clearance query goes through the PyBullet mesh scene (same engine as pose determination);
+    # "hppfcl": legacy Pinocchio/FCL. Override with FLAME_COLLISION_ENGINE. Falls back to hppfcl if pybullet is missing.
+    collision_engine = os.environ.get("FLAME_COLLISION_ENGINE", "pybullet").lower()
 
     def __init__(self):
         if pin is None:
             raise RuntimeError("pinocchio is not available")
         self._robots: Dict[str, PinocchioRobotHandle] = {}
+        self._cspace = None   # (box_min, box_max, margin) in world, see set_cspace_bounds
+        self._cspace_frames: Dict[str, List[Tuple[str, int]]] = {}
+
+    # -- C-space containment -------------------------------------------------------------------------------------
+    _CSPACE_EXCLUDE = ("linear_track", "carriage", "slide", "link_base", "link0")
+
+    def set_cspace_bounds(self, box_min=None, box_max=None, margin: float = 0.0) -> None:
+        """Every robot's arm link frames and end effector must stay inside the world box [box_min, box_max] (shrunk by
+        margin): a configuration with any of them outside counts as a collision in check_collision() (pair
+        "<link>_0" <-> "c_space_bound"), so planning (state validity, start/goal, verification), collision-free IK and
+        the playback collision display all reject it. None turns the check off."""
+        if box_min is None or box_max is None:
+            self._cspace = None
+            return
+        m = float(margin or 0.0)
+        self._cspace = (np.asarray(box_min, dtype=float) + m, np.asarray(box_max, dtype=float) - m)
+        self._cspace_frames = {}
+
+    def _cspace_frame_ids(self, robot_name):
+        ids = self._cspace_frames.get(robot_name)
+        if ids is None:
+            model = self._handle(robot_name).model
+            ids = []
+            for i, f in enumerate(model.frames):
+                name = str(f.name)
+                if f.type != pin.FrameType.BODY or "link" not in name or any(t in name for t in self._CSPACE_EXCLUDE):
+                    continue
+                ids.append((name, i))
+            self._cspace_frames[robot_name] = ids
+        return ids
+
+    def cspace_violations(self, robot_name: str, q: Sequence[float]) -> List[Tuple[str, str]]:
+        """[("<link>_0", "c_space_bound")] for every monitored arm/end-effector frame outside the C-space box."""
+        if self._cspace is None:
+            return []
+        handle = self._handle(robot_name)
+        pin.forwardKinematics(handle.model, handle.data, np.asarray(q, dtype=float))
+        pin.updateFramePlacements(handle.model, handle.data)
+        base_T = np.asarray(handle.description.base_T, dtype=float)
+        lo, hi = self._cspace
+        out = []
+        for name, fid in self._cspace_frame_ids(robot_name):
+            p = base_T[:3, :3] @ np.asarray(handle.data.oMf[fid].translation) + base_T[:3, 3]
+            if np.any(p < lo) or np.any(p > hi):
+                out.append((f"{name}_0", "c_space_bound"))
+        return out
 
     def register_robot(self, description: RobotDescription) -> PinocchioRobotHandle:
         urdf_path = os.path.abspath(description.urdf_path)
@@ -256,6 +320,18 @@ class PinocchioRoboticsBackend(RoboticsBackend):
         lo, hi, _span = self.joint_limits_for_metric(robot_name, normalize=True)
         return np.random.uniform(lo, hi)
 
+    def create_pose_collision_checker(self, obstacle_meshes, obstacle_names, links):
+        """Use planning's URDF collision shapes for pose-only end-link checks."""
+        from plugins.robotics.pybullet_collision import PyBulletURDFLinkCollisionChecker
+        checker = PyBulletURDFLinkCollisionChecker(obstacle_meshes, obstacle_names)
+        try:
+            for robot_name, link_name, mesh in links:
+                checker.register_link(mesh, self._handle(robot_name).description.urdf_path, link_name)
+        except Exception:
+            checker.close()
+            raise
+        return checker
+
     def end_effector_collision_geometry(
         self,
         robot_name: str,
@@ -264,7 +340,8 @@ class PinocchioRoboticsBackend(RoboticsBackend):
         pose_to_link_offset=None,
     ):
         handle = self._handle(robot_name)
-        urdf = URDF.from_xml_file(handle.description.urdf_path)
+        with open(handle.description.urdf_path, "rb") as f:   # bytes: ROS 2's lxml-based parser rejects str + encoding decl.
+            urdf = URDF.from_xml_string(f.read())
         link = urdf.link_map[end_link_name]
         collision = getattr(link, "collision", None)
         if collision is None or collision.geometry is None:
@@ -364,6 +441,9 @@ class PinocchioRoboticsBackend(RoboticsBackend):
         frame_name: Optional[str] = None,
     ) -> IKResult:
         options = options or IKOptions()
+        if str(options.solver or "").lower() in ("collision_free", "collision_free_ik", "cf"):
+            from plugins.robotics.collision_free_ik import solve_collision_free_ik
+            return solve_collision_free_ik(self, robot_name, target_world_T, q_init, options, frame_name)
         handle = self._handle(robot_name)
         model = handle.model
         data = model.createData()
@@ -622,15 +702,45 @@ class PinocchioRoboticsBackend(RoboticsBackend):
         for mesh in static_meshes or []:
             self._add_static_mesh(handle, mesh, recreate_data=False)
         handle.geom_data = pin.GeometryData(handle.geom_model)
+        if self._use_pybullet():
+            self._configure_pybullet_scene(handle, static_meshes)
         handle._configured_mesh_key = mesh_key
         # mesh_key(id 기반) 비교가 다음 호출까지 안전하려면, 이 mesh들이 그 사이 GC되어
         # id가 재사용되지 않도록 handle이 직접 참조를 붙잡고 있어야 한다.
         handle._configured_meshes = list(static_meshes or [])
 
+    # -- PyBullet collision engine ----------------------------------------------------------------------------------
+    def _use_pybullet(self) -> bool:
+        return self.collision_engine == "pybullet" and PyBulletRobotScene is not None
+
+    def _configure_pybullet_scene(self, handle: PinocchioRobotHandle, static_meshes) -> None:
+        if handle.pb_scene is None:
+            pairs = []
+            base = handle.base_geom_model
+            for pair in base.collisionPairs:
+                pairs.append((base.geometryObjects[pair.first].name, base.geometryObjects[pair.second].name))
+            names = [str(handle.model.names[i]) for i in range(1, handle.model.njoints)]
+            handle.pb_scene = PyBulletRobotScene(handle.description.urdf_path, names, pairs)
+        handle.pb_scene.set_static_meshes(list(static_meshes or []))
+
+    def pybullet_scene(self, robot_name: str):
+        """The robot's PyBullet collision scene (None when the hppfcl engine is selected)."""
+        return self._handle(robot_name).pb_scene
+
     def check_collision(self, robot_name: str, q: Sequence[float], return_pairs: bool = False) -> CollisionResult:
         handle = self._handle(robot_name)
         self._require_collision(handle)
         q = np.asarray(q, dtype=float)
+        outside = self.cspace_violations(robot_name, q)
+        if outside:
+            pairs = list(outside)
+            if return_pairs and handle.pb_scene is not None:
+                pairs += list(handle.pb_scene.check(q) or [])
+            return CollisionResult(True, pairs=pairs if return_pairs else [], q=q.copy(), backend=self.name)
+        if handle.pb_scene is not None:
+            hits = handle.pb_scene.check(q) if return_pairs else None
+            collided = bool(hits) if return_pairs else handle.pb_scene.collides(q)
+            return CollisionResult(collided, pairs=list(hits or []), q=q.copy(), backend=self.name)
         has_collision = bool(
             pin.computeCollisions(
                 handle.model,
@@ -666,7 +776,45 @@ class PinocchioRoboticsBackend(RoboticsBackend):
                 return result
         return CollisionResult(False, backend=self.name)
 
-    def link_obstacle_distances(self, robot_name: str, q: Sequence[float]) -> List[Dict[str, Any]]:
+    def has_cached_scene_sdf(self, robot_name: str) -> bool:
+        """Whether distance queries can reuse a field for the current scene."""
+        handle = self._handle(robot_name)
+        key = tuple(id(m) for m in (handle._configured_meshes or []))
+        return handle.sdf_field is not None and handle._sdf_mesh_key == key
+
+    def link_obstacle_distances_sdf(self, robot_name: str, q: Sequence[float],
+                                    resolution: float = 0.03, cap: float = 0.35) -> List[Dict[str, Any]]:
+        """Same entries as link_obstacle_distances() but from the precomputed scene SDF (APF cost, optimizers).
+
+        The field is built once per obstacle-mesh set (new spool, positioner rotation -> new meshes -> rebuilt on the
+        next call); a query is FK + a trilinear lookup of the link surface samples. Distances are clipped to `cap`. Use
+        link_obstacle_distances() where exact values matter (verification, evaluation)."""
+        handle = self._handle(robot_name)
+        self._require_collision(handle)
+        meshes = list(handle._configured_meshes or [])
+        key = tuple(id(m) for m in meshes)
+        if (handle.sdf_field is None or handle._sdf_mesh_key != key
+                or handle._sdf_parameters is None
+                or handle._sdf_parameters[0] != float(resolution)
+                or handle._sdf_parameters[1] < float(cap)):
+            from plugins.optimizer.sdf_field import SceneDistanceField
+            t0 = time.perf_counter()
+            handle.sdf_field = SceneDistanceField(pin, handle.model, handle.description.urdf_path, meshes,
+                                                  resolution=resolution, cap=cap,
+                                                  pipe_points=(handle._distance_field_pipe_points
+                                                      if meshes and handle._distance_field_pipe_mesh is meshes[0]
+                                                      else None))
+            handle._sdf_mesh_key = key
+            handle._sdf_parameters = (float(resolution), float(cap))
+            print(f"APF scene field built: robot={robot_name}, pipe={handle.sdf_field.pipe_source}, obstacles={len(meshes)}, "
+                  f"grid={[s.shape for s in handle.sdf_field.sdfs]}, {time.perf_counter() - t0:.1f}s")
+        entries = handle.sdf_field.distances(q)
+        for entry in entries:
+            entry["distance"] = min(float(cap), entry["distance"])
+        return entries
+
+    def link_obstacle_distances(self, robot_name: str, q: Sequence[float],
+                                max_distance: Optional[float] = None) -> List[Dict[str, Any]]:
         """Minimum distance from every robot link to every static obstacle
         (pipe, positioner, ...) at configuration q - a clearance metric, not
         just a boolean collision check. Uses the same collision scene
@@ -687,6 +835,8 @@ class PinocchioRoboticsBackend(RoboticsBackend):
         handle = self._handle(robot_name)
         self._require_collision(handle)
         q = np.asarray(q, dtype=float)
+        if handle.pb_scene is not None:
+            return handle.pb_scene.distances(q) if max_distance is None else handle.pb_scene.distances(q, float(max_distance))
         try:
             # Don't rely on computeDistances(..., q)'s q-overload to update
             # geometry placements internally - in a live WSL run, querying
@@ -757,6 +907,8 @@ class PinocchioRoboticsBackend(RoboticsBackend):
         "dda_link_end_0")."""
         handle = self._handle(robot_name)
         self._require_collision(handle)
+        if handle.pb_scene is not None:
+            return handle.pb_scene.set_clearance(link_names, margin)
         margin = max(float(margin or 0.0), 0.0)
         names = [str(n) for n in (link_names or [])]
 

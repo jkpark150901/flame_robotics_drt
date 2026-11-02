@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import copy
+import logging
+import re
 import time
 
 import numpy as np
@@ -8,9 +10,11 @@ import numpy as np
 from util.logger.console import ConsoleLogger
 
 console = ConsoleLogger.get_logger()
+# matplotlib's colorbar/tick DEBUG lines (IK experiment plots) drown the planning log
+logging.getLogger("matplotlib").setLevel(logging.WARNING)
 
 
-def plan_single_target(engine, request):
+def _plan_single_target_impl(engine, request):
     """Plan one robot's q-space path from a given start_q to a given target_pose.
 
     Robot Core no longer knows about target groups, positioner rotation, or
@@ -115,6 +119,10 @@ def plan_single_target(engine, request):
                 "verification": dict(getattr(exc, "verification", None) or {}),
                 "edge_collisions": list((getattr(exc, "verification", None) or {}).get("edge_collisions", [])),
                 "collision_preview": True,
+                # collision-free IK goal of the failed target (None if there is none) - see InspectionSequencer
+                "goal_q": getattr(exc, "goal_q", None),
+                # the IK goal even when it collides (playback / visualization of the failed target)
+                "ik_goal_q": getattr(exc, "ik_goal_q", None),
             },
             # The colliding path itself, if the planner captured one before
             # discarding it (see where visualizer.py's "planning failed for
@@ -122,6 +130,7 @@ def plan_single_target(engine, request):
             # still be played back / inspected to see which waypoint or edge
             # actually collided, instead of only a status string.
             "q_path": list(getattr(exc, "q_path", None) or []),
+            "diag": {"ik": getattr(exc, "ik_multi_start", None), "timing": getattr(exc, "timing", None)},
         }
 
     q_path = plan.get("q_path") or []
@@ -163,8 +172,79 @@ def plan_single_target(engine, request):
         "verification": plan.get("verification") or {},
         "edge_collisions": plan.get("edge_collisions") or [],
         "collision_preview": bool(plan.get("collision_preview")),
+        "goal_q": (None if plan.get("goal_q") is None
+                   else np.asarray(plan.get("goal_q"), dtype=float).tolist()),
     }
+    if success:
+        try:
+            from plugins.robotics.path_metrics import planning_path_summary
+            result["path_metrics"] = planning_path_summary(engine, robot_name, q_path)
+        except Exception as exc:
+            result["path_metrics_error"] = f"{type(exc).__name__}: {exc}"
+            console.warning(f"plan_single_target: path metric summary failed for {robot_name}: {exc}")
     return {
         "result": result,
         "q_path": [np.asarray(q, dtype=float).tolist() for q in q_path],
+        "diag": {"ik": plan.get("ik_multi_start"), "timing": plan.get("timing"), "ik_result": plan.get("ik_result")},
     }
+
+
+def _format_result_summary(request, output):
+    """One readable line per target: outcome, failure category + reason, IK search, planner counters, timing."""
+    from plugins.robotics.plan_run_io import classify_failure
+
+    result = output.get("result") or {}
+    diag = output.get("diag") or {}
+    ok = result.get("status") == "success"
+    label = request.get("context_label") or request.get("robot_name")
+    parts = [f"[PLAN {'OK' if ok else 'FAIL'}] {label} ({request.get('robot_name')})"]
+    if request.get("positioner_r_deg") is not None:
+        parts.append(f"positioner_r={float(request['positioner_r_deg']):.0f}deg")
+    if not ok:
+        message = str(result.get("message") or "")
+        pairs = re.search(r"pairs=(\[\[.*?\]\])", message)
+        reason = re.sub(r"\(pairs=.*\)$", "", message).replace("planning failed for target: ", "")
+        category = classify_failure(result) or 'unknown'
+        parts.append(category if reason.strip() in (category, '') else f"{category}: {reason}")
+        if pairs:
+            parts.append("colliding pairs " + pairs.group(1).replace("'", "").replace("_0", ""))
+    parts.append(f"waypoints={len(output.get('q_path') or [])}")
+    ik = diag.get("ik")
+    if ik:
+        text = (f"IK seeds={ik.get('n_seeds')} converged={ik.get('n_converged')} "
+                f"collision_free={ik.get('n_collision_free')}")
+        if ik.get("n_side_ok") is not None:
+            text += f" own_side={ik.get('n_side_ok')}"
+        if ik.get("n_refined"):
+            text += f" refined={ik.get('n_refined_ok')}/{ik.get('n_refined')}"
+        if ik.get("chosen_clearance") is not None:
+            text += f" clearance={float(ik['chosen_clearance']) * 1000:.0f}mm"
+        parts.append(text)
+    elif (diag.get("ik_result") or {}).get("collision"):
+        parts.append("IK goal collides")
+    stats = result.get("planner_stats") or {}
+    if stats.get("iterations") is not None:
+        parts.append(f"planner iterations={stats.get('iterations')}/{stats.get('max_iter')} "
+                     f"solve={float(stats.get('solve_time') or 0.0):.1f}s")
+    timing = diag.get("timing") or {}
+    stage = ", ".join(f"{k}={float(timing[k]):.1f}s" for k in
+                      ("target_setup", "planner_setup", "ik_target_setup", "ik",
+                       "ik_result_check", "planning", "optimization",
+                       "collision_verification", "path_conversion") if k in timing)
+    parts.append(f"plan_elapsed={float(result.get('elapsed') or 0.0):.1f}s")
+    parts.append(f"request_total={float(result.get('request_total') or 0.0):.1f}s"
+                 + (f" ({stage})" if stage else ""))
+    return " | ".join(parts)
+
+
+def plan_single_target(engine, request):
+    """plan_single_target() + one summary log line for the target (see _format_result_summary)."""
+    started = time.perf_counter()
+    output = _plan_single_target_impl(engine, request)
+    output["result"]["request_total"] = time.perf_counter() - started
+    try:
+        line = _format_result_summary(request, output)
+        (console.info if (output.get("result") or {}).get("status") == "success" else console.warning)(line)
+    except Exception as exc:  # never let logging break a plan
+        console.debug(f"plan summary log failed: {exc}")
+    return output

@@ -516,7 +516,10 @@ class OMPLPlannerBase(PlannerBase):
         deadline = getattr(self, "planning_deadline", None)
         budget = float(self.timeout_sec)
         if deadline is not None:
-            budget = max(0.01, min(budget, deadline - time.monotonic()))
+            # a per-target planning_timeout (SimTool planner_timeouts, e.g. 180 s) is the solve budget: it used to be
+            # capped by timeout_sec (15 s in ompl_planner_base.json), so a target that needed more search time ended
+            # as timeout_approximate after 15 s whatever the UI limit was. timeout_sec applies when no deadline is set.
+            budget = max(0.01, deadline - time.monotonic())
 
         # Wire max_iter into a real termination condition (previously
         # accepted by the API but silently ignored - only timeout_sec ever

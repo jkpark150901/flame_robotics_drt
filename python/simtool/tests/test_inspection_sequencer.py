@@ -138,3 +138,52 @@ def test_sequencer_stops_the_sequence_on_first_failure():
     assert not sequencer.is_running
     assert finished["status"] == "failed"
     assert finished["n_planned"] == 0
+
+
+def test_rotation_disabled_plans_deferred_target_at_current_angle():
+    zapi = _FakeZAPI()  # deliberately no rotation request method
+    seq = InspectionSequencer(logging.getLogger('test'))
+    seq.start(zapi, [_target_group('B', 0, reachable_now=False)],
+              planner='rrt_connect', initial_positioner_r_deg=-92.3,
+              auto_rotate_positioner=False)
+    assert len(zapi.calls) == 1
+    assert seq._deferred_groups == []
+    assert seq._current_phase_r_deg == -92.3
+    seq.on_reply({'request_id': zapi.calls[0]['request_id'],
+                  'status': 'success', 'q_path': [[0, 0], [0.1, 0.2]]})
+    assert not seq.is_running
+
+
+def test_rotation_enabled_dispatches_phase_preparation_for_deferred_only():
+    class API(_FakeZAPI):
+        def _ZAPI_request_prepare_next_inspection_phase(self, **kwargs):
+            self.rotation = kwargs
+    zapi=API()
+    seq=InspectionSequencer(logging.getLogger('test'))
+    seq.start(zapi, [_target_group('B',0,reachable_now=False)],planner='rrt_connect',
+              initial_positioner_r_deg=90,auto_rotate_positioner=True)
+    assert zapi.calls==[]
+    assert zapi.rotation['r_deg_delta']==180
+    assert seq._preparing_phase
+
+
+def test_phase_retreat_is_saved_before_rotated_targets():
+    seq = InspectionSequencer(logging.getLogger('test'))
+    seq._active = True
+    seq._preparing_phase = True
+    seq._pending_phase_request_id = 'prep'
+    seq._current_phase_r_deg = -90.0
+    seq._phase_no = 1
+    seq._grand_total = 0
+    seq._finish = lambda: None
+    path = [[0, 1], [0, .4], [0, 0]]
+    assert seq.on_phase_prepared({
+        'request_id': 'prep', 'status': 'success', 'positioner_r_deg': 90,
+        'start_q_by_robot': {'robot': path[-1]},
+        'retreat_plans': {'robot': {'q_path': path, 'elapsed': 1.2,
+                                   'verification': {'colliding_edges': 0}}}})
+    sequence = seq.to_plan_sequence()
+    assert sequence[0]['positioner_r_deg'] == -90
+    assert sequence[0]['plans']['robot']['q_path'] == path
+    assert seq._results[0]['kind'] == 'retreat'
+    assert seq._current_phase_r_deg == 90

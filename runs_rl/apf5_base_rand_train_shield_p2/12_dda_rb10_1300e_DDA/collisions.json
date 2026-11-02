@@ -1,0 +1,15 @@
+{
+  "collision_preview": true,
+  "edge_collisions": [],
+  "verification": {
+    "colliding_edges": 0,
+    "colliding_waypoints": 0,
+    "collision_pairs": [],
+    "edge_collisions": [],
+    "waypoint_collisions": [],
+    "end_link_colliding": false,
+    "backend": "pinocchio",
+    "positioner_collision_checked": false,
+    "positioner_collision_note": "positioner URDF is not included in this planner collision model"
+  }
+}

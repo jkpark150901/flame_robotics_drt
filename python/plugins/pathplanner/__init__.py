@@ -7,6 +7,11 @@ Q_SPACE_PLANNER_MODULES = frozenset({
     "bit_star",
     "direct_path",
     "informed_rrt_star",
+    "pp_birrt",          # pybullet_planning (yijiangh) algorithms on the project's q-space/PyBullet collision,
+    "pp_lazy_prm",       # see plugins/pathplanner/pp_common.py
+    "pp_prm",
+    "pp_rrt",
+    "pp_rrt_star",
     "prm",
     "rrt",
     "rrt_connect",

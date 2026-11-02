@@ -124,7 +124,7 @@ STALE_REQUEST_SWEEP_INTERVAL_SEC = 5.0
 # instead of prematurely killing a legitimately long-running request, plus
 # this much margin for the IK/collision-mesh/etc. work around the actual
 # planner.solve() call that planning_timeout alone doesn't cover.
-STALE_REQUEST_MARGIN_SEC = 30.0
+STALE_REQUEST_MARGIN_SEC = 90.0   # collision-free IK search (<= ~25 s) + path optimization + mesh setup around planner.solve()
 
 
 class EmbeddedRobotCoreClient:
@@ -272,6 +272,21 @@ class EmbeddedRobotCoreClient:
         self._running = False
         self.start()
 
+    def cancel_all(self, reason="cancelled by user"):
+        """Abort whatever is queued or running: every pending request is reported failed with `reason`, and the
+        worker process is restarted (a native planner solve cannot be interrupted from Python; the queue of the old
+        process is dropped with it). Returns the number of cancelled requests."""
+        with self._pending_lock:
+            pending = list(self._pending.items())
+            self._pending.clear()
+        for request_id, (request, _submitted_at) in pending:
+            self._callback(_completion(request_id, request, error=reason))
+        if pending:
+            self._console.warning(
+                f"Robot Core: {reason} - {len(pending)} request(s) cancelled, restarting the worker process")
+            self._restart_process()
+        return len(pending)
+
     def submit(self, request, snapshot):
         if not self.is_running:
             raise RuntimeError("robot core process is not running")
@@ -389,6 +404,21 @@ class ExternalRobotCoreClient(ZAPIBase):
                 self._callback(result)
         except Exception as e:
             self._console.error(f"[ZAPI_ROBOTCORE_CLIENT] Error receiving message: {e}")
+
+    def cancel_all(self, reason="cancelled by user"):
+        """Report every pending request as failed (`reason`) and forget it; a late reply is dropped. The standalone
+        service keeps running whatever it is computing - it cannot be killed from here."""
+        with self._pending_lock:
+            pending = list(self._pending.items())
+            self._pending.clear()
+        for request_id, (request, _submitted_at) in pending:
+            if self._callback:
+                self._callback(_completion(request_id, request, error=reason))
+        if pending:
+            self._console.warning(
+                f"[ZAPI_ROBOTCORE_CLIENT] {reason} - {len(pending)} request(s) cancelled (the external service may "
+                "still finish the current one; its reply will be ignored)")
+        return len(pending)
 
     def submit(self, request, snapshot):
         if not self._running:

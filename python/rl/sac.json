@@ -1,0 +1,70 @@
+{
+    "env": {
+        "robot": "dda_rb10_1300e",
+        "train_snapshots": [
+            "sample/planning_snapshot_p1_2.pkl",
+            "sample/planning_snapshot_p2_3.pkl"
+        ],
+        "eval_snapshots": [
+            "sample/planning_snapshot_p3_6.pkl"
+        ],
+        "max_steps": 300,
+        "dt": 0.1,
+        "max_rot_vel_deg": 50.0,
+        "max_lin_vel": 0.5,
+        "obs_distance_cap": 0.3,
+        "approach_zone": 0.1,
+        "reach_tol": 0.05,
+        "link_reach": 2.0,
+        "near_margin": 0.03,
+        "start_perturb_prob": 0.5,
+        "start_perturb_scale": 0.3,
+        "episodes_per_scene": 20,
+        "joint_weights": {
+            "base": 2.0,
+            "wrist3": 2.0
+        },
+        "curriculum": {
+            "enabled": true,
+            "start_level": 0.05,
+            "step": 0.05,
+            "window": 20,
+            "up_rate": 0.5,
+            "down_rate": 0.2,
+            "min_level": 0.02,
+            "noise": 0.2
+        }
+    },
+    "reward": {
+        "progress": 100.0,
+        "apf": 0.3,
+        "apf_d0": 0.15,
+        "apf_clip": 50.0,
+        "margin": 200.0,
+        "safety_margin": 0.005,
+        "side": 50.0,
+        "time": 0.1,
+        "smooth": 0.05,
+        "collision": 100.0,
+        "goal": 100.0
+    },
+    "sac": {
+        "net_arch": [
+            256,
+            256,
+            256
+        ],
+        "learning_rate": 0.0003,
+        "buffer_size": 1000000,
+        "batch_size": 512,
+        "gamma": 0.99,
+        "tau": 0.005,
+        "ent_coef": "auto",
+        "train_freq": 1,
+        "gradient_steps": 8,
+        "learning_starts": 5000,
+        "n_envs": 16,
+        "total_timesteps": 1000000,
+        "device": "cuda"
+    }
+}

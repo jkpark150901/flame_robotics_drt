@@ -10,10 +10,10 @@ class SimParameterMap:
         self.z_res = 0.01
         self.r_res = 0.1
         self.clamp_res = 0.01
-        self.x_range = [0.0, 8.0]
-        self.z_range = [0.0, 3.0]
+        self.x_range = [0.0, 4.0]
+        self.z_range = [0.0, 0.8]
         self.r_range = [-180.0, 180.0]
-        self.clamp_range = [0.0, 0.9]
+        self.clamp_range = [0.0, 0.85]
         self.spool_x_res = 0.01
         self.spool_y_res = 0.01
         self.spool_z_res = 0.01

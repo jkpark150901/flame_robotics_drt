@@ -1,0 +1,50 @@
+{
+  "index": 11,
+  "group_name": "Point 6 - Inspection pose 1",
+  "robot_name": "rb20_1900es",
+  "pose_name": "RT",
+  "status": "failed",
+  "status_kind": "failed",
+  "category": "timeout_approximate",
+  "message": "planning failed for target: timeout_approximate",
+  "n_waypoints": 1,
+  "has_path": true,
+  "elapsed": 300.7401793592144,
+  "positioner_r_deg": 90.0,
+  "planner_stats": {
+    "state_validity_calls": 3143,
+    "collision_rejects": 460,
+    "workspace_rejects": 0,
+    "solve_time": 300.7032996660564,
+    "algorithm": "RRTstar",
+    "max_iter": 16000,
+    "iterations": 3143,
+    "timeout_sec": 299.9967080729548,
+    "iteration_ptc_error": null
+  },
+  "ik_failure": null,
+  "n_colliding_edges": 0,
+  "colliding_edges": [],
+  "goal_q": [
+    3.674427294109845,
+    0.0017571062359791239,
+    -3.1388171047603475,
+    -0.5629714096141755,
+    2.8681970263637866,
+    -3.136483322984016,
+    0.5598661118759848,
+    -0.003089787330217143
+  ],
+  "ik_goal_q": [
+    3.674427294109845,
+    0.0017571062359791239,
+    -3.1388171047603475,
+    -0.5629714096141755,
+    2.8681970263637866,
+    -3.136483322984016,
+    0.5598661118759848,
+    -0.003089787330217143
+  ],
+  "diag": null,
+  "verification": {}
+}

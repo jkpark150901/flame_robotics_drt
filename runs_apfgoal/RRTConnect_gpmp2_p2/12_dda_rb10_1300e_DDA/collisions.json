@@ -1,0 +1,282 @@
+{
+  "collision_preview": true,
+  "edge_collisions": [
+    {
+      "edge": 12,
+      "from_waypoint": 12,
+      "to_waypoint": 13,
+      "pairs": [
+        [
+          "dda_link2_0",
+          "dda_link4_0"
+        ],
+        [
+          "dda_link1_0",
+          "dda_link3_0"
+        ],
+        [
+          "dda_link2_0",
+          "dda_link_end_0"
+        ]
+      ]
+    },
+    {
+      "edge": 13,
+      "from_waypoint": 13,
+      "to_waypoint": 14,
+      "pairs": [
+        [
+          "dda_link1_0",
+          "dda_link3_0"
+        ],
+        [
+          "dda_link2_0",
+          "dda_link4_0"
+        ],
+        [
+          "dda_link2_0",
+          "dda_link_end_0"
+        ]
+      ]
+    },
+    {
+      "edge": 15,
+      "from_waypoint": 15,
+      "to_waypoint": 16,
+      "pairs": [
+        [
+          "dda_link2_0",
+          "dda_link4_0"
+        ],
+        [
+          "dda_link1_0",
+          "dda_link3_0"
+        ]
+      ]
+    },
+    {
+      "edge": 16,
+      "from_waypoint": 16,
+      "to_waypoint": 17,
+      "pairs": [
+        [
+          "dda_link1_0",
+          "dda_link3_0"
+        ],
+        [
+          "dda_link2_0",
+          "dda_link4_0"
+        ],
+        [
+          "dda_link2_0",
+          "dda_link_end_0"
+        ],
+        [
+          "dda_link2_0",
+          "dda_link5_0"
+        ]
+      ]
+    },
+    {
+      "edge": 17,
+      "from_waypoint": 17,
+      "to_waypoint": 18,
+      "pairs": [
+        [
+          "dda_link1_0",
+          "dda_link3_0"
+        ],
+        [
+          "dda_link2_0",
+          "dda_link4_0"
+        ],
+        [
+          "dda_link2_0",
+          "dda_link5_0"
+        ],
+        [
+          "dda_link2_0",
+          "dda_link_end_0"
+        ]
+      ]
+    }
+  ],
+  "verification": {
+    "colliding_edges": 5,
+    "colliding_waypoints": 3,
+    "collision_pairs": [
+      [
+        "dda_link1_0",
+        "dda_link3_0"
+      ],
+      [
+        "dda_link2_0",
+        "dda_link4_0"
+      ],
+      [
+        "dda_link2_0",
+        "dda_link_end_0"
+      ],
+      [
+        "dda_link2_0",
+        "dda_link5_0"
+      ]
+    ],
+    "edge_collisions": [
+      {
+        "edge": 12,
+        "from_waypoint": 12,
+        "to_waypoint": 13,
+        "pairs": [
+          [
+            "dda_link2_0",
+            "dda_link4_0"
+          ],
+          [
+            "dda_link1_0",
+            "dda_link3_0"
+          ],
+          [
+            "dda_link2_0",
+            "dda_link_end_0"
+          ]
+        ]
+      },
+      {
+        "edge": 13,
+        "from_waypoint": 13,
+        "to_waypoint": 14,
+        "pairs": [
+          [
+            "dda_link1_0",
+            "dda_link3_0"
+          ],
+          [
+            "dda_link2_0",
+            "dda_link4_0"
+          ],
+          [
+            "dda_link2_0",
+            "dda_link_end_0"
+          ]
+        ]
+      },
+      {
+        "edge": 15,
+        "from_waypoint": 15,
+        "to_waypoint": 16,
+        "pairs": [
+          [
+            "dda_link2_0",
+            "dda_link4_0"
+          ],
+          [
+            "dda_link1_0",
+            "dda_link3_0"
+          ]
+        ]
+      },
+      {
+        "edge": 16,
+        "from_waypoint": 16,
+        "to_waypoint": 17,
+        "pairs": [
+          [
+            "dda_link1_0",
+            "dda_link3_0"
+          ],
+          [
+            "dda_link2_0",
+            "dda_link4_0"
+          ],
+          [
+            "dda_link2_0",
+            "dda_link_end_0"
+          ],
+          [
+            "dda_link2_0",
+            "dda_link5_0"
+          ]
+        ]
+      },
+      {
+        "edge": 17,
+        "from_waypoint": 17,
+        "to_waypoint": 18,
+        "pairs": [
+          [
+            "dda_link1_0",
+            "dda_link3_0"
+          ],
+          [
+            "dda_link2_0",
+            "dda_link4_0"
+          ],
+          [
+            "dda_link2_0",
+            "dda_link5_0"
+          ],
+          [
+            "dda_link2_0",
+            "dda_link_end_0"
+          ]
+        ]
+      }
+    ],
+    "waypoint_collisions": [
+      {
+        "waypoint": 13,
+        "pairs": [
+          [
+            "dda_link1_0",
+            "dda_link3_0"
+          ],
+          [
+            "dda_link2_0",
+            "dda_link4_0"
+          ],
+          [
+            "dda_link2_0",
+            "dda_link_end_0"
+          ]
+        ]
+      },
+      {
+        "waypoint": 16,
+        "pairs": [
+          [
+            "dda_link1_0",
+            "dda_link3_0"
+          ],
+          [
+            "dda_link2_0",
+            "dda_link4_0"
+          ]
+        ]
+      },
+      {
+        "waypoint": 17,
+        "pairs": [
+          [
+            "dda_link1_0",
+            "dda_link3_0"
+          ],
+          [
+            "dda_link2_0",
+            "dda_link4_0"
+          ],
+          [
+            "dda_link2_0",
+            "dda_link5_0"
+          ],
+          [
+            "dda_link2_0",
+            "dda_link_end_0"
+          ]
+        ]
+      }
+    ],
+    "end_link_colliding": true,
+    "backend": "pinocchio"
+  }
+}

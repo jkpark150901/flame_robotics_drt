@@ -1,0 +1,38 @@
+[
+  {
+    "run": "20261014_170112_REAL_servo_step10",
+    "old_track_end_s": 14.54,
+    "corrected_track_end_s": 14.720099999999999,
+    "corrected_end_angle_error_deg": 0.04305431173820725,
+    "old_max_mm": 36.32631128073996,
+    "corrected_max_mm": 11.073462157571075,
+    "corrected_peak_time_s": 7.24,
+    "corrected_peak_is_anchor": true,
+    "corrected_peak_is_endpoint": false,
+    "nearest_at_corrected_peak_mm": 0.38124179081743975
+  },
+  {
+    "run": "20261014_170230_REAL_servo_step10",
+    "old_track_end_s": 8.3399,
+    "corrected_track_end_s": 8.52,
+    "corrected_end_angle_error_deg": 0.03100319326382681,
+    "old_max_mm": 23.033506854298672,
+    "corrected_max_mm": 6.331659086640031,
+    "corrected_peak_time_s": 5.039899999999999,
+    "corrected_peak_is_anchor": true,
+    "corrected_peak_is_endpoint": false,
+    "nearest_at_corrected_peak_mm": 0.6215074737559715
+  },
+  {
+    "run": "20261014_170303_REAL_servo_step10",
+    "old_track_end_s": 7.02,
+    "corrected_track_end_s": 7.18,
+    "corrected_end_angle_error_deg": 0.06723325541611869,
+    "old_max_mm": 25.786805987709034,
+    "corrected_max_mm": 7.512910963881319,
+    "corrected_peak_time_s": 6.299899999999999,
+    "corrected_peak_is_anchor": true,
+    "corrected_peak_is_endpoint": false,
+    "nearest_at_corrected_peak_mm": 0.7567280336203486
+  }
+]

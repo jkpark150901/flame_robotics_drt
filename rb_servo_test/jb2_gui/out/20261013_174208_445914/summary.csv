@@ -1,0 +1,2 @@
+method,gain,blend,linf_peak,l2_peak,J1_peak,J2_peak,J3_peak,J4_peak,J5_peak,J6_peak,J1_end_error,J2_end_error,J3_end_error,J4_end_error,J5_end_error,J6_end_error
+jb2,0.1,100.0,7.242561264943241,10.52330068786981,7.242561264943241,4.828492484336771,2.414175257543619,0.0,2.414175257543619,4.828492484336771,0.0,0.0,0.0,0.0,0.0,0.0

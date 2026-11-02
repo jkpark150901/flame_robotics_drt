@@ -206,6 +206,30 @@ class ZAPI(QObject, ZAPIBase):
         else:
             self.__console.warning("[ZAPI] Cannot send save_planning_snapshot: Socket not connected")
 
+    def _ZAPI_request_load_planning_snapshot(self, file_path: str):
+        """저장된 planning snapshot(pickle)으로 viewer scene(배관/positioner/로봇/EF pose)을 복원 요청."""
+        if self.__dealer_socket and self.__dealer_socket.is_joined:
+            self.call(self.__dealer_socket, "zapi_load_planning_snapshot", {"path": file_path})
+            self.__console.info(f"[ZAPI] Sent load_planning_snapshot request: {file_path}")
+        else:
+            self.__console.warning("[ZAPI] Cannot send load_planning_snapshot: Socket not connected")
+
+    def _ZAPI_request_show_spool_collision_mesh(self, show: bool):
+        if self.__dealer_socket and self.__dealer_socket.is_joined:
+            self.call(self.__dealer_socket, "zapi_show_spool_collision_mesh", {"show": bool(show)})
+
+    def _ZAPI_request_show_rejected_ef_candidates(self, show: bool):
+        if self.__dealer_socket and self.__dealer_socket.is_joined:
+            self.call(self.__dealer_socket, "zapi_show_rejected_ef_candidates", {"show": bool(show)})
+
+    def _ZAPI_request_show_saved_ik_goals(self, show: bool):
+        """스냅샷에 저장된 IK 목표 자세(ik_goal_q) 표시 on/off 요청."""
+        if self.__dealer_socket and self.__dealer_socket.is_joined:
+            self.call(self.__dealer_socket, "zapi_show_saved_ik_goals", {"show": bool(show)})
+            self.__console.info(f"[ZAPI] Sent show_saved_ik_goals: {bool(show)}")
+        else:
+            self.__console.warning("[ZAPI] Cannot send show_saved_ik_goals: Socket not connected")
+
     def _ZAPI_request_load_inspection_points(self, file_path: str):
         """JSON 파일에서 검사 지점들을 읽어 복원."""
         if self.__dealer_socket and self.__dealer_socket.is_joined:
@@ -320,13 +344,14 @@ class ZAPI(QObject, ZAPIBase):
                                          fixed_joints=None,
                                          fixed_joint_indices=None,
                                          fixed_joint_values=None,
-                                         ik_solver: str = "pybullet",
+                                         ik_solver: str = "collision_free",
                                          ik_normalize: bool = False,
                                          optimizer: str = None,
                                          optimize_path: bool = None,
                                          context_label: str = None,
                                          obstacle_rotation_T=None,
-                                         lock_linear_track: bool = False):
+                                         lock_linear_track: bool = False,
+                                         preset_goal_q=None):
         """Request a single robot's source_q -> target_pose plan from Robot Core.
 
         Target-group splitting/sorting/positioner-rotation decisions are made
@@ -364,6 +389,8 @@ class ZAPI(QObject, ZAPIBase):
                 kwargs["context_label"] = context_label
             if obstacle_rotation_T is not None:
                 kwargs["obstacle_rotation_T"] = obstacle_rotation_T
+            if preset_goal_q is not None:
+                kwargs["preset_goal_q"] = [float(v) for v in preset_goal_q]
             self.call(self.__dealer_socket, "zapi_plan_single_target", kwargs)
             self.__console.info(f"[ZAPI] Sent plan_single_target: {kwargs}")
         else:
@@ -389,7 +416,7 @@ class ZAPI(QObject, ZAPIBase):
                                        step_size: float = 0.08,
                                        max_iter: int = 3000,
                                        max_workers: int = 2,
-                                       ik_solver: str = "pybullet",
+                                       ik_solver: str = "collision_free",
                                        ik_normalize: bool = False):
         """Request IK-only validation/visualization for the determined DDA/RT EF poses."""
         if self.__dealer_socket and self.__dealer_socket.is_joined:
@@ -426,7 +453,7 @@ class ZAPI(QObject, ZAPIBase):
             self.__console.warning("[ZAPI] Cannot send clear_inspection_path: Socket not connected")
 
     def _ZAPI_request_execute_inspection_path(self, speed: float = 0.2, plan_sequence=None,
-                                              playback_initial_r_deg=None):
+                                              playback_initial_r_deg=None, loaded_playback_result=False):
         """Ask the viewer to render playback for the SimTool-owned plan sequence."""
         if self.__dealer_socket and self.__dealer_socket.is_joined:
             kwargs = {"speed": float(speed)}
@@ -434,10 +461,31 @@ class ZAPI(QObject, ZAPIBase):
                 kwargs["plan_sequence"] = plan_sequence
             if playback_initial_r_deg is not None:
                 kwargs["playback_initial_r_deg"] = float(playback_initial_r_deg)
+            if loaded_playback_result:
+                kwargs["loaded_playback_result"] = True
             self.call(self.__dealer_socket, "zapi_execute_inspection_path", kwargs)
             self.__console.info(f"[ZAPI] Sent execute_inspection_path: {kwargs}")
         else:
             self.__console.warning("[ZAPI] Cannot send execute_inspection_path: Socket not connected")
+
+    def _ZAPI_request_cancel_planning(self):
+        """Ask the viewer to abort the Robot Core planning requests in flight."""
+        if self.__dealer_socket and self.__dealer_socket.is_joined:
+            self.call(self.__dealer_socket, "zapi_cancel_planning", {})
+            self.__console.info("[ZAPI] Sent cancel_planning")
+        else:
+            self.__console.warning("[ZAPI] Cannot send cancel_planning: Socket not connected")
+
+    def _ZAPI_request_show_plan_sequence(self, plan_sequence, playback_initial_r_deg=None):
+        """Ask the viewer to draw a plan sequence (goal frames + end-effector trajectories), e.g. a loaded result."""
+        if self.__dealer_socket and self.__dealer_socket.is_joined:
+            kwargs = {"plan_sequence": plan_sequence}
+            if playback_initial_r_deg is not None:
+                kwargs["playback_initial_r_deg"] = float(playback_initial_r_deg)
+            self.call(self.__dealer_socket, "zapi_show_plan_sequence", kwargs)
+            self.__console.info(f"[ZAPI] Sent show_plan_sequence: {len(plan_sequence or [])} group(s)")
+        else:
+            self.__console.warning("[ZAPI] Cannot send show_plan_sequence: Socket not connected")
 
     def _ZAPI_request_set_mode(self, mode: str):
         """Sends command to set execution mode (simulation or real)."""

@@ -1,0 +1,9 @@
+[
+  {
+    "file": "follow.csv",
+    "label": "servo gain=0.1",
+    "completed": false,
+    "error": "servo 전송 지연: servo 주기(ms)를 늘려 주세요",
+    "error_stage": "servo[2]"
+  }
+]

@@ -40,4 +40,5 @@ class InspectionPathHandler:
             playback_initial_r_deg=self.workflow.planning_result.get(
                 "playback_initial_r_deg"
             ),
+            loaded_playback_result=bool(self.workflow.planning_result.get("loaded_playback_result", False)),
         )

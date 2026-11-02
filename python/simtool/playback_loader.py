@@ -27,12 +27,26 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List
 
+from plugins.robotics.plan_run_io import load_run_info
+
 
 def _read_joint_states_csv(path: Path) -> List[List[float]]:
     with open(path, "r", newline="", encoding="utf-8") as f:
         reader = csv.reader(f)
         next(reader, None)  # header: waypoint, <joint_name>, ...
         return [[float(v) for v in row[1:]] for row in reader]
+
+
+def resolve_playback_run_dir(run_dir) -> Path:
+    """Resolve a benchmark output parent to its one playable saved-path run."""
+    run_dir = Path(run_dir)
+    if (run_dir / "summary.csv").is_file() or (run_dir / "joint_states.csv").is_file():
+        return run_dir
+    candidates = sorted((run_dir / "result_paths").glob("*/summary.csv"))
+    candidates += sorted(run_dir.glob("*/summary.csv"))
+    if len(candidates) == 1:
+        return candidates[0].parent
+    return run_dir
 
 
 def load_playback_plan_sequence(run_dir) -> Dict[str, Any]:
@@ -53,6 +67,9 @@ def load_playback_plan_sequence(run_dir) -> Dict[str, Any]:
     """
     run_dir = Path(run_dir)
     summary_path = run_dir / "summary.csv"
+    # failures.json/run.json exist for runs saved by plugins.robotics.plan_run_io (SimTool auto-save
+    # and benchmark --save-paths); older runs simply have none and get failures derived from summary.csv.
+    run_info = load_run_info(run_dir)
     if not summary_path.exists():
         # Not a --target all run (e.g. a single-target run has joint_states.csv
         # directly in run_dir, with no robot/pose/group info recoverable from
@@ -61,9 +78,13 @@ def load_playback_plan_sequence(run_dir) -> Dict[str, Any]:
             f"{summary_path} not found - this loader only supports test_ompl_planning.py's "
             "--target all output (a folder with summary.csv + per-target subfolders).")
 
+    # failures.json / <idx>_*/result.json (plan_run_io) carry the failed target's IK goal
+    goal_by_index = {str(f.get("index")): (f.get("goal_q") or f.get("ik_goal_q")) for f in (run_info.get("failures") or [])
+                     if (f.get("goal_q") or f.get("ik_goal_q")) is not None}
     order: List[str] = []
     groups: Dict[str, Dict[str, Any]] = {}
     skipped = []
+    derived_failures: List[Dict[str, Any]] = []
     n_targets = 0
 
     with open(summary_path, "r", newline="", encoding="utf-8") as f:
@@ -81,10 +102,20 @@ def load_playback_plan_sequence(run_dir) -> Dict[str, Any]:
                 index_label = str(index)
             subdir = run_dir / f"{index_label}_{robot_name}_{pose_name}"
             csv_path = subdir / "joint_states.csv"
+            row_message = row.get("message") or ""
+            failure_category = row.get("failure_category") or ""
+            if status != "success":
+                derived_failures.append({
+                    "index": index, "group_name": group_name, "robot_name": robot_name,
+                    "pose_name": pose_name, "status": status, "category": failure_category,
+                    "message": row_message,
+                })
             if not csv_path.exists():
                 skipped.append({
                     "index": index, "robot_name": robot_name, "pose_name": pose_name,
-                    "status": status, "reason": f"no joint_states.csv at {csv_path}",
+                    "status": status,
+                    "reason": f"no joint_states.csv at {csv_path}"
+                              + (f" (planning {status}: {row_message})" if status != "success" and row_message else ""),
                 })
                 continue
             q_path = _read_joint_states_csv(csv_path)
@@ -130,15 +161,56 @@ def load_playback_plan_sequence(run_dir) -> Dict[str, Any]:
                     r_deg = 0.0
                 groups[group_name] = {"name": group_name, "positioner_r_deg": r_deg, "plans": {}}
                 order.append(group_name)
-            groups[group_name]["plans"][robot_name] = {"q_path": q_path, "status": status, **plan_extra}
+            status_extra = {}
+            if status != "success":
+                # Same keys InspectionSequencer.to_plan_sequence() gives a live failed plan, so the Viewer's
+                # collision-preview/warning playback treats a loaded failure like a fresh one.
+                status_extra = {
+                    "status_kind": row.get("status_kind") or "failed",
+                    "planning_error": row_message or None,
+                    "collision_preview": True,
+                }
+            goal_q = goal_by_index.get(str(index))
+            if goal_q is not None:
+                status_extra["goal_q"] = goal_q   # failed target: playback shows the straight move start -> IK goal
+            groups[group_name]["plans"][robot_name] = {
+                "q_path": q_path, "status": status, **status_extra, **plan_extra}
 
     plan_sequence = [groups[name] for name in order]
+    _fix_reachable_phase_angle(plan_sequence, run_info.get("run") or {})
     return {
         "plan_sequence": plan_sequence,
         "n_targets": n_targets,
         "n_loaded": sum(len(g["plans"]) for g in plan_sequence),
         "skipped": skipped,
+        # Why each failed target failed: failures.json when present (has category/planner stats/colliding
+        # edges), otherwise just what summary.csv recorded.
+        "failures": run_info["failures"] or derived_failures,
+        "unreached_groups": run_info["unreached_groups"],
+        "run": run_info["run"],
+        # scene the run was planned in (saved by SimTool at sequence start), None for older runs
+        "scene_snapshot": (str(run_dir / "scene_snapshot.pkl") if (run_dir / "scene_snapshot.pkl").exists() else None),
     }
+
+
+def _fix_reachable_phase_angle(plan_sequence: List[Dict[str, Any]], run_meta: Dict[str, Any]) -> None:
+    """Runs saved before 2026-10-29 recorded the reachable (non-rotated) phase as positioner_r_deg=0.0 while the
+    rotated phase has the absolute angle (e.g. 453.4 = 273.4 + 180), so playback turned the positioner to 0 deg for the
+    phase-1 groups. Put the real starting angle there: run.json's initial_positioner_r_deg (newer runs record it), else
+    rotated angle - positioner_second_group_r_deg."""
+    angles = [float(g.get("positioner_r_deg") or 0.0) for g in plan_sequence]
+    rotated = [a for a in angles if abs(a) > 1e-9]
+    if not rotated or len(rotated) == len(angles):
+        return
+    initial = run_meta.get("initial_positioner_r_deg")
+    if initial is None:
+        initial = rotated[0] - float(run_meta.get("positioner_second_group_r_deg", 180.0) or 180.0)
+    initial = float(initial)
+    if abs(initial) < 1e-9:
+        return
+    for group in plan_sequence:
+        if abs(float(group.get("positioner_r_deg") or 0.0)) <= 1e-9:
+            group["positioner_r_deg"] = initial
 
 
 def load_playback_single_target(run_dir, robot_name: str, pose_name: str = "target",

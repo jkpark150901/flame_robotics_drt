@@ -42,6 +42,8 @@ def _build_jobs(groups):
         {
             "group_name": group.get("name"), "robot": robot_name,
             "pose_name": pose_name, "target_pose": target_T.tolist(),
+            # goal q solved beforehand and stored in the snapshot (precompute_ik_goals.py) - planning skips the IK
+            "preset_goal_q": (group.get("ik_goal_q") or {}).get(robot_name),
         }
         for group in groups
         for robot_name, pose_name, target_T in inspection_group_pose_items(group)
@@ -57,6 +59,8 @@ class InspectionSequencer:
         self._jobs: List[Dict[str, Any]] = []
         self._job_index = 0
         self._pending_request_id: Optional[str] = None
+        # after a failed target, plan the next one from that target's (valid) IK goal instead of the last success
+        self._continue_from_failed_goal = True
         self._start_q_by_robot: Dict[str, list] = {}
         self._results: List[Dict[str, Any]] = []
         self._deferred_groups: List[Dict[str, Any]] = []
@@ -84,6 +88,8 @@ class InspectionSequencer:
     def start(self, zapi, target_groups, *, planner, planner_options=None,
               rt_pipe_facing_axis=(0.0, -1.0, 0.0),
               positioner_second_group_r_deg: float = 180.0,
+              initial_positioner_r_deg: float = 0.0,
+              auto_rotate_positioner: bool = True,
               on_progress=None, on_finished=None):
         if zapi is None:
             raise RuntimeError("ZAPI is not available")
@@ -105,6 +111,9 @@ class InspectionSequencer:
             target_groups, rt_pipe_facing_axis=rt_pipe_facing_axis)
         reachable_groups = phases[0]["groups"]
         self._deferred_groups = phases[1]["groups"]
+        if not auto_rotate_positioner:
+            reachable_groups = reachable_groups + self._deferred_groups
+            self._deferred_groups = []
         # Every robot with ANY target anywhere in this sequence (both
         # phases) - used for the retreat-before-rotation robot list (see
         # _advance_or_finish). NOT just the robots with a target in the
@@ -120,12 +129,22 @@ class InspectionSequencer:
         })
 
         self._jobs = _build_jobs(reachable_groups)
+        # progress counts over the whole sequence (both phases), not just the phase that is running: with 9 groups (18 targets)
+        # the UI used to show "1/6" = the first phase only
+        self._grand_total = len(self._jobs) + len(_build_jobs(self._deferred_groups))
+        self._done_before_phase = 0
+        self._phase_no = 1
+        self._phase_count = 2 if self._deferred_groups else 1
         self._zapi = zapi
         self._job_index = 0
         self._start_q_by_robot = {}
         self._results = []
         self._total_job_count = len(self._jobs)
-        self._current_phase_r_deg = 0.0
+        # absolute angle of the reachable phase (the positioner's angle when the sequence starts, e.g. 273.4 deg): the
+        # rotated phase records the absolute angle reported by prepare_next_inspection_phase (e.g. 453.4 deg), and playback
+        # moves the positioner to each group's recorded angle - with 0.0 here it turned the positioner to 0 deg for the
+        # phase-1 groups, so their paths were replayed against a pipe in the wrong place.
+        self._current_phase_r_deg = float(initial_positioner_r_deg or 0.0)
         self._r_deg_delta = float(positioner_second_group_r_deg)
         self._preparing_phase = False
         self._pending_phase_request_id = None
@@ -156,8 +175,9 @@ class InspectionSequencer:
         self._pending_request_id = request_id
         if self._on_progress:
             self._on_progress(
-                f"[{self._job_index + 1}/{len(self._jobs)}] "
-                f"{job['group_name']}:{job['pose_name']} ({job['robot']})")
+                f"[{self._done_before_phase + self._job_index + 1}/{self._grand_total}] "
+                f"{job['group_name']}:{job['pose_name']} ({job['robot']})"
+                + (f" - phase {self._phase_no}/{self._phase_count}" if self._phase_count > 1 else ""))
         start_q = self._start_q_by_robot.get(job["robot"])
         self._console.info(
             "InspectionSequencer: dispatch "
@@ -172,6 +192,7 @@ class InspectionSequencer:
             request_id=request_id,
             start_q=self._start_q_by_robot.get(job["robot"]),
             context_label=f"{job['group_name']}:{job['pose_name']}",
+            preset_goal_q=job.get("preset_goal_q"),
             **self._planner_options,
         )
 
@@ -211,6 +232,7 @@ class InspectionSequencer:
             "group_name": job["group_name"], "robot": job["robot"],
             "pose_name": job["pose_name"], "status": status, "status_kind": status_kind,
             "message": payload.get("message"), "elapsed": payload.get("elapsed"),
+            "request_total": payload.get("request_total"),
             "q_path": q_path, "positioner_r_deg": self._current_phase_r_deg,
             # Which waypoint/edge actually collided (OMPLPlannerBase.
             # verify_path()'s shape) - carried through so to_plan_sequence()
@@ -218,6 +240,19 @@ class InspectionSequencer:
             # playback machinery (_warn_collision_preview_playback/
             # _highlight_collision_pairs), not just animate the path blindly.
             "verification": payload.get("verification") or {},
+            # Failure detail kept for plan_run_io.save_plan_run (failures.json): which stage failed
+            # and the planner's own counters, not just the one-line message.
+            "planner_stats": payload.get("planner_stats") or {},
+            "ik_failure": payload.get("ik_failure"),
+            "edge_collisions": payload.get("edge_collisions") or [],
+            "collision_preview": bool(payload.get("collision_preview")),
+            # IK goal of the target (also when planning failed): playback shows a failed target as the straight joint-space
+            # move start -> goal_q, with the colliding moments in red, instead of skipping it.
+            "goal_q": payload.get("goal_q"),
+            "ik_goal_q": payload.get("ik_goal_q"),
+            "diag": payload.get("diag"),
+            "path_metrics": payload.get("path_metrics"),
+            "path_metrics_error": payload.get("path_metrics_error"),
         })
         if status == "success" and q_path:
             self._console.info(
@@ -227,6 +262,14 @@ class InspectionSequencer:
                 f"start_q={[round(v, 5) for v in q_path[0]]} "
                 f"goal_q={[round(v, 5) for v in q_path[-1]]} n_waypoints={len(q_path)}")
             self._start_q_by_robot[job["robot"]] = q_path[-1]
+        elif self._continue_from_failed_goal and payload.get("goal_q"):
+            # A->B failed but B's IK goal is a valid (collision-free) configuration: treat B as the new position of this
+            # robot so the next target is planned B->C instead of A->C. The robot did not travel A->B in this plan
+            # (playback jumps there); targets without a usable goal (IK failed / goal collides) still chain from A.
+            self._start_q_by_robot[job["robot"]] = [float(v) for v in payload["goal_q"]]
+            self._console.warning(
+                "InspectionSequencer: target failed, continuing from its IK goal: "
+                f"{job['group_name']}:{job['pose_name']} ({job['robot']}) - {payload.get('message')}")
         else:
             # Continue past a failed target instead of aborting the whole
             # sequence - a single unreachable/colliding pose used to stop
@@ -306,6 +349,19 @@ class InspectionSequencer:
             self._finish()
             return True
 
+        # Keep retreat paths in the saved results and playback sequence, before
+        # changing the phase angle. They were planned against the pre-rotation scene.
+        for robot, plan in (payload.get("retreat_plans") or {}).items():
+            self._results.append({
+                "group_name": f"Positioner retreat (phase {self._phase_no})",
+                "robot": robot, "pose_name": "retreat", "kind": "retreat",
+                "status": "success", "status_kind": "success", "message": None,
+                "elapsed": plan.get("elapsed"), "q_path": plan["q_path"],
+                "verification": plan.get("verification") or {},
+                "positioner_r_deg": self._current_phase_r_deg,
+            })
+            self._total_job_count += 1
+
         start_q_by_robot = payload.get("start_q_by_robot") or {}
         self._start_q_by_robot.update(start_q_by_robot)
         self._current_phase_r_deg = float(payload.get("positioner_r_deg", self._current_phase_r_deg))
@@ -329,6 +385,9 @@ class InspectionSequencer:
         self._jobs = _build_jobs(next_groups)
         self._job_index = 0
         self._total_job_count += len(self._jobs)
+        self._done_before_phase = len(self._results)
+        self._phase_no = 2
+        self._grand_total = max(self._grand_total, self._done_before_phase + len(self._jobs))
 
         if not self._jobs:
             self._finish()
@@ -353,11 +412,92 @@ class InspectionSequencer:
             lines.append(f"[SKIP] {name} -> never reached (positioner-rotation prep failed or sequence stopped)")
         return lines
 
+    def _failure_report(self):
+        """(counts, lines) for the whole sequence: success/failed totals, failures by cause and by robot / phase, and one
+        line per failed target with its cause (category, reason, colliding pairs)."""
+        import re
+        from collections import Counter
+        from plugins.robotics.plan_run_io import classify_failure
+
+        total = len(self._results)
+        failed = [r for r in self._results if r.get("status") != "success"]
+        n_ok = total - len(failed)
+        by_cause = Counter(classify_failure(r) or "unknown" for r in failed)
+        by_robot = {}
+        by_phase = {}
+        for r in self._results:
+            ok = r.get("status") == "success"
+            for table, key in ((by_robot, r["robot"]), (by_phase, f"{float(r.get('positioner_r_deg') or 0.0):.0f}deg")):
+                entry = table.setdefault(key, [0, 0])
+                entry[0 if ok else 1] += 1
+        counts = {"total": total, "success": n_ok, "failed": len(failed), "by_cause": dict(by_cause),
+                  "by_robot": {k: {"success": v[0], "failed": v[1]} for k, v in by_robot.items()},
+                  "by_phase": {k: {"success": v[0], "failed": v[1]} for k, v in by_phase.items()},
+                  "never_reached": [g.get("name") for g in self._deferred_groups]}
+        lines = [
+            "===== inspection planning summary =====",
+            f"targets planned: {total} | success {n_ok} | failed {len(failed)}"
+            + (f" | never reached {len(self._deferred_groups)} group(s)" if self._deferred_groups else ""),
+        ]
+        if by_cause:
+            lines.append("failure causes: " + ", ".join(f"{c} x{n}" for c, n in by_cause.most_common()))
+        lines.append("by robot: " + ", ".join(f"{k} ok {v[0]}/fail {v[1]}" for k, v in sorted(by_robot.items())))
+        lines.append("by positioner phase: " + ", ".join(f"{k} ok {v[0]}/fail {v[1]}" for k, v in sorted(by_phase.items())))
+        for r in failed:
+            category = classify_failure(r) or "unknown"
+            message = str(r.get("message") or "")
+            pairs = re.search(r"pairs=(\[\[.*?\]\])", message)
+            reason = re.sub(r"\(pairs=.*\)$", "", message).replace("planning failed for target: ", "").strip()
+            line = (f"  FAIL {r['robot']} {r['group_name']}:{r['pose_name']} "
+                    f"({float(r.get('positioner_r_deg') or 0.0):.0f}deg) - {category}")
+            if reason and reason != category:
+                line += f": {reason}"
+            if pairs:
+                line += " | colliding " + pairs.group(1).replace("'", "").replace("_0", "")
+            stats = r.get("planner_stats") or {}
+            if stats.get("iterations") is not None:
+                line += f" | iterations {stats.get('iterations')}/{stats.get('max_iter')}"
+            lines.append(line)
+        for name in counts["never_reached"]:
+            lines.append(f"  SKIP group {name} - never reached (positioner-rotation prep failed or sequence stopped)")
+        lines.append("=======================================")
+        return counts, lines
+
+    def cancel(self, reason: str = "cancelled by user") -> bool:
+        """Stop the running sequence: nothing more is dispatched, the reply of the request in flight is dropped (the
+        sequence is no longer active), every target not planned yet is recorded as cancelled, and the normal
+        finish runs (summary, on_finished -> run saved and playable with what was planned). Returns False if idle."""
+        if not self._active:
+            return False
+        done = {(r["group_name"], r["robot"], r["pose_name"]) for r in self._results}
+        remaining = [job for job in self._jobs if (job["group_name"], job["robot"], job["pose_name"]) not in done]
+        remaining += [job for job in _build_jobs(self._deferred_groups)
+                      if (job["group_name"], job["robot"], job["pose_name"]) not in done]
+        for job in remaining:
+            self._results.append({
+                "group_name": job["group_name"], "robot": job["robot"], "pose_name": job["pose_name"],
+                "status": "cancelled", "status_kind": "failed", "message": reason, "elapsed": None,
+                "q_path": [], "positioner_r_deg": self._current_phase_r_deg, "verification": {},
+                "planner_stats": {}, "ik_failure": None, "edge_collisions": [], "collision_preview": False,
+                "goal_q": None, "diag": None})
+        self._pending_request_id = None
+        self._pending_phase_request_id = None
+        self._deferred_groups = []
+        self._console.warning(f"InspectionSequencer: {reason} - {len(remaining)} target(s) not planned")
+        self._finish()
+        return True
+
     def _finish(self):
         self._active = False
         self._preparing_phase = False
         n_ok = sum(1 for r in self._results if r["status"] == "success")
         summary_lines = self._human_readable_lines()
+        try:
+            failure_counts, report_lines = self._failure_report()
+            summary_lines = summary_lines + report_lines
+        except Exception as exc:
+            failure_counts = None
+            self._console.warning(f"InspectionSequencer: could not build the failure summary: {exc!r}")
         status = (
             "success" if n_ok == self._total_job_count and self._total_job_count
             else "partial" if n_ok else "failed"
@@ -369,6 +509,9 @@ class InspectionSequencer:
             "n_planned": n_ok,
             "n_total": self._total_job_count,
             "summary_lines": summary_lines,
+            "failure_counts": failure_counts,
+            "planner": self._planner,
+            "planner_options": dict(self._planner_options),
         }
         # Log the summary here unconditionally, THEN hand it to on_finished
         # (window.py's __on_inspection_sequence_finished, which prints its
@@ -446,5 +589,7 @@ class InspectionSequencer:
                 "collision_preview": is_failure,
                 "edge_collisions": verification.get("edge_collisions") or [],
                 "planning_error": r.get("message") if is_failure else None,
+                # playback of a failed target: straight move to its IK goal (also a colliding one)
+                "goal_q": r.get("goal_q") or r.get("ik_goal_q"),
             }
         return [groups[name] for name in order]

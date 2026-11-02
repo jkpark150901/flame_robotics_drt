@@ -9,6 +9,9 @@ from plugins.pluginbase.optimizerbase import OptimizerBase
 from plugins.optimizer import apf
 
 class Stomp(OptimizerBase):
+    # log prefix / debug file prefix of the shared helpers below (_save_*); CHOMP (chomp.py) subclasses with its own
+    TAG = "STOMP"
+
     def __init__(self, config_path: str = None):
         import json
         if config_path is None:
@@ -362,11 +365,11 @@ class Stomp(OptimizerBase):
         try:
             os.makedirs(out_dir, exist_ok=True)
         except Exception as e:
-            print(f"[STOMP] Warning: could not create debug_output_dir {out_dir!r}: {e}")
+            print(f"[{self.TAG}] Warning: could not create debug_output_dir {out_dir!r}: {e}")
             return
 
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-        csv_path = os.path.join(out_dir, f"stomp_convergence_{timestamp}.csv")
+        csv_path = os.path.join(out_dir, f"{self.TAG.lower()}_convergence_{timestamp}.csv")
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
             writer = csv_module.writer(f)
             writer.writerow(["iter", "total", "length", "obstacle", "attractive", "min_clearance"])
@@ -378,7 +381,7 @@ class Stomp(OptimizerBase):
             matplotlib.use("Agg")
             import matplotlib.pyplot as plt
         except ImportError:
-            print(f"[STOMP] Wrote {csv_path} (matplotlib unavailable, skipping plot)")
+            print(f"[{self.TAG}] Wrote {csv_path} (matplotlib unavailable, skipping plot)")
             return
 
         iters = [row[0] for row in cost_history]
@@ -396,7 +399,7 @@ class Stomp(OptimizerBase):
         ax_cost.plot(iters, attractive, label="attractive", linestyle="--")
         ax_cost.set_yscale("symlog")
         ax_cost.set_ylabel("cost (symlog)")
-        ax_cost.set_title("STOMP best-candidate cost per iteration")
+        ax_cost.set_title(f"{self.TAG} best-candidate cost per iteration")
         ax_cost.legend(loc="upper right", fontsize="small")
         ax_cost.grid(True, alpha=0.3)
 
@@ -423,10 +426,10 @@ class Stomp(OptimizerBase):
         ax_obs.grid(True, alpha=0.3)
 
         fig.tight_layout()
-        png_path = os.path.join(out_dir, f"stomp_convergence_{timestamp}.png")
+        png_path = os.path.join(out_dir, f"{self.TAG.lower()}_convergence_{timestamp}.png")
         fig.savefig(png_path, dpi=150)
         plt.close(fig)
-        print(f"[STOMP] Wrote {csv_path}, {png_path}")
+        print(f"[{self.TAG}] Wrote {csv_path}, {png_path}")
 
     def _save_task_space_history(self, path_history, planner):
         """Task-space (world xy by default, see self.task_space_axes) view of
@@ -444,7 +447,7 @@ class Stomp(OptimizerBase):
         """
         backend, robot_name = apf.robot_backend_and_name(planner)
         if backend is None or not robot_name or not hasattr(backend, "frame_world_T"):
-            print("[STOMP] Skipping task-space plot: robotics backend has no frame_world_T()")
+            print(f"[{self.TAG}] Skipping task-space plot: robotics backend has no frame_world_T()")
             return
 
         max_lines = 8
@@ -458,7 +461,7 @@ class Stomp(OptimizerBase):
         try:
             os.makedirs(out_dir, exist_ok=True)
         except Exception as e:
-            print(f"[STOMP] Warning: could not create debug_output_dir {out_dir!r}: {e}")
+            print(f"[{self.TAG}] Warning: could not create debug_output_dir {out_dir!r}: {e}")
             return
         timestamp = time.strftime("%Y%m%d_%H%M%S")
 
@@ -481,7 +484,7 @@ class Stomp(OptimizerBase):
             series.append((iter_num, xs, ys, costs))
 
         import csv as csv_module
-        csv_path = os.path.join(out_dir, f"stomp_taskspace_{timestamp}.csv")
+        csv_path = os.path.join(out_dir, f"{self.TAG.lower()}_taskspace_{timestamp}.csv")
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
             writer = csv_module.writer(f)
             writer.writerow(["iter", "waypoint", "x", "y", "z", "repulsive_cost", "min_clearance"])
@@ -492,7 +495,7 @@ class Stomp(OptimizerBase):
             matplotlib.use("Agg")
             import matplotlib.pyplot as plt
         except ImportError:
-            print(f"[STOMP] Wrote {csv_path} (matplotlib unavailable, skipping plot)")
+            print(f"[{self.TAG}] Wrote {csv_path} (matplotlib unavailable, skipping plot)")
             return
 
         axis_labels = ["x", "y", "z"]
@@ -506,16 +509,16 @@ class Stomp(OptimizerBase):
             ax.scatter(xs, ys, s=sizes, color=color, edgecolor="black", linewidth=0.3, zorder=3)
         ax.set_xlabel(f"world {axis_labels[ax_i]}")
         ax.set_ylabel(f"world {axis_labels[ax_j]}")
-        ax.set_title(f"STOMP EE task-space trajectory per iteration (robot={robot_name})\n"
+        ax.set_title(f"{self.TAG} EE task-space trajectory per iteration (robot={robot_name})\n"
                      f"marker size = APF repulsive cost at that waypoint")
         ax.legend(loc="best", fontsize="small")
         ax.grid(True, alpha=0.3)
         ax.set_aspect("equal", adjustable="datalim")
         fig.tight_layout()
-        png_path = os.path.join(out_dir, f"stomp_taskspace_{timestamp}.png")
+        png_path = os.path.join(out_dir, f"{self.TAG.lower()}_taskspace_{timestamp}.png")
         fig.savefig(png_path, dpi=150)
         plt.close(fig)
-        print(f"[STOMP] Wrote {csv_path}, {png_path}")
+        print(f"[{self.TAG}] Wrote {csv_path}, {png_path}")
 
     def _save_playback_trajectory(self, path_history, planner):
         """Save each iteration's working path as its own "target" in exactly
@@ -551,11 +554,11 @@ class Stomp(OptimizerBase):
         needs_rotation = bool(getattr(planner, "debug_obstacle_rotated", False))
 
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-        run_dir = os.path.join(self.debug_output_dir, f"stomp_playback_{timestamp}")
+        run_dir = os.path.join(self.debug_output_dir, f"{self.TAG.lower()}_playback_{timestamp}")
         try:
             os.makedirs(run_dir, exist_ok=True)
         except Exception as e:
-            print(f"[STOMP] Warning: could not create playback dir {run_dir!r}: {e}")
+            print(f"[{self.TAG}] Warning: could not create playback dir {run_dir!r}: {e}")
             return
 
         summary_rows = []
@@ -582,6 +585,6 @@ class Stomp(OptimizerBase):
                                "n_waypoints", "needs_rotation", "positioner_r_deg"])
             writer.writeheader()
             writer.writerows(summary_rows)
-        print(f"[STOMP] Wrote {len(summary_rows)}-iteration playback trajectory to {run_dir} "
+        print(f"[{self.TAG}] Wrote {len(summary_rows)}-iteration playback trajectory to {run_dir} "
               f"(load in SimTool via 'Load Playback Result' -> {summary_path})")
 

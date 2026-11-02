@@ -1,0 +1,65 @@
+{
+  "error": "servo 전송 지연: servo 주기(ms)를 늘려 주세요",
+  "stage": "servo[2]",
+  "last_servo": {
+    "target": [
+      0.0014999999999999998,
+      0.0029999999999999996,
+      0.0045,
+      0.005999999999999999,
+      0.0075,
+      0.009
+    ],
+    "t1": 0.009999999999999998,
+    "t2": 0.02,
+    "gain": 0.1,
+    "alpha": 1.0
+  },
+  "responses": [
+    {
+      "time": 1791883697.870465,
+      "stage": "initial",
+      "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+    },
+    {
+      "time": 1791883697.8833678,
+      "stage": "initial",
+      "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+    },
+    {
+      "time": 1791883698.186001,
+      "stage": "move_to_start",
+      "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+    },
+    {
+      "time": 1791883698.2070708,
+      "stage": "move_to_start",
+      "response": "{ \"type\": Info, \"category\": \"motion_changed\", \"msg\": \"1200\" }"
+    },
+    {
+      "time": 1791883698.2909381,
+      "stage": "move_to_start",
+      "response": "{ \"type\": Info, \"category\": \"motion_changed\", \"msg\": \"0\" }"
+    },
+    {
+      "time": 1791883698.6142948,
+      "stage": "servo[0]",
+      "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+    },
+    {
+      "time": 1791883698.624328,
+      "stage": "servo[1]",
+      "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+    },
+    {
+      "time": 1791883698.6344616,
+      "stage": "servo[2]",
+      "response": "{ \"type\": Warn, \"category\": \"code\", \"msg\": \"568\" }"
+    },
+    {
+      "time": 1791883698.6757367,
+      "stage": "servo[2]",
+      "response": "{ \"type\": ACK, \"category\": \"\", \"msg\": \"\" }"
+    }
+  ]
+}
